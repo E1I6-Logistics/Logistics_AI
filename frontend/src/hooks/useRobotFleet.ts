@@ -7,6 +7,7 @@ import {
   setRobotMode,
   type ConnectionDeviceDto,
   type RobotMode,
+  type OperationMode,
   type RobotStateDto,
   type RobotRoute,
 } from '../api/fmsApi'
@@ -53,6 +54,7 @@ export function useRobotFleet() {
   const [connectionSnapshotAvailable, setConnectionSnapshotAvailable] = useState(true)
   const [robotStates, setRobotStates] = useState<Record<string, RobotStateDto>>({})
   const [mode, setModeState] = useState<RobotMode>('simulation')
+  const [operationMode, setOperationMode] = useState<OperationMode>('algorithm')
   const [modeSwitching, setModeSwitching] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -61,6 +63,7 @@ export function useRobotFleet() {
   const refreshMode = useCallback(async () => {
     const result = await getRobotMode()
     setModeState(result.mode)
+    setOperationMode(result.operation_mode ?? 'algorithm')
     return result.mode
   }, [])
 
@@ -127,6 +130,7 @@ export function useRobotFleet() {
           const message = JSON.parse(event.data)
           if (message?.type === 'system' && message.data?.mode) {
             setModeState(message.data.mode as RobotMode)
+            if (message.data.operation_mode) setOperationMode(message.data.operation_mode)
             void refreshRobots()
             return
           }
@@ -160,12 +164,13 @@ export function useRobotFleet() {
     }
   }, [mode, refreshRobots])
 
-  const changeMode = useCallback(async (nextMode: RobotMode) => {
-    if (nextMode === mode) return
+  const changeMode = useCallback(async (nextMode: RobotMode, nextOperationMode: OperationMode) => {
+    if (nextMode === mode && nextOperationMode === operationMode) return
     setModeSwitching(true)
     try {
-      const result = await setRobotMode(nextMode)
+      const result = await setRobotMode(nextMode, nextOperationMode)
       setModeState(result.mode)
+      setOperationMode(result.operation_mode ?? 'algorithm')
       setRobotStates({})
       await refreshRobots()
       setError(null)
@@ -175,7 +180,7 @@ export function useRobotFleet() {
     } finally {
       setModeSwitching(false)
     }
-  }, [mode, refreshRobots])
+  }, [mode, operationMode, refreshRobots])
 
   const robotIds = useMemo(() => {
     if (mode === 'real') {
@@ -244,6 +249,7 @@ export function useRobotFleet() {
     mapRobotIds,
     managedRobots,
     mode,
+    operationMode,
     modeSwitching,
     loading,
     error,

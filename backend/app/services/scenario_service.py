@@ -125,7 +125,7 @@ class ScenarioManager:
             self.ensure_available()
             from .order_manager import order_manager
             if any(row["status"] in ("PENDING", "IN_PROGRESS")
-                   for row in order_manager.list_orders()) or order_manager.returning:
+                   for row in order_manager.list_orders()) or order_manager.returning or order_manager.recovering:
                 raise ValueError("주문 또는 스테이션 복귀 중에는 시나리오를 시작할 수 없습니다.")
             config = load_config()
             scenario = next((s for s in config["scenarios"] if s["name"] == name), None)

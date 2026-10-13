@@ -22,14 +22,14 @@ async def dashboard_websocket(websocket: WebSocket):
         if mode_manager.mode == "simulation":
             from ..services.mock_data import mock_fms
             await websocket.send_json(
-                {"type": "system", "data": {"mode": mode_manager.mode, "source": "mock"}}
+                {"type": "system", "data": {"mode": mode_manager.mode, "operation_mode": mode_manager.operation_mode, "source": "mock"}}
             )
             for state in mock_fms.robot_snapshots(mode_manager.mode):
                 await websocket.send_json({"type": "telemetry", "data": state})
         else:
             print(f"[{strftime('%Y-%m-%d %H:%M:%S')}] [INFO] [REAL WS] Sending telemetry for all robots", flush=True)
             await websocket.send_json(
-                {"type": "system", "data": {"mode": mode_manager.mode, "source": "ros2"}}
+                {"type": "system", "data": {"mode": mode_manager.mode, "operation_mode": mode_manager.operation_mode, "source": "ros2"}}
             )
             for robot in fleet_manager.get_all_robots():
                 pixel_x = None

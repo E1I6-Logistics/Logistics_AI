@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException
 
 from ..schemas.order import CreateOrderRequest
 from ..services.order_manager import order_manager
-from ..services.mode_service import mode_manager
+from ..services.mode_service import mode_manager, feature_engine
 from ..services.workstation_manager import workstation_manager
 
 router = APIRouter(prefix="/api/orders", tags=["orders"])
@@ -11,11 +11,16 @@ router = APIRouter(prefix="/api/orders", tags=["orders"])
 @router.post("")
 async def create_order(payload: CreateOrderRequest):
     try:
+        operation_mode = mode_manager.operation_mode
+        driving_mode = "llm" if feature_engine("route", operation_mode) == "ai" else "standard"
+        if (payload.operation_mode is not None and payload.operation_mode != operation_mode
+                or payload.driving_mode is not None and payload.driving_mode != driving_mode):
+            raise ValueError("운영 모드가 변경되었습니다. 현재 모드를 확인하고 다시 등록하세요.")
         return order_manager.create_order(
             items=payload.items.model_dump(),
             total_quantity=payload.total_quantity,
             order_name=payload.order_name,
-            driving_mode=payload.driving_mode,
+            driving_mode=driving_mode,
             selector=payload.selector,
             model=payload.model,
         )
@@ -28,8 +33,18 @@ async def create_order(payload: CreateOrderRequest):
 
 @router.get("")
 async def list_orders():
-    return {"orders": order_manager.list_orders(),
-            "workstations": workstation_manager.status(mode_manager.mode)}
+    orders = order_manager.list_orders()
+    mode = mode_manager.mode
+    return {"orders": orders, "workstations": workstation_manager.status(mode),
+            "pickups": workstation_manager.pickup_status(mode, orders)}
+
+
+@router.post("/{order_id}/retry")
+async def retry_order(order_id: str):
+    try:
+        return order_manager.retry_order(order_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.delete("/{order_id}")

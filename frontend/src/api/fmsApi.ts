@@ -12,9 +12,12 @@ function wsBaseFromHttp(base: string) {
 export const WS_BASE = (import.meta.env.VITE_FMS_WS_BASE ?? wsBaseFromHttp(API_BASE)).replace(/\/$/, '')
 
 export type RobotMode = 'real' | 'simulation'
+export type OperationMode = 'algorithm' | 'ai'
 
 export type RobotModeDto = {
   mode: RobotMode
+  operation_mode: OperationMode
+  feature_engines: Record<string, 'algorithm' | 'ai'>
   real_available: boolean
   simulation_active: boolean
 }
@@ -59,12 +62,16 @@ export function getRobotMode() {
   return request<RobotModeDto>('/api/mode')
 }
 
-export function setRobotMode(mode: RobotMode) {
-  return request<RobotModeDto>('/api/mode', {
+export async function setRobotMode(mode: RobotMode, operation_mode: OperationMode) {
+  const result = await request<RobotModeDto>('/api/mode', {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ mode }),
+    body: JSON.stringify({ mode, operation_mode }),
   })
+  if (!result.operation_mode) {
+    throw new Error('실행 중인 백엔드가 이전 버전입니다. 백엔드 재시작 후 운영 모드를 전환하세요.')
+  }
+  return result
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {

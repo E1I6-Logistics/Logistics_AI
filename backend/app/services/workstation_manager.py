@@ -31,7 +31,11 @@ class WorkstationManager:
         )
         return occupied, unknown
 
-    def choose(self, order_id, mode):
+    def choose(self, order_id, mode, operation_mode="algorithm"):
+        from .mode_service import feature_engine
+        # A future AI selector can branch here without changing traffic control.
+        if feature_engine("workstation", operation_mode) != "algorithm":
+            raise ValueError("지원하지 않는 작업대 선택 방식입니다.")
         with self._lock:
             occupied, unknown = self._occupied(mode)
             if unknown:
@@ -63,6 +67,37 @@ class WorkstationManager:
                     state = "FREE"
                 result[node] = {"status": state, "order_id": self._assigned.get(node)}
             return result
+
+    def pickup_status(self, mode, orders):
+        """Read pickup occupancy and reservations without changing traffic."""
+        from .reservation import reservation_tables, node_key
+        if mode == "simulation":
+            from .mock_data import mock_fms
+            locations = {r["robot_id"]: r["occupied_node"]
+                         for r in mock_fms.robot_snapshots(mode)}
+        else:
+            from .fleet_manager import fleet_manager
+            locations = {r.robot_id: r.occupied_node for r in fleet_manager.get_all_robots()}
+        _, unknown = self._occupied(mode)
+        reservations = reservation_tables[mode].snapshot()
+        now = monotonic()
+        result = {}
+        for node in ("5", "6"):
+            robot_ids = [robot_id for robot_id, occupied in locations.items() if occupied == node]
+            active = [row for row in orders if row["mode"] == mode
+                      and row["status"] == "IN_PROGRESS" and node in row["pickup_nodes"]]
+            occupants = [row for row in active if row["robot_id"] in robot_ids]
+            waiting = [row["order_name"] for row in active if row["phase"] == "WAITING_PICKUP"]
+            reserved = sorted({r.robot_id for r in reservations
+                               if r.resource == node_key(node) and r.end > now})
+            status = "OCCUPIED" if robot_ids else "UNKNOWN" if unknown else "FREE"
+            result[node] = {
+                "status": status, "robot_ids": robot_ids,
+                "order_name": occupants[0]["order_name"] if occupants else None,
+                "phase": occupants[0]["phase"] if occupants else None,
+                "waiting_orders": waiting, "reserved_robot_ids": reserved,
+            }
+        return result
 
 
 workstation_manager = WorkstationManager()

@@ -10,7 +10,7 @@ type Options = {
   angularSpeed?: number
 }
 
-const CONTROL_KEYS = new Set(['q', 'w', 'e', 'a', 's', 'd', ' '])
+const CONTROL_KEYS = new Set(['q', 'w', 'e', 'a', 's', 'd'])
 
 function isTypingTarget(target: EventTarget | null) {
   const el = target as HTMLElement | null
@@ -66,8 +66,8 @@ export function useCmdVel({
   }, [robotId])
 
   const pressKey = useCallback((key: string) => {
-    const normalized = key === 'Space' ? ' ' : key.toLowerCase()
-    if (!CONTROL_KEYS.has(normalized) || normalized === ' ') return
+    const normalized = key.toLowerCase()
+    if (!CONTROL_KEYS.has(normalized)) return
     if (pressedRef.current.has(normalized)) return
     pressedRef.current.add(normalized)
     setActiveKeys(new Set(pressedRef.current))
@@ -75,8 +75,8 @@ export function useCmdVel({
   }, [sendCurrent])
 
   const releaseKey = useCallback((key: string) => {
-    const normalized = key === 'Space' ? ' ' : key.toLowerCase()
-    if (!CONTROL_KEYS.has(normalized) || normalized === ' ') return
+    const normalized = key.toLowerCase()
+    if (!CONTROL_KEYS.has(normalized)) return
     pressedRef.current.delete(normalized)
     setActiveKeys(new Set(pressedRef.current))
     sendCurrent()
@@ -126,10 +126,6 @@ export function useCmdVel({
       if (!CONTROL_KEYS.has(key)) return
       event.preventDefault()
 
-      if (key === ' ') {
-        stop()
-        return
-      }
       if (event.repeat) return
       pressKey(key)
     }
@@ -139,7 +135,7 @@ export function useCmdVel({
       const key = event.key.toLowerCase()
       if (!CONTROL_KEYS.has(key)) return
       event.preventDefault()
-      if (key !== ' ') releaseKey(key)
+      releaseKey(key)
     }
 
     const onBlur = () => stop()

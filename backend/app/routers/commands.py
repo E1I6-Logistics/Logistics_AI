@@ -202,6 +202,8 @@ async def stop_all_robots():
                 order_manager.cancel_order(robot["order_id"])
         for robot_id in list(order_manager.returning):
             order_manager.cancel_robot(robot_id, mode_manager.mode)
+        for robot_id in list(order_manager.recovering):
+            order_manager.cancel_robot(robot_id, mode_manager.mode)
         result["mode"] = mode_manager.mode
 
         return result

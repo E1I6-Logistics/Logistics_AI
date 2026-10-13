@@ -2,7 +2,7 @@
 
 import asyncio
 
-from .mode_service import mode_manager
+from .mode_service import mode_manager, feature_engine
 from .route_graph import load_route_graph
 
 
@@ -12,15 +12,19 @@ async def dispatch_order_route(order, node, current_node, valid=None):
         raise ValueError("운용 모드가 변경되었습니다.")
 
     required_path = None
-    if order["driving_mode"] == "llm":
+    operation_mode = order.get("operation_mode", "ai" if order["driving_mode"] == "llm" else "algorithm")
+    if feature_engine("route", operation_mode) == "ai":
         if current_node is None:
             raise ValueError("AI 경로의 출발 노드를 확인할 수 없습니다.")
         from .llm_route_preview import preview_llm_route
         graph = load_route_graph()
-        result = await asyncio.to_thread(
-            preview_llm_route, graph, current_node, node,
-            selector=order["selector"], model=order["model"],
-        )
+        try:
+            result = await asyncio.to_thread(
+                preview_llm_route, graph, current_node, node,
+                selector=order["selector"], model=order["model"],
+            )
+        except (ValueError, RuntimeError) as exc:
+            raise ValueError(f"AI 경로 생성 실패(N{current_node} → N{node}): {exc}") from exc
         required_path = result["path"]
         if mode_manager.mode != mode or load_route_graph() != graph:
             raise ValueError("AI 경로 생성 중 운용 모드 또는 지도가 변경되었습니다.")

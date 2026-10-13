@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import WarehouseMap from './WarehouseMap'
 import RobotOrderForm from './components/RobotOrderForm'
-import { getOrders, type OrderDto, type WorkstationDto } from './api/orderApi'
+import { getOrders, retryOrder, type OrderDto, type WorkstationDto, type PickupDto } from './api/orderApi'
 import ScenarioControls from './components/ScenarioControls'
 import {
   sendGoalNode,
@@ -48,38 +48,114 @@ const PHASE_TEXT: Record<string, string> = {
   FAILED: '주문 실패',
 }
 
+const RECOVERY_TEXT: Record<string, string> = {
+  PENDING: '실패 후 복귀 대기', RETURNING: '실패 후 스테이션 복귀 중',
+  RETURNED: '실패 후 복귀 완료', BLOCKED: '자동 복귀 불가 · 상태 확인 필요', STOPPED: '복귀 중지',
+}
+
+function itemText(order: OrderDto): string {
+  return `A ${order.items.A}개 · B ${order.items.B}개 · C ${order.items.C}개 · D ${order.items.D}개`
+}
+
 function displayRobotStatus(robot: LiveRobot, orders: OrderDto[]): string {
   if (!robot.connected || robot.status !== 'IDLE') return robot.status
   const activeOrder = orders.find(order =>
     order.robot_id === robot.backendId && order.status === 'IN_PROGRESS')
   if (activeOrder) return PHASE_TEXT[activeOrder.phase] ?? '주문 수행 중'
+  const recovery = orders.find(order => order.robot_id === robot.backendId
+    && ['PENDING', 'RETURNING'].includes(order.recovery_status ?? ''))
+  if (recovery) return RECOVERY_TEXT[recovery.recovery_status!]
   if (robot.occupiedEdge) return '경로 정지 · 노드 확인 필요'
   return robot.status
 }
 
-function OrderStatus({ orders, workstations }: {
+function OrderStatus({ orders, workstations, pickups }: {
   orders: OrderDto[]
   workstations: Record<string, WorkstationDto>
+  pickups: Record<string, PickupDto>
 }) {
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [retrying, setRetrying] = useState(false)
+  const [retryMessage, setRetryMessage] = useState<string | null>(null)
+  const selected = orders.find(order => order.order_id === selectedId)
+  const retry = async (order: OrderDto) => {
+    setRetrying(true)
+    try {
+      await retryOrder(order.order_id)
+      setRetryMessage(`${order.order_name}을(를) 배차 대기열에 다시 등록했습니다.`)
+    } catch (error) {
+      setRetryMessage(error instanceof Error ? error.message : '재시도 실패')
+    } finally {
+      setRetrying(false)
+    }
+  }
   const stationText: Record<string, string> = {
     FREE: '비어 있음', OCCUPIED: '점유 중', ASSIGNED: '다른 주문에 할당됨', UNKNOWN: '점유 상태 확인 불가',
   }
-  return <section aria-label="주문 및 작업대 상태" style={{ marginBottom: 14 }}>
+  return <section className="fms-order-status" aria-label="주문 및 작업대 상태">
+    <div className="fms-order-card">
     <SectionTitle>주문 진행 단계</SectionTitle>
-    <div aria-label="주문 목록" style={{ maxHeight: 5 * 48, overflowY: 'auto', paddingRight: 3 }}>
-    {orders.slice().reverse().map(order => <div key={order.order_id}
-      title={order.error ?? undefined}
-      style={{ boxSizing: 'border-box', height: 43, padding: '6px 8px', marginBottom: 5, border: `1px solid ${C.line}`, borderRadius: 6, fontSize: 10, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>
+    <div aria-label="주문 목록" style={{ maxHeight: 5 * 52, overflowY: 'auto', paddingRight: 3 }}>
+    {orders.slice().reverse().map(order => <button key={order.order_id}
+      onClick={() => { setSelectedId(order.order_id); setRetryMessage(null) }}
+      title="주문 상세 및 실패 사유 보기"
+      style={{ display: 'block', width: '100%', textAlign: 'left', background: 'white', color: C.text,
+        boxSizing: 'border-box', height: 48, padding: '3px 8px', marginBottom: 4,
+        border: `1px solid ${C.line}`, borderRadius: 6, fontSize: 10, cursor: 'pointer', overflow: 'hidden' }}>
       <strong>{order.order_name}</strong> · {PHASE_TEXT[order.phase] ?? order.phase}
+      <div>
       {order.phase.includes('PICKUP') && ` N${order.pickup_nodes[order.pickup_index] ?? ''}`}
       {order.workstation_node ? ` · N${order.workstation_node}` : ' · 작업대 미정'}
       {order.robot_id ? ` · ${order.robot_id}` : ''}
-    </div>)}
+      </div>
+      {order.error && <div style={{ color: C.danger, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{order.error}</div>}
+    </button>)}
     </div>
+    {selected && <div role="dialog" aria-label="주문 상세" style={{ position: 'fixed', zIndex: 80, bottom: 20, right: 20, width: 340, maxWidth: 'calc(100vw - 60px)', background: 'white', boxShadow: '0 8px 32px #0003', padding: 16, border: `1px solid ${C.line}`, borderRadius: 6, fontSize: 11, overflowWrap: 'anywhere' }}>
+      <button onClick={() => setSelectedId(null)} aria-label="주문 상세 닫기" style={{ float: 'right', border: 0, background: 'transparent', cursor: 'pointer' }}>닫기 ×</button>
+      <strong>{selected.order_name}</strong><div>{itemText(selected)}</div>
+      <div>등록 모드: {selected.operation_mode === 'ai' ? 'AI' : '알고리즘'}</div>
+      {selected.error && <div style={{ color: C.danger }}>
+        실패 단계: {PHASE_TEXT[selected.failed_phase ?? ''] ?? selected.failed_phase}<br />
+        원인: {selected.error}
+      </div>}
+      {selected.recovery_status && <div>{RECOVERY_TEXT[selected.recovery_status]}</div>}
+      {selected.recovery_error && <div style={{ color: C.danger }}>{selected.recovery_error}</div>}
+      {selected.status === 'FAILED' && selected.mode === 'simulation' && <button
+        disabled={retrying || ['PENDING', 'RETURNING'].includes(selected.recovery_status ?? '')}
+        onClick={() => void retry(selected)}>주문 재시도 · 다른 가용 로봇 우선</button>}
+      {retryMessage && <div role="status">{retryMessage}</div>}
+    </div>}
     {orders.length === 0 && <div style={{ color: C.muted, fontSize: 10 }}>등록된 주문이 없습니다.</div>}
+    </div>
+    <div className="fms-order-card">
+    <SectionTitle>로봇별 진행 주문</SectionTitle>
+    {['robot1', 'robot2', 'robot3'].map(robotId => {
+      const order = orders.find(row => row.robot_id === robotId && row.status === 'IN_PROGRESS')
+      const recovery = orders.find(row => row.robot_id === robotId
+        && ['PENDING', 'RETURNING'].includes(row.recovery_status ?? ''))
+      return <div key={robotId} style={{ padding: '6px 8px', marginBottom: 5, background: '#F5F7FA', borderRadius: 6, fontSize: 11 }}>
+        <strong>{robotId}</strong> · {order?.order_name ?? (recovery ? RECOVERY_TEXT[recovery.recovery_status!] : '진행 주문 없음')}
+        {order && <><div>{PHASE_TEXT[order.phase] ?? order.phase}</div><div>{itemText(order)}</div></>}
+      </div>
+    })}
+    </div>
+    <div className="fms-order-card">
+    <SectionTitle>픽업대 상태</SectionTitle>
+    {['5', '6'].map(node => {
+      const pickup = pickups[node]
+      return <div key={node} style={{ padding: '5px 8px', fontSize: 11 }}>
+        <strong>N{node} · {node === '5' ? 'A/B' : 'C/D'}</strong> · {stationText[pickup?.status] ?? '상태 확인 중'}
+        {pickup?.robot_ids.length ? ` · ${pickup.robot_ids.join(', ')}` : ''}
+        {pickup?.order_name && <div>{pickup.order_name} · {PHASE_TEXT[pickup.phase ?? ''] ?? pickup.phase}</div>}
+        {Boolean(pickup?.waiting_orders.length) && <div>차례 대기: {pickup.waiting_orders.join(', ')}</div>}
+        {Boolean(pickup?.reserved_robot_ids.length) && <div>노드 예약: {pickup.reserved_robot_ids.join(', ')}</div>}
+      </div>
+    })}
     <SectionTitle>작업대 상태</SectionTitle>
     {(['3', '4'] as const).map(node => <InfoRow key={node} label={`N${node}`}
       value={stationText[workstations[node]?.status] ?? '점유 상태 확인 불가'} />)}
+    </div>
   </section>
 }
 
@@ -88,7 +164,9 @@ export default function FmsControlApp() {
   const [scenarioActive, setScenarioActive] = useState(false)
   const [selectedRobot, setSelectedRobot] = useState<RobotId | null>(null)
   const [targetNode, setTargetNode] = useState<string | null>(null)
-  const [drivingMode, setDrivingMode] = useState<'standard' | 'llm'>('standard')
+  const [ordersPanelOpen, setOrdersPanelOpen] = useState(true)
+  const [ordersPanelHeight, setOrdersPanelHeight] = useState(326)
+  const panelDrag = useRef<{ startY: number; startHeight: number; height: number } | null>(null)
   const [routeModels, setRouteModels] = useState<RouteModelGroupsDto>({ ollama: [], decision_model: [] })
   const [selectedRouteModel, setSelectedRouteModel] = useState<RouteModelDto | null>(null)
   const [routeModelError, setRouteModelError] = useState<string | null>(null)
@@ -99,11 +177,13 @@ export default function FmsControlApp() {
   const [rightPanelOpen, setRightPanelOpen] = useState(true)
   const [orders, setOrders] = useState<OrderDto[]>([])
   const [workstations, setWorkstations] = useState<Record<string, WorkstationDto>>({})
+  const [pickups, setPickups] = useState<Record<string, PickupDto>>({})
 
   useEffect(() => {
     const refresh = () => { void getOrders().then(data => {
       setOrders(data.orders)
       setWorkstations(data.workstations)
+      setPickups(data.pickups ?? {})
     }).catch(() => {}) }
     refresh()
     const timer = window.setInterval(refresh, 1000)
@@ -115,11 +195,15 @@ export default function FmsControlApp() {
     mapRobotIds,
     managedRobots,
     mode: robotMode,
+    operationMode,
     modeSwitching,
     changeMode,
     error: fleetError,
   } = useRobotFleet()
   const { nodes, edges, nodeItems, loading: graphLoading, error: graphError } = useRouteGraph()
+
+  const drivingMode = operationMode === 'ai' ? 'llm' : 'standard'
+  const currentOrders = orders.filter(order => order.mode === robotMode)
 
   const selectedLiveRobot = managedRobots.find(robot => robot.id === selectedRobot)
   const connectedRobotCount = managedRobots.filter(robot => robot.connected).length
@@ -154,7 +238,7 @@ export default function FmsControlApp() {
 
   useEffect(() => {
     setLlmPreview(null)
-  }, [targetNode, robotMode, selectedRouteModel])
+  }, [targetNode, robotMode, operationMode, selectedRouteModel])
 
   useEffect(() => {
     if (!LLM_PREVIEW_READY && !LLM_MOVE_READY && !LLM_ORDER_READY) return
@@ -379,13 +463,58 @@ export default function FmsControlApp() {
     void runCommand( 'emergency', () => stopAllRobots())
   }
 
-  const handleModeChange = (mode: 'real' | 'simulation') => {
-    if (mode === robotMode || modeSwitching || scenarioActive) return
+  const startPanelDrag = (event: React.PointerEvent<HTMLDivElement>) => {
+    panelDrag.current = {
+      startY: event.clientY,
+      startHeight: ordersPanelOpen ? ordersPanelHeight : 0,
+      height: ordersPanelOpen ? ordersPanelHeight : 0,
+    }
+    event.currentTarget.setPointerCapture(event.pointerId)
+  }
+
+  const movePanelDrag = (event: React.PointerEvent<HTMLDivElement>) => {
+    const drag = panelDrag.current
+    if (!drag) return
+    const maxHeight = Math.max(180, Math.floor(window.innerHeight * 0.7))
+    drag.height = Math.max(0, Math.min(maxHeight, drag.startHeight + drag.startY - event.clientY))
+    setOrdersPanelOpen(drag.height >= 100)
+    if (drag.height >= 100) setOrdersPanelHeight(Math.max(180, drag.height))
+  }
+
+  const finishPanelDrag = () => {
+    const drag = panelDrag.current
+    if (!drag) return
+    panelDrag.current = null
+    if (drag.height < 100) {
+      setOrdersPanelOpen(false)
+    } else {
+      setOrdersPanelOpen(true)
+      setOrdersPanelHeight(Math.max(180, drag.height))
+    }
+  }
+
+  const resizePanelWithKeyboard = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === 'ArrowUp') {
+      event.preventDefault()
+      setOrdersPanelOpen(true)
+      setOrdersPanelHeight(height => Math.min(Math.floor(window.innerHeight * 0.7), height + 50))
+    } else if (event.key === 'ArrowDown') {
+      event.preventDefault()
+      if (ordersPanelOpen && ordersPanelHeight <= 180) {
+        setOrdersPanelOpen(false)
+      } else {
+        setOrdersPanelHeight(height => Math.max(180, height - 50))
+      }
+    }
+  }
+
+  const handleModeChange = (mode: 'real' | 'simulation', nextOperation: 'algorithm' | 'ai') => {
+    if ((mode === robotMode && nextOperation === operationMode) || modeSwitching || scenarioActive) return
     setSelectedRobot(null)
     setTargetNode(null)
-    setCommandState({ tone: 'info', message: `${mode === 'real' ? '실제 로봇' : '시뮬레이션'} 모드로 전환하고 있습니다.` })
-    void changeMode(mode)
-      .then(() => setCommandState({ tone: 'success', message: `${mode === 'real' ? '실제 로봇' : '시뮬레이션'} 모드로 전환되었습니다.` }))
+    setCommandState({ tone: 'info', message: `${mode === 'real' ? '실제' : '시뮬레이션'} · ${nextOperation === 'ai' ? 'AI' : '알고리즘'} 모드로 전환하고 있습니다.` })
+    void changeMode(mode, nextOperation)
+      .then(() => setCommandState({ tone: 'success', message: `${mode === 'real' ? '실제' : '시뮬레이션'} · ${nextOperation === 'ai' ? 'AI' : '알고리즘'} 모드로 전환되었습니다.` }))
       .catch(error => setCommandState({
         tone: 'danger',
         message: error instanceof Error ? error.message : '운용 모드를 전환하지 못했습니다.',
@@ -412,7 +541,7 @@ export default function FmsControlApp() {
       </aside>
 
       <main style={{ display: 'flex', flex: 1, minWidth: 0, flexDirection: 'column', overflow: 'hidden' }}>
-        <header style={{ height: 46, flexShrink: 0, padding: '0 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: C.surface, borderBottom: `1px solid ${C.line}` }}>
+        <header className="fms-header" style={{ minHeight: 54, gap: 10, flexWrap: 'wrap', flexShrink: 0, padding: '0 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: C.surface, borderBottom: `1px solid ${C.line}` }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <strong style={{ fontSize: 13.5, letterSpacing: '-.03em' }}>E1I6 물류센터 FMS</strong>
             <span style={{ width: 1, height: 14, background: C.line }} />
@@ -425,16 +554,18 @@ export default function FmsControlApp() {
             </div>
             <div role="group" aria-label="로봇 운용 모드" style={{ display: 'flex', padding: 2, borderRadius: 7, background: '#EEF1F5', border: `1px solid ${C.line}` }}>
               {([
-                ['real', '실제 로봇'],
-                ['simulation', '시뮬레이션'],
-              ] as const).map(([mode, label]) => {
-                const active = robotMode === mode
+                ['simulation', 'algorithm', '시뮬 · 알고리즘'],
+                ['simulation', 'ai', '시뮬 · AI'],
+                ['real', 'algorithm', '실제 · 알고리즘'],
+                ['real', 'ai', '실제 · AI'],
+              ] as const).map(([mode, operation, label]) => {
+                const active = robotMode === mode && operationMode === operation
                 return (
                   <button
-                    key={mode}
+                    key={mode + operation}
                     disabled={modeSwitching || scenarioActive}
                     aria-pressed={active}
-                    onClick={() => handleModeChange(mode)}
+                    onClick={() => handleModeChange(mode, operation)}
                     style={{
                       minWidth: 66,
                       padding: '4px 9px',
@@ -456,7 +587,32 @@ export default function FmsControlApp() {
           </div>
         </header>
 
-        <div style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
+        <div className="fms-operation-strip" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '6px 16px', borderBottom: `1px solid ${C.line}`, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 11, color: C.muted }}>
+            {operationMode === 'ai' ? 'AI 운영 · 경로 생성 AI / 배차·작업대 선택 알고리즘' : '알고리즘 운영 · 경로 생성·배차·작업대 선택 알고리즘'}
+          </span>
+          <button
+            aria-expanded={ordersPanelOpen}
+            onClick={() => setOrdersPanelOpen(open => !open)}
+            style={{
+              padding: '5px 10px',
+              border: `1px solid ${C.line}`,
+              borderRadius: 6,
+              background: C.surface,
+              cursor: 'pointer',
+              fontFamily: 'Pretendard, sans-serif',
+              fontSize: '13px',
+              fontWeight: 500,
+            }}
+          >
+            주문 현황 - 대기 {currentOrders.filter(order => order.status === 'PENDING').length}건
+            {ordersPanelOpen ? '접기 ▾' : '펼치기 ▴'}
+          </button>
+        </div>
+        {commandState && <div style={{ position: 'relative', zIndex: 60 }}>
+          <CommandToast state={commandState} onClose={() => setCommandState(null)} />
+        </div>}
+        <div className="fms-control-workspace" style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
           <RobotRail
             robotIds={managedIds as RobotId[]}
             selectedRobot={selectedRobot}
@@ -469,26 +625,10 @@ export default function FmsControlApp() {
 
           <section style={{ position: 'relative', display: 'flex', flex: 1, minWidth: 0, background: C.surface }} aria-label="FMS 실시간 지도">
             <ScenarioControls modeSwitching={modeSwitching} onActiveChange={setScenarioActive} />
-            {commandState && (
-              <CommandToast state={commandState} onClose={() => setCommandState(null)} />
-            )}
-              <div
-                style={{
-                  position: 'absolute',
-                  top: 14,
-                  right: 14,
-                  zIndex: 20,
-                  width: 300,
-                  maxWidth: 'calc(100% - 28px)',
-                }}
-              >
-                <RobotOrderForm
-                  disabled={scenarioActive}
-                  routeModels={routeModels}
-                  routeModelError={routeModelError}
-                  llmOrderReady={LLM_ORDER_READY}
-                />
-              </div>
+            <div style={{ position: 'absolute', top: 14, right: 14, zIndex: 20, width: 300, maxWidth: 'calc(100% - 28px)' }}>
+              <RobotOrderForm operationMode={operationMode} disabled={scenarioActive || modeSwitching}
+                routeModels={routeModels} routeModelError={routeModelError} llmOrderReady={LLM_ORDER_READY} />
+            </div>
             <WarehouseMap
               nodes={nodes}
               edges={edges}
@@ -544,7 +684,6 @@ export default function FmsControlApp() {
           <RobotPanel
             robotId={selectedRobot}
             orders={orders}
-            workstations={workstations}
             liveRobot={selectedLiveRobot}
             targetNode={targetNode}
             drivingMode={drivingMode}
@@ -552,7 +691,6 @@ export default function FmsControlApp() {
             selectedRouteModel={selectedRouteModel}
             routeModelError={routeModelError}
             onRouteModelChange={setSelectedRouteModel}
-            onDrivingModeChange={mode => { setDrivingMode(mode); setLlmPreview(null) }}
             llmPreview={llmPreview}
             llmPreviewReady={LLM_PREVIEW_READY}
             llmMoveReady={LLM_MOVE_READY}
@@ -565,7 +703,6 @@ export default function FmsControlApp() {
             busy={busy}
             onRemoteDown={remote.pressKey}
             onRemoteUp={remote.releaseKey}
-            onRemoteStop={remote.stop}
             onMove={moveToSelectedNode}
             onPreview={previewSelectedRoute}
             onReturnToRoute={returnToNearestNode}
@@ -574,6 +711,22 @@ export default function FmsControlApp() {
             onRelease={releaseSelectedRobot}
           />
           )}
+        </div>
+        <div className="fms-order-resize" role="separator" aria-label="주문 현황 높이 조절"
+          aria-orientation="horizontal" aria-valuemin={0}
+          aria-valuemax={Math.floor(window.innerHeight * 0.7)}
+          aria-valuenow={ordersPanelOpen ? Math.round(ordersPanelHeight) : 0}
+          tabIndex={0}
+          onPointerDown={startPanelDrag} onPointerMove={movePanelDrag}
+          onPointerUp={finishPanelDrag} onPointerCancel={finishPanelDrag}
+          onKeyDown={resizePanelWithKeyboard}>
+          <span className="fms-order-resize-grip" />
+        </div>
+        <div className="fms-order-dashboard" aria-label="주문 현황 패널"
+          style={{ height: ordersPanelOpen ? ordersPanelHeight : 0,
+            padding: ordersPanelOpen ? '10px 14px' : 0,
+            overflowY: ordersPanelOpen ? 'auto' : 'hidden' }}>
+          {ordersPanelOpen && <OrderStatus orders={currentOrders} workstations={workstations} pickups={pickups} />}
         </div>
       </main>
     </div>
@@ -606,10 +759,9 @@ function RobotRail({ robotIds, selectedRobot, getStatus, onSelect }: {
 
 type LiveRobot = ReturnType<typeof useRobotFleet>['managedRobots'][number]
 
-function RobotPanel({ scenarioActive, robotId, orders, workstations, liveRobot, targetNode, drivingMode, routeModels, selectedRouteModel, routeModelError, onRouteModelChange, onDrivingModeChange, llmPreview, llmPreviewReady, llmMoveReady, nearestNode, realMode, emergencyStopped, remoteStatus, remoteKeys, busy, onRemoteDown, onRemoteUp, onRemoteStop, onMove, onPreview, onReturnToRoute, onCharge, onStop, onRelease, }: {
+function RobotPanel({ scenarioActive, robotId, orders, liveRobot, targetNode, drivingMode, routeModels, selectedRouteModel, routeModelError, onRouteModelChange, llmPreview, llmPreviewReady, llmMoveReady, nearestNode, realMode, emergencyStopped, remoteStatus, remoteKeys, busy, onRemoteDown, onRemoteUp, onMove, onPreview, onReturnToRoute, onCharge, onStop, onRelease, }: {
   robotId: RobotId | null
   orders: OrderDto[]
-  workstations: Record<string, WorkstationDto>
   liveRobot?: LiveRobot
   targetNode: string | null
   drivingMode: 'standard' | 'llm'
@@ -617,7 +769,6 @@ function RobotPanel({ scenarioActive, robotId, orders, workstations, liveRobot, 
   selectedRouteModel: RouteModelDto | null
   routeModelError: string | null
   onRouteModelChange: (model: RouteModelDto | null) => void
-  onDrivingModeChange: (mode: 'standard' | 'llm') => void
   llmPreview: LlmRoutePreviewDto | null
   llmPreviewReady: boolean
   llmMoveReady: boolean
@@ -630,7 +781,6 @@ function RobotPanel({ scenarioActive, robotId, orders, workstations, liveRobot, 
   busy: string | null
   onRemoteDown: (key: string) => void
   onRemoteUp: (key: string) => void
-  onRemoteStop: () => void
   onMove: () => void
   onPreview: () => void
   onReturnToRoute: () => void
@@ -640,12 +790,51 @@ function RobotPanel({ scenarioActive, robotId, orders, workstations, liveRobot, 
 }) {
   if (!robotId) {
     return (
-      <aside style={{ width: 390, flexShrink: 0, borderLeft: `1px solid ${C.line}`, background: C.surface, padding: 24, boxSizing: 'border-box', overflowY: 'auto' }}>
-        <OrderStatus orders={orders} workstations={workstations} />
+      <aside
+        className="fms-robot-panel"
+        style={{
+          width: 390,
+          flexShrink: 0,
+          borderLeft: `1px solid ${C.line}`,
+          background: C.surface,
+          padding: 24,
+          boxSizing: 'border-box',
+          overflowY: 'auto',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          textAlign: 'center',
+        }}
+      >
         <div>
-          <div style={{ width: 54, height: 54, margin: '0 auto 14px', display: 'grid', placeItems: 'center', borderRadius: 15, background: '#EDF6FF', color: C.primary, fontSize: 24 }}>◎</div>
-          <strong style={{ display: 'block', fontSize: 14, marginBottom: 7 }}>로봇을 선택하세요</strong>
-          <span style={{ color: C.muted, fontSize: 11, lineHeight: 1.6 }}>지도 또는 좌측 로봇 목록에서<br />제어할 로봇을 선택하세요.</span>
+          <div style={{
+            width: 54,
+            height: 54,
+            margin: '0 auto 14px',
+            display: 'grid',
+            placeItems: 'center',
+            borderRadius: 15,
+            background: '#EDF6FF',
+            color: C.primary,
+            fontSize: 24
+          }}>◎</div>
+
+          <strong style={{
+            display: 'block',
+            fontSize: 14,
+            marginBottom: 7
+          }}>
+            로봇을 선택하세요
+          </strong>
+
+          <span style={{
+            color: C.muted,
+            fontSize: 11,
+            lineHeight: 1.6
+          }}>
+            지도 또는 좌측 로봇 목록에서<br />
+            제어할 로봇을 선택하세요.
+          </span>
         </div>
       </aside>
     )
@@ -659,9 +848,10 @@ function RobotPanel({ scenarioActive, robotId, orders, workstations, liveRobot, 
   const batteryColor = battery < 30 ? C.danger : battery < 50 ? C.warning : C.success
   const route = liveRobot?.route?.node_ids?.length ? liveRobot.route.node_ids.map(id => `N${id}`).join(' → ') : '—'
   const controlsEnabled = connected && !emergencyStopped && !scenarioActive && remoteStatus === 'ready'
+  const activeOrder = orders.find(order => order.robot_id === liveRobot?.backendId && order.status === 'IN_PROGRESS')
 
   return (
-    <aside style={{ width: 390, flexShrink: 0, borderLeft: `1px solid ${C.line}`, background: C.surface, display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '-2px 0 8px rgba(0,0,0,.05)' }} aria-label={`${robotId} 정보 및 제어`}>
+    <aside className="fms-robot-panel" style={{ width: 390, flexShrink: 0, borderLeft: `1px solid ${C.line}`, background: C.surface, display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '-2px 0 8px rgba(0,0,0,.05)' }} aria-label={`${robotId} 정보 및 제어`}>
       <div style={{ padding: '14px 16px', borderBottom: `1px solid ${C.line}`, display: 'flex', alignItems: 'center', gap: 10 }}>
         <div style={{ width: 38, height: 38, borderRadius: 10, display: 'grid', placeItems: 'center', background: '#EDF6FF', border: `2px solid ${C.primary}`, color: C.primary, fontWeight: 900 }}>{robotId.replace('R-', '')}</div>
         <div style={{ minWidth: 0 }}>
@@ -674,7 +864,10 @@ function RobotPanel({ scenarioActive, robotId, orders, workstations, liveRobot, 
       </div>
 
       <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '14px 16px 18px' }}>
-        <OrderStatus orders={orders} workstations={workstations} />
+        {activeOrder && <div style={{ padding: 10, background: '#EDF6FF', borderRadius: 8, fontSize: 11 }}>
+          <strong>{activeOrder.order_name}</strong> · {PHASE_TEXT[activeOrder.phase]}
+          <div>{itemText(activeOrder)}</div>
+        </div>}
         <SectionTitle>핵심 상태</SectionTitle>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
           <StatusCard label="배터리" value={`${Math.round(battery)}%`} color={batteryColor}>
@@ -713,24 +906,8 @@ function RobotPanel({ scenarioActive, robotId, orders, workstations, liveRobot, 
         <div style={{ padding: '10px 12px', border: '1px solid #CFE2F7', borderRadius: 9, background: '#F4F8FF', color: route === '—' ? C.muted : '#1155A8', font: `10px ${MONO}`, lineHeight: 1.55 }}>{route}</div>
 
         <SectionTitle>노드 이동</SectionTitle>
-        <div style={{ display: 'flex', gap: 7, marginBottom: 9 }}>
-          {(['standard', 'llm'] as const).map(mode => (
-            <button
-              key={mode}
-              type="button"
-              aria-pressed={drivingMode === mode}
-              onClick={() => onDrivingModeChange(mode)}
-              style={{
-                flex: 1, padding: '8px 5px', borderRadius: 7,
-                border: '1px solid ' + (drivingMode === mode ? C.primary : C.line),
-                background: drivingMode === mode ? '#EDF6FF' : '#fff',
-                color: drivingMode === mode ? C.primary : C.muted,
-                fontSize: 10, fontWeight: 700, cursor: 'pointer',
-              }}
-            >
-              {mode === 'standard' ? '기본 주행' : 'LLM 경로'}
-            </button>
-          ))}
+        <div style={{ fontSize: 11, color: C.muted, marginBottom: 9 }}>
+          {drivingMode === 'llm' ? 'AI 운영 모드 · AI 경로 생성' : '알고리즘 운영 모드'}
         </div>
         {drivingMode === 'llm' && (
           <div style={{ marginBottom: 9 }}>
@@ -841,7 +1018,6 @@ function RobotPanel({ scenarioActive, robotId, orders, workstations, liveRobot, 
               )
             })}
           </div>
-          <button disabled={!controlsEnabled} onClick={onRemoteStop} style={{ width: '100%', height: 38, marginTop: 6, borderRadius: 8, border: '1px solid #BEC8D6', background: '#fff', color: C.text, fontSize: 10, fontWeight: 800 }}>SPACE · 주행 정지</button>
         </div>
 
         <SectionTitle>직접 제어</SectionTitle>
@@ -892,7 +1068,7 @@ function RobotPanel({ scenarioActive, robotId, orders, workstations, liveRobot, 
 }
 
 function SectionTitle({ children }: { children: React.ReactNode }) {
-  return <div style={{ margin: '16px 0 7px', color: '#8B97A5', fontSize: 8.5, fontWeight: 800, letterSpacing: '.09em' }}>{children}</div>
+  return <div className="fms-section-title" style={{ margin: '16px 0 7px', color: '#8B97A5', fontSize: 8.5, fontWeight: 800, letterSpacing: '.09em' }}>{children}</div>
 }
 
 function StatusCard({ label, value, color, children }: { label: string; value: string; color: string; children?: React.ReactNode }) {

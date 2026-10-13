@@ -14,6 +14,7 @@ class CreateOrderRequest(BaseModel):
     order_name: str | None = None
     items: OrderItems
     total_quantity: int
-    driving_mode: Literal["standard", "llm"] = "standard"
+    driving_mode: Literal["standard", "llm"] | None = None
+    operation_mode: Literal["algorithm", "ai"] | None = None
     selector: str | None = None
     model: str | None = None

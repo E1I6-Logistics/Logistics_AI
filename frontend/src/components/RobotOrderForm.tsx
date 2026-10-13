@@ -5,6 +5,7 @@ import type { RouteModelDto, RouteModelGroupsDto } from '../api/fmsApi'
 import { C, MONO } from '../constants/theme'
 
 type Props = {
+  operationMode: 'algorithm' | 'ai'
   disabled?: boolean
   routeModels: RouteModelGroupsDto
   routeModelError: string | null
@@ -18,11 +19,11 @@ const INITIAL_ITEMS: OrderItems = {
   D: 0,
 }
 
-export default function RobotOrderForm({ disabled = false, routeModels, routeModelError, llmOrderReady }: Props) {
+export default function RobotOrderForm({ operationMode, disabled = false, routeModels, routeModelError, llmOrderReady }: Props) {
   const [items, setItems] = useState<OrderItems>(INITIAL_ITEMS)
   const [orderName, setOrderName] = useState('')
   const [expanded, setExpanded] = useState(true)
-  const [drivingMode, setDrivingMode] = useState<'standard' | 'llm'>('standard')
+  const drivingMode = operationMode === 'ai' ? 'llm' : 'standard'
   const [selectedModelKey, setSelectedModelKey] = useState('')
   const fieldsId = useId()
   const [submitting, setSubmitting] = useState(false)
@@ -50,7 +51,6 @@ export default function RobotOrderForm({ disabled = false, routeModels, routeMod
 
   useEffect(() => {
     setItems(INITIAL_ITEMS)
-    setDrivingMode('standard')
     setSelectedModelKey('')
     setMessage(null)
   }, [])
@@ -76,6 +76,7 @@ export default function RobotOrderForm({ disabled = false, routeModels, routeMod
         order_name: orderName || undefined,
         items,
         total_quantity: totalQuantity,
+        operation_mode: operationMode,
         driving_mode: drivingMode,
         selector: drivingMode === 'llm' ? selectedModel?.selector : undefined,
         model: drivingMode === 'llm' ? selectedModel?.model : undefined,
@@ -83,7 +84,7 @@ export default function RobotOrderForm({ disabled = false, routeModels, routeMod
 
       setMessage({
         tone: 'success',
-        text: `주문 ${order.order_id}이 등록되었습니다.`,
+        text: `주문 ${order.order_name}이(가) 등록되었습니다.`,
       })
       setItems(INITIAL_ITEMS)
       setOrderName('')
@@ -221,29 +222,8 @@ export default function RobotOrderForm({ disabled = false, routeModels, routeMod
           </div>
         </div>
 
-        <div style={{ marginTop: 10, display: 'flex', gap: 6 }}>
-          {(['standard', 'llm'] as const).map(mode => (
-            <button
-              key={mode}
-              type="button"
-              aria-pressed={drivingMode === mode}
-              disabled={formDisabled}
-              onClick={() => { setDrivingMode(mode); setMessage(null) }}
-              style={{
-                flex: 1,
-                padding: '7px 5px',
-                borderRadius: 6,
-                border: '1px solid ' + (drivingMode === mode ? C.primary : C.line),
-                background: drivingMode === mode ? '#EDF6FF' : '#fff',
-                color: drivingMode === mode ? C.primary : C.muted,
-                fontSize: 9,
-                fontWeight: 700,
-                cursor: formDisabled ? 'not-allowed' : 'pointer',
-              }}
-            >
-              {mode === 'standard' ? '기본 경로' : 'LLM 경로'}
-            </button>
-          ))}
+        <div style={{ marginTop: 10, color: C.muted, fontSize: 11 }}>
+          운영 모드: {operationMode === 'ai' ? 'AI' : '알고리즘'} · 상단 설정 적용
         </div>
         {drivingMode === 'llm' && (
           <div style={{ marginTop: 8 }}>

@@ -6,7 +6,11 @@ from ..config import REAL_POSE_TIMEOUT_S
 from time import monotonic
 
 
-def available_robots(mode, busy_ids, returning_ids=()):
+def available_robots(mode, busy_ids, returning_ids=(), operation_mode="algorithm"):
+    from .mode_service import feature_engine
+    # AI dispatch can be connected here later; both modes currently use this policy.
+    if feature_engine("dispatch", operation_mode) != "algorithm":
+        raise ValueError("지원하지 않는 배차 방식입니다.")
     if mode == "simulation":
         from .mock_data import mock_fms
         rows = mock_fms.robot_snapshots(mode)

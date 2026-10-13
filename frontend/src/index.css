@@ -64,3 +64,49 @@ html, body, #root {
 button { transition: background 0.12s, border-color 0.12s, color 0.12s, box-shadow 0.12s; }
 button:focus-visible { outline: 2px solid #1A6FD8; outline-offset: 2px; border-radius: 4px; }
 
+
+
+/* Add a collapsible order overview beneath the existing map and controls. */
+.fms-order-dashboard {
+  flex-shrink: 0;
+  background: #F4F6FA;
+  box-sizing: border-box;
+}
+.fms-order-resize {
+  height: 18px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  cursor: ns-resize;
+  touch-action: none;
+  background: #F4F6FA;
+  border-top: 1px solid #DFE5ED;
+}
+.fms-order-resize-grip {
+  width: 56px;
+  height: 4px;
+  border-radius: 4px;
+  background: #A7B3C3;
+}
+.fms-order-resize:hover .fms-order-resize-grip,
+.fms-order-resize:focus-visible .fms-order-resize-grip { background: #1A6FD8; }
+.fms-order-status {
+  display: grid;
+  grid-template-columns: minmax(280px, 1.3fr) minmax(230px, 1fr) minmax(250px, 1fr);
+  gap: 14px;
+  align-items: start;
+}
+.fms-order-card {
+  min-width: 0;
+  padding: 8px 12px;
+  border: 1px solid #DFE5ED;
+  border-radius: 10px;
+  background: white;
+}
+.fms-order-card > .fms-section-title:first-child { margin-top: 0 !important; }
+@media (max-width: 800px) {
+  .fms-header { padding: 8px !important; }
+  .fms-control-workspace { overflow-x: auto !important; }
+  .fms-control-workspace > section { min-width: 360px !important; }
+  .fms-order-status { min-width: 790px; }
+}

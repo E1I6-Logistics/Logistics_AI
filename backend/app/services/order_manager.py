@@ -1,6 +1,7 @@
 """공통 주문 대기열, 배차, Real 작업 단계."""
 
 import asyncio
+from datetime import datetime, timezone
 from threading import RLock
 from uuid import uuid4
 
@@ -8,7 +9,7 @@ from ..models.robot import RobotState
 from ..ros2.ros_gateway import CHARGING_STATION_NODES, NODE_OMX_MAP, ros_gateway
 from ..schemas.robot import normalize_robot_id
 from .fleet_manager import fleet_manager
-from .mode_service import mode_manager
+from .mode_service import mode_manager, feature_engine
 from .mqtt_manager import mqtt_manager
 from .order_dispatcher import available_robots
 from .order_route_dispatcher import dispatch_order_route
@@ -21,6 +22,7 @@ class OrderManager:
         self.lock = RLock()
         self.orders = {}
         self.returning = {}  # robot_id -> completed order_id
+        self.recovering = {}  # robot_id -> failed order_id
         self._return_started = set()
         self._route_tasks = {}
 
@@ -33,9 +35,15 @@ class OrderManager:
             nodes.append("6")
         return nodes
 
-    def create_order(self, items, total_quantity, order_name=None, driving_mode="standard",
+    def create_order(self, items, total_quantity, order_name=None, driving_mode=None,
                      selector=None, model=None):
         scenario_manager.ensure_available()
+        operation_mode = mode_manager.operation_mode
+        if driving_mode is None:
+            driving_mode = "llm" if feature_engine("route", operation_mode) == "ai" else "standard"
+        else:
+            # Preserve callers that already supply the legacy route mode.
+            operation_mode = "ai" if driving_mode == "llm" else "algorithm"
         if set(items) != {"A", "B", "C", "D"} or any(
             not isinstance(value, int) or value < 0 for value in items.values()
         ):
@@ -54,12 +62,13 @@ class OrderManager:
             order_id = str(uuid4())
             row = {
                 "order_id": order_id,
-                "order_name": order_name or f"ORDER-{len(self.orders) + 1:03d}",
+                "order_name": (order_name or "").strip() or f"ORDER-{len(self.orders) + 1:03d}",
                 "items": dict(items), "total_quantity": total_quantity,
                 "pickup_nodes": self.get_pickup_nodes(items),
                 "pickup_index": 0, "workstation_node": None,
                 "robot_id": None, "status": "PENDING", "phase": "PENDING",
                 "mode": mode_manager.mode, "driving_mode": driving_mode,
+                "operation_mode": operation_mode,
                 "selector": selector, "model": model, "route_started": False,
             }
             self.orders[order_id] = row
@@ -67,7 +76,35 @@ class OrderManager:
 
     @staticmethod
     def public_order(row):
-        return {key: value for key, value in row.items() if key != "route_started"}
+        return {key: value for key, value in row.items()
+                if key != "route_started" and not key.startswith("_")}
+
+    def retry_order(self, order_id):
+        with scenario_manager.lock, self.lock:
+            scenario_manager.ensure_available()
+            row = self.orders.get(order_id)
+            if row is None or row["status"] != "FAILED":
+                raise ValueError("실패한 주문만 재시도할 수 있습니다.")
+            if row["mode"] != "simulation" or mode_manager.mode != "simulation":
+                raise ValueError("실제 주문은 적재물과 OMX 작업 결과 확인 후 재등록하세요.")
+            if row["operation_mode"] != mode_manager.operation_mode:
+                raise ValueError("주문을 등록했던 AI/알고리즘 운영 모드로 전환한 뒤 재시도하세요.")
+            if order_id in self.recovering.values():
+                raise ValueError("실패 로봇의 복귀가 끝난 뒤 재시도하세요.")
+            if row.get("recovery_status") in ("BLOCKED", "STOPPED"):
+                from .mock_data import mock_fms
+                snapshot = mock_fms.robot_snapshot(row["robot_id"], "simulation")
+                if (snapshot["occupied_node"] != CHARGING_STATION_NODES.get(row["robot_id"])
+                        or snapshot["goal_node"] is not None or snapshot["route"] is not None):
+                    raise ValueError("실패 로봇을 담당 스테이션으로 복귀시킨 뒤 재시도하세요.")
+            row.update(last_robot_id=row["robot_id"], robot_id=None,
+                       status="PENDING", phase="PENDING", pickup_index=0,
+                       workstation_node=None, route_started=False, _held_node=None)
+            row["retry_count"] = row.get("retry_count", 0) + 1
+            row.pop("error", None)
+            row.pop("recovery_status", None)
+            row.pop("recovery_error", None)
+            return self.public_order(row)
 
     def list_orders(self):
         with self.lock:
@@ -98,9 +135,14 @@ class OrderManager:
             row = self.orders.get(order_id)
             if row is None or row["status"] in ("COMPLETED", "CANCELLED"):
                 return False
+            owns_robot = (row["status"] == "IN_PROGRESS"
+                          or self.recovering.get(row["robot_id"]) == order_id)
             row["status"] = row["phase"] = "CANCELLED"
             workstation_manager.release(order_id)
-            robot_id, mode = row["robot_id"], row["mode"]
+            robot_id, mode = row["robot_id"] if owns_robot else None, row["mode"]
+            if robot_id in self.recovering:
+                self.recovering.pop(robot_id)
+                row["recovery_status"] = "STOPPED"
         if robot_id:
             if mode == "simulation":
                 from .mock_data import mock_fms
@@ -116,6 +158,9 @@ class OrderManager:
     def cancel_robot(self, robot_id, mode):
         robot_id = normalize_robot_id(robot_id)
         with self.lock:
+            failed_id = self.recovering.pop(robot_id, None)
+            if failed_id in self.orders:
+                self.orders[failed_id]["recovery_status"] = "STOPPED"
             completed_id = self.returning.pop(robot_id, None)
             self._return_started.discard(robot_id)
             if completed_id in self.orders:
@@ -134,7 +179,24 @@ class OrderManager:
         with self.lock:
             busy = {row["robot_id"] for row in self.orders.values()
                     if row["status"] == "IN_PROGRESS" and row["robot_id"]}
-            candidates = available_robots(mode, busy, set(self.returning))
+            busy.update(self.recovering)
+            if mode == "simulation":
+                from .mock_data import mock_fms
+                from .simulation_order_runner import simulation_order_runner
+                # A failed recovery must not silently become a new dispatch.
+                # Manual return to the station makes the robot available again.
+                for row in self.orders.values():
+                    if (row["mode"] == mode and row["status"] == "FAILED"
+                            and row.get("recovery_status") in ("BLOCKED", "STOPPED")):
+                        snapshot = mock_fms.robot_snapshot(row["robot_id"], mode)
+                        if snapshot["occupied_node"] != CHARGING_STATION_NODES.get(row["robot_id"]):
+                            busy.add(row["robot_id"])
+                        elif (snapshot["goal_node"] is None and snapshot["route"] is None
+                              and not snapshot.get("stop_requested")):
+                            row["recovery_status"] = "RETURNED"
+                for robot_id, failed_id in self.recovering.items():
+                    simulation_order_runner.start_recovery(failed_id, robot_id)
+            candidates = available_robots(mode, busy, set(self.returning), mode_manager.operation_mode)
             for row in self.orders.values():
                 if row["mode"] != mode or row["status"] != "PENDING" or not candidates:
                     continue
@@ -148,7 +210,9 @@ class OrderManager:
                             blocked_by_earlier_pickup = True
                             break
                 candidate_index = None
-                for index, candidate in enumerate(candidates):
+                preferred = sorted(enumerate(candidates),
+                                   key=lambda item: item[1] == row.get("last_robot_id"))
+                for index, candidate in preferred:
                     # A returning robot must leave the workstation before
                     # waiting behind an earlier order at the same pickup.
                     if blocked_by_earlier_pickup and candidate in self.returning:
@@ -172,8 +236,8 @@ class OrderManager:
                 if mode == "simulation":
                     from .mock_data import mock_fms
                     snapshot = mock_fms.robot_snapshot(robot_id, mode)
-                    if snapshot["goal_node"] is not None:
-                        mock_fms.stop_robot(robot_id)
+                    mock_fms.stop_robot(robot_id)
+                    row["_held_node"] = snapshot["occupied_node"]
                     from .simulation_order_runner import simulation_order_runner
                     simulation_order_runner.start(row["order_id"])
                 else:
@@ -218,7 +282,7 @@ class OrderManager:
             return
         phase = row["phase"]
         if phase == "WAITING_WORKSTATION":
-            node = workstation_manager.choose(order_id, "real")
+            node = workstation_manager.choose(order_id, "real", row["operation_mode"])
             if node is None:
                 return
             with self.lock:
@@ -310,18 +374,38 @@ class OrderManager:
             row = self.orders.get(order_id)
             if row is None or row["status"] != "IN_PROGRESS":
                 return
+            failed_phase = row["phase"]
+            row["failed_phase"] = failed_phase
+            row["failed_at"] = datetime.now(timezone.utc).isoformat()
+            row.setdefault("failures", []).append({
+                "phase": failed_phase, "reason": reason, "robot_id": row["robot_id"],
+                "time": row["failed_at"],
+            })
             row["status"] = row["phase"] = "FAILED"
             row["error"] = reason
             workstation_manager.release(order_id)
             if row["mode"] == "simulation":
                 from .mock_data import mock_fms
-                # A failed order no longer owns this robot. Stop its route
-                # before a later queue tick can assign another order.
+                snapshot = mock_fms.robot_snapshot(row["robot_id"], "simulation")
+                row["failure_robot_state"] = {
+                    key: snapshot.get(key) for key in
+                    ("status", "occupied_node", "occupied_edge", "goal_node", "stop_requested")
+                }
+                can_recover = (snapshot["connection_state"] == "ONLINE"
+                               and snapshot["status"] != "MOVING"
+                               and (not snapshot.get("stop_requested") or row.get("_held_node"))
+                               and (snapshot["occupied_node"] is not None
+                                    or snapshot["occupied_edge"] is not None))
                 mock_fms.stop_robot(row["robot_id"])
+                row["recovery_status"] = "PENDING" if can_recover else "BLOCKED"
+                if can_recover:
+                    self.recovering[row["robot_id"]] = order_id
             else:
                 robot = fleet_manager.get_robot(row["robot_id"])
                 if robot:
                     robot.pause("next_destination_failed", reason)
+            print(f"[{row['failed_at']}] [ORDER FAILED] name={row['order_name']} id={order_id} "
+                  f"robot={row['robot_id']} phase={failed_phase} reason={reason}", flush=True)
 
     def on_mqtt_result(self, omx, data):
         # MQTT 콜백은 단계만 변경한다. 다음 경로는 FastAPI 루프에서 시작한다.
