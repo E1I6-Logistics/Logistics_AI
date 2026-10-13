@@ -75,7 +75,12 @@ Logistics_FMS/
 │   │   ├── services/            # Mock Fleet, A*, 지도, 그래프, Zenoh 연결 관리
 │   │   ├── config.py            # 지도·그래프·모드·CORS 환경 설정
 │   │   └── main.py              # FastAPI 앱과 ROS 2 executor 수명주기
-│   ├── .env.example
+│   ├── simulation/              # 시나리오·모의 실행기·경로 평가 도구
+│   │   ├── evaluation/
+│   │   ├── llm_providers/
+│   │   ├── route_selector/
+│   │   ├── services/
+│   │   └── simulators/
 │   └── requirements.txt
 ├── frontend/
 │   ├── public/
@@ -91,12 +96,6 @@ Logistics_FMS/
 │   ├──Logistics_AMR/       # 별도 clone: jhleedev00 브랜치
 ├── maps/                        # PGM/PNG/YAML Occupancy Map
 ├── routes/                      # GeoJSON 경로 그래프와 비교용 그래프
-├── simulation/
-│   ├── evaluation/              # 비교 CLI, 평가와 집계
-│   ├── llm_providers/           # Ollama/OpenAI/Anthropic provider
-│   ├── route_selector/          # 경로 선택기
-│   ├── services/                # 비교용 경로 서비스
-│   └── simulators/              # Mock Fleet/Robot 실행기
 ├── tests/                       # 경로·LLM 비교 단위 테스트와 fixture
 ├── scripts/
 │   ├── main/                    # Main PC Zenoh 설치·셸 설정
@@ -108,6 +107,8 @@ Logistics_FMS/
 ├── tools/diagnostics/           # Zenoh 진단 도구
 ├── doc/                         # ROS 2/Zenoh 및 백엔드 제어 문서
 ├── logs/                        # 실행 로그와 PID 파일
+├── .env.example                 # FMS·AI 공통 설정 예시
+├── .env                         # 로컬 설정 및 API 키 (Git 제외)
 ├── start_fms.sh                 # 전체 개발 스택 시작
 └── stop_fms.sh                  # 전체 개발 스택 종료
 ```
@@ -188,12 +189,12 @@ OS, ROS 2, Python, Zenoh, Node.js, Docker, 프런트엔드 의존성과 네트�
 
 ## 환경 설정
 
-백엔드 설정 예시는 `backend/.env.example`에 있습니다. 현재 코드는 OS 환경변수를 직접 읽으므로 필요하면 실행 전에 export합니다.
+FMS와 AI의 공통 설정 예시는 루트 `.env.example`에 있습니다. 로컬 `.env`는 시작 스크립트와 Python 백엔드·평가 도구가 읽으며 Git에서 제외됩니다. 이미 셸에 설정한 환경변수는 `.env`보다 우선합니다.
 
 | 환경변수 | 기본값 | 설명 |
 | --- | --- | --- |
 | `FMS_ROBOT_MODE` | `simulation` | 시작 모드: `simulation` 또는 `real` |
-| `FMS_MAP_YAML` | `my_map.yaml` | `maps/` 아래에서 사용할 지도 YAML |
+| `FMS_MAP_YAML` | `logitle_map.yaml` | `maps/` 아래에서 사용할 지도 YAML |
 | `FMS_ROUTE_GRAPH` | `test.geojson` | `routes/` 아래에서 사용할 GeoJSON 그래프 |
 | `FMS_CORS_ORIGINS` | `*` | 쉼표로 구분한 허용 Origin |
 | `VITE_FMS_API_BASE` | 현재 호스트의 `:8000` | 프런트엔드 API 주소 |
@@ -203,7 +204,7 @@ OS, ROS 2, Python, Zenoh, Node.js, Docker, 프런트엔드 의존성과 네트�
 
 ```bash
 export FMS_ROBOT_MODE=real
-export FMS_MAP_YAML=my_map.yaml
+export FMS_MAP_YAML=logitle_map.yaml
 export FMS_ROUTE_GRAPH=test.geojson
 ```
 
@@ -320,22 +321,22 @@ LLM 기능은 코드로 계산한 최단 경로와 모델이 제안한 경로를
 ```bash
 cd ~/Logistics_FMS
 source ~/venv/robot/bin/activate
-python -m pip install -r simulation/requirements.txt
-test -f simulation/.env || cp simulation/.env.example simulation/.env
+python -m pip install -r backend/simulation/requirements.txt
+test -f .env || cp .env.example .env
 
-python -m simulation.evaluation.cli build-compact
-python -m simulation.evaluation.cli compare --start 2 --goal 6 --dry-run
-python -m simulation.evaluation.cli compare --start 2 --goal 6
+python -m backend.simulation.evaluation.cli build-compact
+python -m backend.simulation.evaluation.cli compare --start 2 --goal 6 --dry-run
+python -m backend.simulation.evaluation.cli compare --start 2 --goal 6
 ```
 
-`simulation/.env`에서 `LLM_PROVIDER`, provider별 모델·인증 정보, `LLM_ROUTE_GRAPH`를 설정합니다. Ollama를 사용할 때는 서버와 모델을 먼저 준비합니다.
+`.env`에서 `LLM_PROVIDER`, provider별 모델·인증 정보, `LLM_ROUTE_GRAPH`를 설정합니다. Ollama를 사용할 때는 서버와 모델을 먼저 준비합니다.
 
 ```bash
 ollama serve
 ollama pull qwen3:4b
 ```
 
-비교 결과는 `simulation/llm_route_comparisons.jsonl`, 집계 결과는 `simulation/llm_route_summary.json`에 기록되며 두 파일은 Git에서 제외됩니다.
+비교 결과는 `backend/simulation/llm_route_comparisons.jsonl`, 집계 결과는 `backend/simulation/llm_route_summary.json`에 기록되며 두 파일은 Git에서 제외됩니다.
 
 ## 병목·교착 시나리오 실행
 
@@ -384,14 +385,14 @@ unset OLLAMA_MODEL
 
 모델을 비교할 때는 시작 노드, 도착 노드, 그래프, 재시도 횟수를 동일하게 유지합니다. 모델별 실행 결과는 `model` 값으로 구분되어 누적됩니다.
 
-Mock Fleet에서 LLM 비교를 사용하려면 ROS 2 환경과 Zenoh Router를 준비한 뒤 `python -m simulation.simulators.mock_fleet`를 실행합니다. LLM 비교는 선택 사항이며 주행에는 코드로 계산한 경로를 사용합니다. 오프라인 검증 명령은 `python -m unittest discover -s tests -v`입니다.
+Mock Fleet에서 LLM 비교를 사용하려면 ROS 2 환경과 Zenoh Router를 준비한 뒤 `python -m backend.simulation.simulators.mock_fleet`를 실행합니다. LLM 비교는 선택 사항이며 주행에는 코드로 계산한 경로를 사용합니다. 오프라인 검증 명령은 `python -m unittest discover -s tests -v`입니다.
 
 여러 Ollama 모델을 같은 조건에서 반복 평가하고 Jetson에서 결과를 다시
 수집하는 방법은 [`doc/llm-route-generation-benchmark.md`](doc/llm-route-generation-benchmark.md)를
 참고하세요. 실행 전 그래프와 기준 경로만 확인하려면 다음 명령을 사용합니다.
 
 ```bash
-python -m simulation.evaluation.benchmark --check
+python -m backend.simulation.evaluation.benchmark --check
 ```
 
 

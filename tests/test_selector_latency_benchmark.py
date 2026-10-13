@@ -8,7 +8,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from simulation.evaluation.selector_latency_benchmark import (
+from backend.simulation.evaluation.selector_latency_benchmark import (
     CSV_FILENAME,
     ROUTE_CASES,
     ROUTE_GRAPH_PATH,

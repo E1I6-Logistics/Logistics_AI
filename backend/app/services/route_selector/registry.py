@@ -5,12 +5,7 @@ from __future__ import annotations
 import os
 from abc import ABC, abstractmethod
 from importlib import import_module
-from pathlib import Path
 from typing import Any, Mapping
-
-from dotenv import load_dotenv
-
-load_dotenv(Path(__file__).resolve().parents[4] / "simulation" / ".env", override=False)
 
 
 class RouteSelector(ABC):

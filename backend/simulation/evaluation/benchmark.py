@@ -24,18 +24,18 @@ from pathlib import Path
 from statistics import mean, median
 from typing import Any, Callable
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT))
 
-from simulation.evaluation.device_metadata import ollama_model_device_metadata
-from simulation.evaluation.graph_retrieval import (
+from backend.simulation.evaluation.device_metadata import ollama_model_device_metadata
+from backend.simulation.evaluation.graph_retrieval import (
     full_graph_metadata,
     ground_truth_coverage,
     retrieve_path_relevant_graph,
 )
-from simulation.llm_providers.ollama_provider import OllamaPathProvider
-from simulation.evaluation.iterative_chain import ITERATIVE_STEP_SCHEMA, run_iterative_chain
-from simulation.services.route_service import (
+from backend.simulation.llm_providers.ollama_provider import OllamaPathProvider
+from backend.simulation.evaluation.iterative_chain import ITERATIVE_STEP_SCHEMA, run_iterative_chain
+from backend.simulation.services.route_service import (
     build_compact_adjacency_graph,
     build_compact_route_graph,
     build_route_inputs,

@@ -86,7 +86,7 @@ class LayaSelector(RouteSelector):
                 "Hugging Face Laya 실행 패키지가 없습니다. "
                 "JetPack용 CUDA PyTorch를 먼저 설치한 뒤 "
                 "'python -m pip install -r "
-                "simulation/requirements.txt'를 실행하세요."
+                "backend/simulation/requirements.txt'를 실행하세요."
             ) from error
         return laya.load(**kwargs)
 

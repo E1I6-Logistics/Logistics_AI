@@ -9,16 +9,16 @@ from datetime import datetime, timezone
 from pathlib import Path
 from time import monotonic
 
-from simulation.services.route_service import compare_path_metrics, validate_and_calculate_path_distance
+from backend.simulation.services.route_service import compare_path_metrics, validate_and_calculate_path_distance
 
-from simulation.llm_providers import get_provider
-from simulation.llm_providers.base import LLMPathProvider
+from backend.simulation.llm_providers import get_provider
+from backend.simulation.llm_providers.base import LLMPathProvider
 from .summary import write_summary
 
 SIMULATION_DIR = Path(__file__).resolve().parents[1]
 LLM_RESULT_PATH = SIMULATION_DIR / "llm_route_comparisons.jsonl"
 LLM_SUMMARY_PATH = SIMULATION_DIR / "llm_route_summary.json"
-ROUTE_DIR = Path(__file__).resolve().parents[2] / "routes"
+ROUTE_DIR = Path(__file__).resolve().parents[3] / "routes"
 
 
 def resolve_llm_route_graph_path(value: str | Path | None = None) -> Path:

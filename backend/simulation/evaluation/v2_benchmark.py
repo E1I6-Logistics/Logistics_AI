@@ -10,10 +10,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from simulation.evaluation.benchmark import load_and_validate_config, run_benchmark
+from backend.simulation.evaluation.benchmark import load_and_validate_config, run_benchmark
 
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_MATRIX = Path(__file__).with_name("route_generation_v2_matrix.json")
 RESULTS_ROOT = Path(__file__).with_name("benchmark_results")
 COMPARABLE_SETTING_KEYS = (

@@ -5,7 +5,7 @@ import math
 import unittest
 from pathlib import Path
 
-from simulation.services.route_service import build_route_inputs, plan_route
+from backend.simulation.services.route_service import build_route_inputs, plan_route
 from tests.fixtures import load_graph
 
 

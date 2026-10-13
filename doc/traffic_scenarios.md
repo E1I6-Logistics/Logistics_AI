@@ -97,12 +97,12 @@ ArUco 정렬을 우회하는 테스트 전용 주행 모드는 만들지 않았�
 | `backend/app/routers/scenarios.py` | `list_scenarios`, `run_scenario`, `scenario_status` | 목록 GET, 실행 POST, 상태 GET |
 | `backend/app/services/scenario_service.py` | `ScenarioManager.start`, `_run`, `robot_states` | 검증, 단일 실행·완료/실패 관리, 모드별 상태 확인 |
 | `backend/app/services/command_service.py` | `navigate_to_node`, `stop_robot` | 기존 모드별 명령 재사용 |
-| `simulation/scenarios.py` | `placement`, `prepare` | 기존 Mock 초기 배치 로직 이동 |
+| `backend/simulation/scenarios.py` | `placement`, `prepare` | 기존 Mock 초기 배치 로직 이동 |
 | `backend/app/ros2/ros_gateway.py` | `on_aruco_align_result` | 주문 없는 이동 완료, 비상정지 후 늦은 정렬 결과 무시 |
 | `tests/traffic_scenarios.py` | `main` | 같은 실행 API를 사용하는 필수 이름 CLI |
 
 공통 실행부는 Mock을 상위에서 import하지 않는다. 시뮬레이션 준비는 해당 분기에서만
-`simulation.scenarios`를 로드한다. 시뮬레이션 제거 시 이 분기와 Mock 상태/명령 분기를
+`backend.simulation.scenarios`를 로드한다. 시뮬레이션 제거 시 이 분기와 Mock 상태/명령 분기를
 제거하면 실제 상태 확인·실행·UI·CLI는 유지할 수 있다. 테스트 JSON은 공통 데이터로 남긴다.
 
 ## 검증

@@ -11,7 +11,7 @@ import copy
 from collections import deque
 from typing import Any
 
-from simulation.services.route_service import compact_graph_edges
+from backend.simulation.services.route_service import compact_graph_edges
 
 
 # 그래프에서 도달 가능한 노드를 찾는다.

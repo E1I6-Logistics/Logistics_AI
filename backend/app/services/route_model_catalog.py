@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-CONFIG_PATH = Path(__file__).resolve().parents[3] / "simulation" / "evaluation" / "selector_iterative_benchmark.json"
+CONFIG_PATH = Path(__file__).resolve().parents[3] / "backend" / "simulation" / "evaluation" / "selector_iterative_benchmark.json"
 
 
 def enabled_route_models() -> dict[str, list[dict[str, str]]]:

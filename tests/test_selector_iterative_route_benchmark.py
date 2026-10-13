@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from simulation.evaluation.selector_iterative_route_benchmark import (
+from backend.simulation.evaluation.selector_iterative_route_benchmark import (
     _prepare,
     _run_route,
     _resolve_model_specs,
@@ -439,7 +439,7 @@ class SelectorIterativeRouteBenchmarkTest(unittest.TestCase):
     # 반복형 Ollama 설정이 선택된 모델을 찾는지 검증한다.
     def test_iterative_ollama_config_resolves_selected_models(self):
         # 실행용 모델 설정을 바꾸지 않고 독립된 설정에서 모델 선택 처리를 확인한다.
-        config = json.loads(Path("simulation/evaluation/selector_iterative_benchmark.json").read_text())
+        config = json.loads(Path("backend/simulation/evaluation/selector_iterative_benchmark.json").read_text())
         for model in config["models"]:
             if model["name"] == "qwen3:4b":
                 model["enabled"] = True
@@ -458,7 +458,7 @@ class SelectorIterativeRouteBenchmarkTest(unittest.TestCase):
     # 반복형 Ollama 설정이 알 수 없는 모델을 거부하는지 검증한다.
     def test_iterative_ollama_config_rejects_unknown_model(self):
         with self.assertRaisesRegex(ValueError, "not present in config"):
-            load_iterative_config(Path("simulation/evaluation/selector_iterative_benchmark.json"), ["missing:model"])
+            load_iterative_config(Path("backend/simulation/evaluation/selector_iterative_benchmark.json"), ["missing:model"])
 
     # 다중 모델 실행기는 모델별 하위 결과와 상위 matrix manifest를 만든다.
     # 설정된 실행기가 결과 행렬과 모델별 결과를 저장하는지 검증한다.
@@ -503,7 +503,7 @@ class SelectorIterativeRouteBenchmarkTest(unittest.TestCase):
             )
             output = temporary / "output"
             with patch(
-                "simulation.evaluation.selector_iterative_route_benchmark." "_build_configured_ollama_selector",
+                "backend.simulation.evaluation.selector_iterative_route_benchmark." "_build_configured_ollama_selector",
                 return_value=_FirstCandidateSelector(),
             ):
                 matrix = run_configured_benchmarks(config_path, output, progress=False)

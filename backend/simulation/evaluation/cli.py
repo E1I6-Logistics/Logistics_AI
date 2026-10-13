@@ -9,14 +9,14 @@ import sys
 from pathlib import Path
 from time import monotonic
 
-from simulation.evaluation.comparison import (
+from backend.simulation.evaluation.comparison import (
     LLM_RESULT_PATH,
     LLM_SUMMARY_PATH,
     compare_path_with_llm,
     resolve_llm_route_graph_path,
 )
-from simulation.evaluation.summary import write_summary
-from simulation.services.route_service import (
+from backend.simulation.evaluation.summary import write_summary
+from backend.simulation.services.route_service import (
     ROUTE_GRAPH_PATH as CONFIGURED_GRAPH_PATH,
     build_compact_route_graph,
     build_route_inputs,
@@ -24,7 +24,7 @@ from simulation.services.route_service import (
     plan_route,
 )
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 ROUTE_DIR = PROJECT_ROOT / "routes"
 
 
@@ -32,17 +32,17 @@ def selected_provider_config() -> tuple[str, str]:
     """Validate only the credentials needed by the selected provider."""
     provider = os.getenv("LLM_PROVIDER", "").strip().lower()
     if provider not in {"openai", "anthropic", "ollama"}:
-        raise ValueError("simulation/.env에 LLM_PROVIDER를 openai, anthropic 또는 ollama로 설정하세요.")
+        raise ValueError("루트 .env에 LLM_PROVIDER를 openai, anthropic 또는 ollama로 설정하세요.")
 
     model_name = f"{provider.upper()}_MODEL"
     model = os.getenv(model_name, "").strip()
     if not model:
-        raise ValueError(f"simulation/.env에 {model_name}을 설정하세요.")
+        raise ValueError(f"루트 .env에 {model_name}을 설정하세요.")
 
     if provider != "ollama":
         key_name = f"{provider.upper()}_API_KEY"
         if not os.getenv(key_name):
-            raise ValueError(f"simulation/.env에 {key_name}를 설정하세요.")
+            raise ValueError(f"루트 .env에 {key_name}를 설정하세요.")
     return provider, model
 
 

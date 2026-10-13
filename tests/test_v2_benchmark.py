@@ -5,8 +5,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from simulation.evaluation.benchmark import load_and_validate_config
-from simulation.evaluation.v2_benchmark import DEFAULT_MATRIX, resolve_experiment_configs
+from backend.simulation.evaluation.benchmark import load_and_validate_config
+from backend.simulation.evaluation.v2_benchmark import DEFAULT_MATRIX, resolve_experiment_configs
 
 
 class V2BenchmarkTest(unittest.TestCase):
@@ -26,7 +26,7 @@ class V2BenchmarkTest(unittest.TestCase):
     # 고정 10쌍을 사용하고 반복 규칙·지시문을 최종 인접 선택 시험과 통일한다.
     # 반복형 정책이 최종 벤치마크와 일치하는지 검증한다.
     def test_iterative_policy_matches_final_benchmark(self):
-        from simulation.services.iterative_route_policy import NEXT_NODE_INSTRUCTIONS
+        from backend.simulation.services.iterative_route_policy import NEXT_NODE_INSTRUCTIONS
 
         with tempfile.TemporaryDirectory() as directory:
             configs = [json.loads(p.read_text()) for p in resolve_experiment_configs(DEFAULT_MATRIX, Path(directory))]

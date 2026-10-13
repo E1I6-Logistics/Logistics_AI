@@ -2,7 +2,7 @@
 
 import unittest
 
-from simulation.evaluation.summary import summarize
+from backend.simulation.evaluation.summary import summarize
 
 
 class LlmComparisonSummaryTest(unittest.TestCase):

@@ -7,6 +7,19 @@ set -Eeuo pipefail
 # - Host: FastAPI, Vite, ROS 2 daemon, zenoh-bridge-ros2dds, Kev
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Load the shared .env without replacing values already exported by the caller.
+if [ -f "$PROJECT_DIR/.env" ]; then
+    while IFS= read -r line || [ -n "$line" ]; do
+        [[ "$line" == *=* ]] || continue
+        name="${line%%=*}"
+        [[ "$name" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+        if [ -z "${!name+x}" ]; then
+            export "$line"
+        fi
+    done <"$PROJECT_DIR/.env"
+fi
+
 FRONTEND_DIR="$PROJECT_DIR/frontend"
 COMPOSE_FILE="${FMS_COMPOSE_FILE:-$PROJECT_DIR/infra/docker-compose.yml}"
 LOG_DIR="${FMS_LOG_DIR:-$PROJECT_DIR/logs}"

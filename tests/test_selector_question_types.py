@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from simulation.evaluation.selector_question_types_benchmark import (
+from backend.simulation.evaluation.selector_question_types_benchmark import (
     CASES,
     CSV_FILENAME,
     SUMMARY_FILENAME,

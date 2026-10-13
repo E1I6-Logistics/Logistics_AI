@@ -3,7 +3,7 @@
 import json
 from pathlib import Path
 
-from simulation.services.route_service import build_route_inputs
+from backend.simulation.services.route_service import build_route_inputs
 
 
 MOCK_DIR = Path(__file__).resolve().parent / "mock"

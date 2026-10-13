@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from simulation.evaluation import cli
+from backend.simulation.evaluation import cli
 from tests.fixtures import load_graph
 
 

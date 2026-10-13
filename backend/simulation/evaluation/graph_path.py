@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[3]
 
 
 def resolve_graph_path(explicit: Path | None = None, *, fallback: Path | None = None) -> Path:

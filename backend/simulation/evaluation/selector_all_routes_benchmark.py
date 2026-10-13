@@ -15,13 +15,13 @@ from pathlib import Path
 from statistics import mean, median
 from typing import Any
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT))
 
-from simulation.evaluation.device_metadata import git_metadata, selector_device_metadata
-from simulation.evaluation.graph_path import resolve_graph_path
-from simulation.route_selector import get_selector
-from simulation.services.route_service import (
+from backend.simulation.evaluation.device_metadata import git_metadata, selector_device_metadata
+from backend.simulation.evaluation.graph_path import resolve_graph_path
+from backend.simulation.route_selector import get_selector
+from backend.simulation.services.route_service import (
     build_compact_route_graph,
     build_route_inputs,
     plan_route,
@@ -29,8 +29,8 @@ from simulation.services.route_service import (
 )
 
 GRAPH_PATH = resolve_graph_path()
-CONFIG_PATH = ROOT / "simulation" / "evaluation" / "route_generation_benchmark.json"
-RESULTS_ROOT = ROOT / "simulation" / "benchmark_results"
+CONFIG_PATH = ROOT / "backend" / "simulation" / "evaluation" / "route_generation_benchmark.json"
+RESULTS_ROOT = ROOT / "backend" / "simulation" / "benchmark_results"
 MANIFEST_FILENAME = "manifest.json"
 TRIALS_FILENAME = "selector_all_routes_trials.jsonl"
 SUMMARY_FILENAME = "selector_all_routes_summary.json"

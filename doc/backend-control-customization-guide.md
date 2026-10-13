@@ -476,7 +476,7 @@ Mock 서비스로 대체한 후 다음 구현은 제거할 수 있다.
 - 연결 allow/block API
 - 비어 있는 placeholder service 파일
 
-최상위 `simulation/` 폴더는 별도의 실험 및 ROS 도구일 수 있으므로 기본 삭제 범위에서 제외한다.
+`backend/simulation/`에는 시나리오와 별도 실험 도구가 있으므로 기본 삭제 범위에서 제외한다.
 
 ## 9. 구현 순서
 

@@ -1,5 +1,5 @@
 # ============================================================
-# Last_Project_org
+# AX_Logistics
 # ROS2 / Python / FastAPI / React / Vite / Docker
 # ============================================================
 
@@ -41,14 +41,12 @@ ENV/
 # React / Vite / Node.js
 # ------------------------------------------------------------
 node_modules/
-frontend/node_modules/
 frontend/.pnpm-store/
 
 dist/
-frontend/dist/
 
 .vite/
-frontend/.vite/
+*.tsbuildinfo
 
 npm-debug.log*
 yarn-debug.log*
@@ -158,9 +156,14 @@ test-results/
 
 doc/record_file/
 
-# LLM experiment runtime outputs
-simulation/llm_route_comparisons.jsonl
-simulation/llm_route_summary.json
+# Simulation and LLM runtime outputs
+/backend/simulation/benchmark_results/
+/backend/simulation/evaluation/benchmark_results/
+/backend/simulation/llm_route_comparisons.jsonl
+/backend/simulation/llm_route_summary.json
+
+# The former top-level package now lives under backend/.
+/simulation/
 
 # Logistics_AMR file
 robots_ws/

@@ -41,8 +41,8 @@ Logistics_FMS/
 │   ├── ros2-zenoh-guide.md           # 이 문서
 │   └── backend-control-customization-guide.md
 ├── tools/diagnostics/zenoh_monitor.py
-├── backend/ / frontend/ / infra/
-└── maps/ / robots_ws/ / routes/ / simulation/
+├── backend/ (simulation/ 포함) / frontend/ / infra/
+└── maps/ / robots_ws/ / routes/
 ```
 
 특정 시점의 장애 조사 기록은 프로젝트 밖에 보관한다. 현재 백엔드는 모의 데이터를 제공하므로 이 문서의 실장비 통신 절차는 장비 환경에서 별도로 확인해야 한다.

@@ -1,9 +1,9 @@
 """V2와 최종 시험이 같은 인접 후보·순환 제한·강제 이동을 사용하는지 확인한다."""
 
 import unittest
-from simulation.evaluation.iterative_chain import IterativeRouteError, run_iterative_chain
-from simulation.services.iterative_route_runner import run_selected_route
-from simulation.evaluation.selector_iterative_route_benchmark import _run_route
+from backend.simulation.evaluation.iterative_chain import IterativeRouteError, run_iterative_chain
+from backend.simulation.services.iterative_route_runner import run_selected_route
+from backend.simulation.evaluation.selector_iterative_route_benchmark import _run_route
 
 GRAPH = {
     "type": "CompactAdjacencyGraph",
@@ -111,7 +111,7 @@ class IterativeChainTest(unittest.TestCase):
     # benchmark 집계에서도 강제 이동을 API 1회로 오인하지 않는지 확인한다.
     # 강제 경로 시행의 모델 호출 횟수가 0인지 검증한다.
     def test_trial_counts_zero_calls_for_forced_route(self):
-        from simulation.evaluation.benchmark import _run_trial
+        from backend.simulation.evaluation.benchmark import _run_trial
 
         graph = {
             "type": "CompactAdjacencyGraph",
@@ -129,7 +129,7 @@ class IterativeChainTest(unittest.TestCase):
     # 서버 실패는 부분 경로·timeout·실제 호출 수로 남아 모델 정답과 섞이지 않는다.
     # 시행 결과에 전송 실패가 남는지 검증한다.
     def test_trial_retains_transport_failure(self):
-        from simulation.evaluation.benchmark import _run_trial
+        from backend.simulation.evaluation.benchmark import _run_trial
 
         case = {"start": 1, "goal": 3, "expected_path": [1, 2, 3], "expected_distance": 2}
         trial = _run_trial(FakeProvider([TimeoutError("timed out")]), "fake", case, 1, self._trial_inputs(GRAPH))
@@ -142,7 +142,7 @@ class IterativeChainTest(unittest.TestCase):
     # 평가 시행에 필요한 입력을 구성한다.
     @staticmethod
     def _trial_inputs(graph):
-        from simulation.services.route_service import compact_graph_edges
+        from backend.simulation.services.route_service import compact_graph_edges
         from pathlib import Path
 
         return {

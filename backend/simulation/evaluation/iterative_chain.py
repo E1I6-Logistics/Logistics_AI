@@ -5,9 +5,9 @@ from __future__ import annotations
 import copy
 from typing import Any
 
-from simulation.route_selector.ollama_selector import OllamaSelector
-from simulation.services.iterative_route_runner import run_selected_route
-from simulation.services.route_service import compact_graph_edges, build_edge_weight_lookup
+from backend.simulation.route_selector.ollama_selector import OllamaSelector
+from backend.simulation.services.iterative_route_runner import run_selected_route
+from backend.simulation.services.route_service import compact_graph_edges, build_edge_weight_lookup
 
 # 실제 요청은 OllamaSelector가 현재 후보 ID를 enum으로 제한한 choice 스키마를 만든다.
 ITERATIVE_STEP_SCHEMA = {

@@ -20,14 +20,14 @@ import sys
 from urllib import error as url_error
 from urllib import request as url_request
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from simulation.services.route_service import build_route_inputs, load_route_graph, plan_route
+from backend.simulation.services.route_service import build_route_inputs, load_route_graph, plan_route
 
 # 벤더별 API 호출은 llm_providers에 맡기고 비교 로직은 evaluation에서 가져온다.
-from simulation.evaluation.comparison import compare_path_with_llm
+from backend.simulation.evaluation.comparison import compare_path_with_llm
 
 ROBOT_IDS = ("robot1", "robot2", "robot3")
 INITIAL_POINT_IDS = {"robot1": 0, "robot2": 1, "robot3": 2}

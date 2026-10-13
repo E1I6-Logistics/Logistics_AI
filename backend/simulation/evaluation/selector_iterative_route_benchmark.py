@@ -16,15 +16,15 @@ from pathlib import Path
 from statistics import mean, median
 from typing import Any
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT))
 
-from simulation.evaluation.device_metadata import git_metadata, selector_device_metadata
-from simulation.evaluation.graph_path import resolve_graph_path
-from simulation.route_selector import get_selector
-from simulation.services.iterative_route_policy import MAX_VISITS_PER_NODE, NEXT_NODE_INSTRUCTIONS
-from simulation.services.iterative_route_runner import run_selected_route as _run_route, _random_path_baseline
-from simulation.services.route_service import (
+from backend.simulation.evaluation.device_metadata import git_metadata, selector_device_metadata
+from backend.simulation.evaluation.graph_path import resolve_graph_path
+from backend.simulation.route_selector import get_selector
+from backend.simulation.services.iterative_route_policy import MAX_VISITS_PER_NODE, NEXT_NODE_INSTRUCTIONS
+from backend.simulation.services.iterative_route_runner import run_selected_route as _run_route, _random_path_baseline
+from backend.simulation.services.route_service import (
     build_compact_adjacency_graph,
     build_route_inputs,
     build_edge_weight_lookup,
@@ -32,14 +32,14 @@ from simulation.services.route_service import (
     validate_and_calculate_path_distance,
 )
 
-CONFIG_PATH = ROOT / "simulation" / "evaluation" / "route_generation_benchmark.json"
+CONFIG_PATH = ROOT / "backend" / "simulation" / "evaluation" / "route_generation_benchmark.json"
 MATRIX_MANIFEST_FILENAME = "selector_iterative_matrix_manifest.json"
 TRIALS_FILENAME = "selector_iterative_route_trials.jsonl"
 SUMMARY_FILENAME = "selector_iterative_route_summary.json"
 CSV_FILENAME = "selector_iterative_route_samples.csv"
 MANIFEST_FILENAME = "manifest.json"
 DEFAULT_CASE_COUNT = 5
-DEFAULT_RESULTS_DIR = ROOT / "simulation" / "benchmark_results"
+DEFAULT_RESULTS_DIR = ROOT / "backend" / "simulation" / "benchmark_results"
 DOCKING_NODE_IDS = tuple(range(7))
 
 
@@ -360,8 +360,8 @@ def load_iterative_config(config_path: Path, selected_models: list[str] | None =
 
 def _build_configured_ollama_selector(spec: dict[str, Any]) -> Any:
     """Create one Ollama selector from a resolved model configuration."""
-    from simulation.llm_providers.ollama_provider import OllamaPathProvider
-    from simulation.route_selector.ollama_selector import OllamaSelector
+    from backend.simulation.llm_providers.ollama_provider import OllamaPathProvider
+    from backend.simulation.route_selector.ollama_selector import OllamaSelector
 
     provider = OllamaPathProvider(
         model=spec["name"],

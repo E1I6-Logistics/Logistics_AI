@@ -14,13 +14,13 @@ from pathlib import Path
 from statistics import mean, median
 from typing import Any, Callable
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT))
 
-from simulation.evaluation.device_metadata import git_metadata, selector_device_metadata
-from simulation.evaluation.graph_path import resolve_graph_path
-from simulation.route_selector import get_selector
-from simulation.services.route_service import (
+from backend.simulation.evaluation.device_metadata import git_metadata, selector_device_metadata
+from backend.simulation.evaluation.graph_path import resolve_graph_path
+from backend.simulation.route_selector import get_selector
+from backend.simulation.services.route_service import (
     build_compact_route_graph,
     build_route_inputs,
     plan_route,
@@ -31,9 +31,9 @@ TRIALS_FILENAME = "selector_latency_trials.jsonl"
 SUMMARY_FILENAME = "selector_latency_summary.json"
 CSV_FILENAME = "selector_latency_samples.csv"
 MANIFEST_FILENAME = "manifest.json"
-DEFAULT_RESULTS_DIR = ROOT / "simulation" / "benchmark_results"
+DEFAULT_RESULTS_DIR = ROOT / "backend" / "simulation" / "benchmark_results"
 ROUTE_GRAPH_PATH = resolve_graph_path()
-ROUTE_CONFIG_PATH = ROOT / "simulation" / "evaluation" / "route_generation_benchmark.json"
+ROUTE_CONFIG_PATH = ROOT / "backend" / "simulation" / "evaluation" / "route_generation_benchmark.json"
 OPTION_IDS = ("option_a", "option_b", "option_c", "option_d", "option_e")
 Clock = Callable[[], float]
 

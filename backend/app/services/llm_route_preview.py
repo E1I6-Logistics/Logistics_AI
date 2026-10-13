@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any
-
-from dotenv import load_dotenv
 
 from ..config import ROUTE_GRAPH_PATH
 from .route_model_catalog import enabled_model_configuration
@@ -51,7 +48,6 @@ def preview_llm_route(
     provider: Any | None = None,
 ) -> dict[str, Any]:
     """시험과 같은 상태·후보 규칙으로 경로를 선택하고 유효성을 검사한다."""
-    load_dotenv(Path(__file__).resolve().parents[3] / "simulation" / ".env", override=False)
     if model is None:
         raise ValueError("경로 모델을 선택하세요.")
     model_config = enabled_model_configuration(selector, model)

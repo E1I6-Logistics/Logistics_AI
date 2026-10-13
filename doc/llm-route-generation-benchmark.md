@@ -79,22 +79,22 @@ Ollama provider와 Laya 의존성은 하나의 파일에서 관리한다.
 ```bash
 cd ~/Logistics_FMS
 source ~/venv/robot/bin/activate
-python -m pip install -r simulation/requirements.txt
+python -m pip install -r backend/simulation/requirements.txt
 python -m pip check
 ```
 
-Laya를 포함한 Python 패키지는 `simulation/requirements.txt`에서 통합 관리한다.
+Laya를 포함한 Python 패키지는 `backend/simulation/requirements.txt`에서 통합 관리한다.
 
 ### 2.4 환경변수 파일 생성
 
 ```bash
 cd ~/Logistics_FMS
-cp -n simulation/.env.example simulation/.env
+cp -n .env.example .env
 ```
 
-`simulation/.env`에는 API key를 커밋하지 않는다. Laya와 Kev 선택기는 이 파일을
-자동으로 읽는다. Ollama 경로 생성 벤치마크는 현재 이 파일을 자동으로 읽지 않으므로
-원격 Ollama 주소는 실행 터미널에서 `export OLLAMA_HOST=...`로 지정한다.
+`.env`에는 API key를 커밋하지 않는다. 백엔드와 경로 평가 도구가 이 파일을
+자동으로 읽는다. 원격 Ollama를 사용할 때는 이 파일에 `OLLAMA_HOST=...`를
+추가하거나 실행 터미널에서 `export OLLAMA_HOST=...`로 지정한다.
 
 ### 2.5 CUDA 실제 연산 확인
 
@@ -147,8 +147,8 @@ CompactAdjacencyGraph만 지원하므로 원본 GeoJSON 속도 비교에는 입�
 구조 검증은 모델을 호출하지 않는다.
 
 ```bash
-python -m simulation.evaluation.benchmark \
-  --config simulation/evaluation/route_generation_benchmark_jetson.json \
+python -m backend.simulation.evaluation.benchmark \
+  --config backend/simulation/evaluation/route_generation_benchmark_jetson.json \
   --check
 ```
 
@@ -248,25 +248,25 @@ R1 전용 장문 thinking 예산을 적용하지 않는다. 0.15초는 응답 �
 Jetson:
 
 ```bash
-python -m simulation.evaluation.benchmark \
-  --config simulation/evaluation/route_generation_benchmark_jetson.json \
-  --output simulation/benchmark_results/jetson-$(date +%Y%m%d-%H%M%S)
+python -m backend.simulation.evaluation.benchmark \
+  --config backend/simulation/evaluation/route_generation_benchmark_jetson.json \
+  --output backend/simulation/benchmark_results/jetson-$(date +%Y%m%d-%H%M%S)
 ```
 
 PC 10종 선별:
 
 ```bash
-python -m simulation.evaluation.benchmark \
-  --config simulation/evaluation/route_generation_benchmark.json \
-  --output simulation/benchmark_results/pc-$(date +%Y%m%d-%H%M%S)
+python -m backend.simulation.evaluation.benchmark \
+  --config backend/simulation/evaluation/route_generation_benchmark.json \
+  --output backend/simulation/benchmark_results/pc-$(date +%Y%m%d-%H%M%S)
 ```
 
 PC와 Jetson의 순수 장비 차이를 비교할 때는 PC에서도 Jetson 설정 파일을 사용한다.
 
 ```bash
-python -m simulation.evaluation.benchmark \
-  --config simulation/evaluation/route_generation_benchmark_jetson.json \
-  --output simulation/benchmark_results/pc-matched-$(date +%Y%m%d-%H%M%S)
+python -m backend.simulation.evaluation.benchmark \
+  --config backend/simulation/evaluation/route_generation_benchmark_jetson.json \
+  --output backend/simulation/benchmark_results/pc-matched-$(date +%Y%m%d-%H%M%S)
 ```
 
 두 설정은 `num_ctx=4096`으로 같지만 모델 수가 다르므로, PC 10종 전체와 Jetson 5종 전체를 직접 비교하지 않고 공통 5종만 장비 비교에 사용한다.
@@ -276,16 +276,16 @@ python -m simulation.evaluation.benchmark \
 중단된 Ollama 시험은 같은 설정과 결과 폴더로 재개한다.
 
 ```bash
-python -m simulation.evaluation.benchmark \
-  --config simulation/evaluation/route_generation_benchmark_jetson.json \
-  --resume simulation/benchmark_results/<실행 폴더>
+python -m backend.simulation.evaluation.benchmark \
+  --config backend/simulation/evaluation/route_generation_benchmark_jetson.json \
+  --resume backend/simulation/benchmark_results/<실행 폴더>
 ```
 
 모델을 다시 호출하지 않고 `trials.jsonl`에서 요약과 CSV를 재생성한다.
 
 ```bash
-python -m simulation.evaluation.benchmark \
-  --export-results simulation/benchmark_results/<실행 폴더>
+python -m backend.simulation.evaluation.benchmark \
+  --export-results backend/simulation/benchmark_results/<실행 폴더>
 ```
 
 ### 4.6 DeepSeek-R1 thinking·출력 예산 진단 (PC, 본시험 제외)
@@ -309,22 +309,22 @@ PC에서 R1 모델을 준비하고 설정을 확인한다. `--check`는 Ollama�
 ollama pull deepseek-r1:1.5b
 ollama pull deepseek-r1:14b
 
-python -m simulation.evaluation.benchmark \
-  --config simulation/evaluation/deepseek_r1_thinking_off_diagnostic.json --check
-python -m simulation.evaluation.benchmark \
-  --config simulation/evaluation/deepseek_r1_thinking_on_diagnostic.json --check
+python -m backend.simulation.evaluation.benchmark \
+  --config backend/simulation/evaluation/deepseek_r1_thinking_off_diagnostic.json --check
+python -m backend.simulation.evaluation.benchmark \
+  --config backend/simulation/evaluation/deepseek_r1_thinking_on_diagnostic.json --check
 ```
 
 두 조건을 각각 실행한다.
 
 ```bash
-python -m simulation.evaluation.benchmark \
-  --config simulation/evaluation/deepseek_r1_thinking_off_diagnostic.json \
-  --output simulation/benchmark_results/pc-r1-think-off-$(date +%Y%m%d-%H%M%S)
+python -m backend.simulation.evaluation.benchmark \
+  --config backend/simulation/evaluation/deepseek_r1_thinking_off_diagnostic.json \
+  --output backend/simulation/benchmark_results/pc-r1-think-off-$(date +%Y%m%d-%H%M%S)
 
-python -m simulation.evaluation.benchmark \
-  --config simulation/evaluation/deepseek_r1_thinking_on_diagnostic.json \
-  --output simulation/benchmark_results/pc-r1-think-on-$(date +%Y%m%d-%H%M%S)
+python -m backend.simulation.evaluation.benchmark \
+  --config backend/simulation/evaluation/deepseek_r1_thinking_on_diagnostic.json \
+  --output backend/simulation/benchmark_results/pc-r1-think-on-$(date +%Y%m%d-%H%M%S)
 ```
 
 각 결과의 `trials.jsonl`과 `model_summary.csv`를 확인한다.
@@ -345,7 +345,7 @@ V1과 같은 5개 Start/Target 각각에 대해 코드가 만든 유효 경로 �
 
 ### 5.1 설정
 
-`simulation/.env`:
+`.env`:
 
 ```dotenv
 ROUTE_SELECTOR=laya
@@ -367,12 +367,12 @@ CUDA를 사용할 수 없거나 CPU fallback이 발생했을 때 시험을 실�
 ### 5.2 V1 후보 선택 반복 측정
 
 ```bash
-python -m simulation.evaluation.selector_latency_benchmark \
-  --output simulation/benchmark_results/<환경>-laya-latency-$(date +%Y%m%d-%H%M%S) \
+python -m backend.simulation.evaluation.selector_latency_benchmark \
+  --output backend/simulation/benchmark_results/<환경>-laya-latency-$(date +%Y%m%d-%H%M%S) \
   --repeats 5 --warmups 1 --deadline 0.15
 
-python -m simulation.evaluation.selector_question_types_benchmark \
-  --output simulation/benchmark_results/<환경>-laya-question-types-$(date +%Y%m%d-%H%M%S) \
+python -m backend.simulation.evaluation.selector_question_types_benchmark \
+  --output backend/simulation/benchmark_results/<환경>-laya-question-types-$(date +%Y%m%d-%H%M%S) \
   --repeats 5 --warmups 1
 
 ```
@@ -431,8 +431,8 @@ Laya 실행:
 
 ```bash
 ROUTE_SELECTOR=laya \
-python -m simulation.evaluation.selector_all_routes_benchmark \
-  --output simulation/benchmark_results/<환경>-laya-all-routes-$(date +%Y%m%d-%H%M%S) \
+python -m backend.simulation.evaluation.selector_all_routes_benchmark \
+  --output backend/simulation/benchmark_results/<환경>-laya-all-routes-$(date +%Y%m%d-%H%M%S) \
   --repeats 5 --warmups 1 --deadline 0.15
 ```
 
@@ -456,8 +456,8 @@ ROUTE_SELECTOR=kev \
 KEV_HOST=http://127.0.0.1:8011 \
 KEV_MODEL=kev-08b \
 KEV_REQUIRE_CUDA=true \
-python -m simulation.evaluation.selector_all_routes_benchmark \
-  --output simulation/benchmark_results/<환경>-kev-08b-all-routes-$(date +%Y%m%d-%H%M%S) \
+python -m backend.simulation.evaluation.selector_all_routes_benchmark \
+  --output backend/simulation/benchmark_results/<환경>-kev-08b-all-routes-$(date +%Y%m%d-%H%M%S) \
   --repeats 5 --warmups 1 --deadline 0.15
 ```
 
@@ -470,8 +470,8 @@ Ollama 실행:
 
 ```bash
 ROUTE_SELECTOR=ollama OLLAMA_MODEL=qwen3:4b \
-python -m simulation.evaluation.selector_all_routes_benchmark \
-  --output simulation/benchmark_results/<환경>-qwen3-4b-all-routes-$(date +%Y%m%d-%H%M%S) \
+python -m backend.simulation.evaluation.selector_all_routes_benchmark \
+  --output backend/simulation/benchmark_results/<환경>-qwen3-4b-all-routes-$(date +%Y%m%d-%H%M%S) \
   --repeats 5 --warmups 1 --deadline 0.15
 ```
 
@@ -592,9 +592,9 @@ export KEV_MODEL=kev-08b
 export KEV_TIMEOUT_SECONDS=60
 export KEV_REQUIRE_CUDA=true
 
-RESULT_DIR="simulation/benchmark_results/pc-rtx4070-kev-0.8b-latency-$(date +%Y%m%d-%H%M%S)"
+RESULT_DIR="backend/simulation/benchmark_results/pc-rtx4070-kev-0.8b-latency-$(date +%Y%m%d-%H%M%S)"
 
-python -m simulation.evaluation.selector_latency_benchmark \
+python -m backend.simulation.evaluation.selector_latency_benchmark \
   --output "$RESULT_DIR" \
   --repeats 5 \
   --warmups 1 \
@@ -604,9 +604,9 @@ python -m simulation.evaluation.selector_latency_benchmark \
 0.8B의 choice·score·noul question type 벤치마크도 같은 서버 설정으로 실행한다.
 
 ```bash
-QUESTION_RESULT_DIR="simulation/benchmark_results/pc-rtx4070-kev-0.8b-question-types-$(date +%Y%m%d-%H%M%S)"
+QUESTION_RESULT_DIR="backend/simulation/benchmark_results/pc-rtx4070-kev-0.8b-question-types-$(date +%Y%m%d-%H%M%S)"
 
-python -m simulation.evaluation.selector_question_types_benchmark \
+python -m backend.simulation.evaluation.selector_question_types_benchmark \
   --output "$QUESTION_RESULT_DIR" \
   --repeats 5 \
   --warmups 1
@@ -615,8 +615,8 @@ python -m simulation.evaluation.selector_question_types_benchmark \
 Jetson에서는 출력 폴더 이름만 다음처럼 변경한다.
 
 ```bash
-RESULT_DIR="simulation/benchmark_results/jetson-orin-kev-0.8b-latency-$(date +%Y%m%d-%H%M%S)"
-QUESTION_RESULT_DIR="simulation/benchmark_results/jetson-orin-kev-0.8b-question-types-$(date +%Y%m%d-%H%M%S)"
+RESULT_DIR="backend/simulation/benchmark_results/jetson-orin-kev-0.8b-latency-$(date +%Y%m%d-%H%M%S)"
+QUESTION_RESULT_DIR="backend/simulation/benchmark_results/jetson-orin-kev-0.8b-question-types-$(date +%Y%m%d-%H%M%S)"
 ```
 
 0.8B 시험이 끝나면 터미널 1에서 `Ctrl+C`로 서버를 종료한 뒤 4B 시험을
@@ -677,9 +677,9 @@ export KEV_MODEL=kev-4b
 export KEV_TIMEOUT_SECONDS=60
 export KEV_REQUIRE_CUDA=true
 
-RESULT_DIR="simulation/benchmark_results/pc-rtx4070-kev-4b-latency-$(date +%Y%m%d-%H%M%S)"
+RESULT_DIR="backend/simulation/benchmark_results/pc-rtx4070-kev-4b-latency-$(date +%Y%m%d-%H%M%S)"
 
-python -m simulation.evaluation.selector_latency_benchmark \
+python -m backend.simulation.evaluation.selector_latency_benchmark \
   --output "$RESULT_DIR" \
   --repeats 5 \
   --warmups 1 \
@@ -689,9 +689,9 @@ python -m simulation.evaluation.selector_latency_benchmark \
 4B의 choice·score·noul question type 벤치마크도 같은 서버 설정으로 실행한다.
 
 ```bash
-QUESTION_RESULT_DIR="simulation/benchmark_results/pc-rtx4070-kev-4b-question-types-$(date +%Y%m%d-%H%M%S)"
+QUESTION_RESULT_DIR="backend/simulation/benchmark_results/pc-rtx4070-kev-4b-question-types-$(date +%Y%m%d-%H%M%S)"
 
-python -m simulation.evaluation.selector_question_types_benchmark \
+python -m backend.simulation.evaluation.selector_question_types_benchmark \
   --output "$QUESTION_RESULT_DIR" \
   --repeats 5 \
   --warmups 1
@@ -935,18 +935,18 @@ Vector RAG는 자연어 장애물 보고, 안전 정책, 운송 규칙, 과거 �
 Ollama를 호출하지 않고 행렬 구조와 Ground Truth를 먼저 확인한다.
 
 ```bash
-python -m simulation.evaluation.v2_benchmark \
-  --matrix simulation/evaluation/route_generation_v2_matrix.json \
+python -m backend.simulation.evaluation.v2_benchmark \
+  --matrix backend/simulation/evaluation/route_generation_v2_matrix.json \
   --check
 ```
 
 최종 비교의 Ollama 3종을 고정 10쌍 × 5회 × 6조건으로 실행한다(총 900회).
 
 ```bash
-python -m simulation.evaluation.v2_benchmark \
-  --matrix simulation/evaluation/route_generation_v2_matrix.json \
+python -m backend.simulation.evaluation.v2_benchmark \
+  --matrix backend/simulation/evaluation/route_generation_v2_matrix.json \
   --model gemma3:12b --model deepseek-coder:6.7b --model phi4:14b \
-  --output "simulation/benchmark_results/pc-v2-aligned-10pairs-$(date +%Y%m%d-%H%M%S)"
+  --output "backend/simulation/benchmark_results/pc-v2-aligned-10pairs-$(date +%Y%m%d-%H%M%S)"
 ```
 
 V2는 Jetson에서 실행하지 않는다. PC 결과만 V2 비교 자료로 사용한다.
@@ -959,12 +959,12 @@ V2는 Jetson에서 실행하지 않는다. PC 결과만 V2 비교 자료로 사�
 
 ```bash
 for budget in 1024 2048; do
-  python -m simulation.evaluation.v2_benchmark \
-    --matrix simulation/evaluation/route_generation_v2_matrix.json \
+  python -m backend.simulation.evaluation.v2_benchmark \
+    --matrix backend/simulation/evaluation/route_generation_v2_matrix.json \
     --only cot_no_rag --only cot_graph_retrieval \
     --model gemma3:12b --model deepseek-coder:6.7b --model phi4:14b \
     --num-predict "$budget" \
-    --output "simulation/benchmark_results/pc-v2-cot-budget-${budget}-$(date +%Y%m%d-%H%M%S)" || break
+    --output "backend/simulation/benchmark_results/pc-v2-cot-budget-${budget}-$(date +%Y%m%d-%H%M%S)" || break
 done
 ```
 
@@ -1006,9 +1006,9 @@ V2 최상위 폴더에는 `matrix_manifest.json`, 파생 설정 6개와 조건�
 두 조건을 통합 비교한다.
 
 ```bash
-V2_DIR=simulation/benchmark_results/<pc-v2-결과폴더>
+V2_DIR=backend/simulation/benchmark_results/<pc-v2-결과폴더>
 
-python -m simulation.evaluation.compare_strategy_results \
+python -m backend.simulation.evaluation.compare_strategy_results \
   --generation DirectNoRAG="$V2_DIR/direct_no_rag" \
   --generation DirectGraphRetrieval="$V2_DIR/direct_graph_retrieval" \
   --generation CoTNoRAG="$V2_DIR/cot_no_rag" \
@@ -1062,12 +1062,12 @@ configs/*.json 및 manifest의 settings.iterative_policy로 새 반복 규칙을
 
 ```bash
 ROUTE_SELECTOR=laya \
-python -m simulation.evaluation.selector_iterative_route_benchmark \
+python -m backend.simulation.evaluation.selector_iterative_route_benchmark \
   --graph routes/test_int.geojson \
   --case-mode random \
   --candidate-scope neighbors \
   --context-mode full_graph_only \
-  --output simulation/benchmark_results/laya-full-graph-$(date +%Y%m%d-%H%M%S) \
+  --output backend/simulation/benchmark_results/laya-full-graph-$(date +%Y%m%d-%H%M%S) \
   --repeats 5 --warmups 1 --deadline 0.15 --case-count 5
 ```
 
@@ -1090,7 +1090,7 @@ selector와 model 이름을 포함한 폴더가 자동 생성된다.
 
 ```bash
 ROUTE_SELECTOR=laya \
-python -m simulation.evaluation.selector_iterative_route_benchmark \
+python -m backend.simulation.evaluation.selector_iterative_route_benchmark \
   --graph routes/test_int.geojson \
   --case-mode random \
   --route-seed <첫-실행-seed> \
@@ -1104,7 +1104,7 @@ Kev는 서버의 checkpoint와 `KEV_MODEL`을 일치시킨다.
 ```bash
 # Kev-0.8B 서버 실행 중
 ROUTE_SELECTOR=kev KEV_HOST=http://127.0.0.1:8011 KEV_MODEL=kev-08b \
-python -m simulation.evaluation.selector_iterative_route_benchmark \
+python -m backend.simulation.evaluation.selector_iterative_route_benchmark \
   --graph routes/test_int.geojson --case-mode random \
   --route-seed <첫-실행-seed> \
   --candidate-scope neighbors --context-mode neighbor_context \
@@ -1112,7 +1112,7 @@ python -m simulation.evaluation.selector_iterative_route_benchmark \
 
 # 서버를 Kev-4B checkpoint로 교체한 뒤 실행
 ROUTE_SELECTOR=kev KEV_HOST=http://127.0.0.1:8011 KEV_MODEL=kev-4b \
-python -m simulation.evaluation.selector_iterative_route_benchmark \
+python -m backend.simulation.evaluation.selector_iterative_route_benchmark \
   --graph routes/test_int.geojson --case-mode random \
   --route-seed <첫-실행-seed> \
   --candidate-scope neighbors --context-mode neighbor_context \
@@ -1124,7 +1124,7 @@ Ollama 단일 모델은 환경 변수 방식으로도 실행할 수 있다.
 ```bash
 ROUTE_SELECTOR=ollama OLLAMA_MODEL=qwen3:4b \
 OLLAMA_HOST=http://127.0.0.1:11434 \
-python -m simulation.evaluation.selector_iterative_route_benchmark \
+python -m backend.simulation.evaluation.selector_iterative_route_benchmark \
   --graph routes/test_int.geojson --case-mode random \
   --route-seed <첫-실행-seed> \
   --candidate-scope neighbors --context-mode neighbor_context \
@@ -1132,37 +1132,37 @@ python -m simulation.evaluation.selector_iterative_route_benchmark \
 ```
 
 Ollama 여러 모델의 목록과 공통·모델별 파라미터는
-`simulation/evaluation/selector_iterative_benchmark.json`에서 관리한다.
+`backend/simulation/evaluation/selector_iterative_benchmark.json`에서 관리한다.
 `ollama_defaults`에는 공통 host, timeout, keep-alive, temperature, seed,
 `num_ctx`, `num_predict`를 두고, 각 `models` 항목은 `enabled`, `think`,
 `options`로 필요한 값만 덮어쓴다. 실행 전에는 Ollama 요청 없이 JSON, Graph 파일,
 Graph SHA-256과 선택 모델을 검사한다.
 
 ```bash
-python -m simulation.evaluation.selector_iterative_route_benchmark \
-  --config simulation/evaluation/selector_iterative_benchmark.json \
+python -m backend.simulation.evaluation.selector_iterative_route_benchmark \
+  --config backend/simulation/evaluation/selector_iterative_benchmark.json \
   --check
 ```
 
 한 모델만 실행한다.
 
 ```bash
-python -m simulation.evaluation.selector_iterative_route_benchmark \
-  --config simulation/evaluation/selector_iterative_benchmark.json \
+python -m backend.simulation.evaluation.selector_iterative_route_benchmark \
+  --config backend/simulation/evaluation/selector_iterative_benchmark.json \
   --model qwen3:4b \
-  --output simulation/benchmark_results/pc-qwen3-4b-iterative-$(date +%Y%m%d-%H%M%S)
+  --output backend/simulation/benchmark_results/pc-qwen3-4b-iterative-$(date +%Y%m%d-%H%M%S)
 ```
 
 여러 모델만 골라 같은 Graph, 경로, 반복 조건으로 순서대로 실행한다. `--model`은
 반복해서 사용한다.
 
 ```bash
-python -m simulation.evaluation.selector_iterative_route_benchmark \
-  --config simulation/evaluation/selector_iterative_benchmark.json \
+python -m backend.simulation.evaluation.selector_iterative_route_benchmark \
+  --config backend/simulation/evaluation/selector_iterative_benchmark.json \
   --model qwen3:0.6b \
   --model qwen3:4b \
   --model phi4:14b \
-  --output simulation/benchmark_results/pc-selected-models-$(date +%Y%m%d-%H%M%S)
+  --output backend/simulation/benchmark_results/pc-selected-models-$(date +%Y%m%d-%H%M%S)
 ```
 
 `--model`을 생략하면 JSON에서 `enabled: true`인 모델을 모두 실행한다. 각 모델 결과는
@@ -1178,7 +1178,7 @@ case, seed, 반복 횟수, Context 조건을 JSON 값으로 통일하므로 같�
 
 ```bash
 ROUTE_SELECTOR=<laya|kev|ollama> \
-python -m simulation.evaluation.selector_iterative_route_benchmark \
+python -m backend.simulation.evaluation.selector_iterative_route_benchmark \
   --graph routes/test_int.geojson \
   --case-mode all-pairs \
   --candidate-scope neighbors \

@@ -212,7 +212,7 @@ class ScenarioManager:
             if self._status["state"] == "stopping":
                 raise ValueError(self._status["message"])
             if mode == "simulation":
-                from simulation.scenarios import prepare
+                from backend.simulation.scenarios import prepare
 
                 touched = True
                 prepare(specs, nodes)

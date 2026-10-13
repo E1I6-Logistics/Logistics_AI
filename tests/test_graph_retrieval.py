@@ -2,7 +2,7 @@
 
 import unittest
 
-from simulation.evaluation.graph_retrieval import ground_truth_coverage, retrieve_path_relevant_graph
+from backend.simulation.evaluation.graph_retrieval import ground_truth_coverage, retrieve_path_relevant_graph
 
 
 class GraphRetrievalTest(unittest.TestCase):
