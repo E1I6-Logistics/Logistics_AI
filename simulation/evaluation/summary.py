@@ -22,10 +22,7 @@ def _metric_value(record: dict, field: str):
     # 유효 경로 여부와 응답 시간을 사용해 0.15초 충족 여부를 재계산한다.
     if field == "meets_realtime_deadline" and field not in metrics:
         deadline = metrics.get("realtime_deadline_seconds", 0.15)
-        return (
-            bool(metrics.get("valid_path"))
-            and metrics.get("response_time_seconds", float("inf")) <= deadline
-        )
+        return bool(metrics.get("valid_path")) and metrics.get("response_time_seconds", float("inf")) <= deadline
     return metrics.get(field)
 
 
@@ -38,12 +35,8 @@ def summarize(records: list[dict]) -> dict:
     """실행 기록을 동일한 실험 조건끼리 묶어 비율과 평균을 계산한다."""
     # metrics가 없는 예전 JSONL 행은 현재 지표 구조로 비교할 수 없으므로
     # 집계에서는 제외하되, 몇 건을 제외했는지는 최종 결과에 남긴다.
-    legacy_record_count = sum(
-        not isinstance(record.get("metrics"), dict) for record in records
-    )
-    records = [
-        record for record in records if isinstance(record.get("metrics"), dict)
-    ]
+    legacy_record_count = sum(not isinstance(record.get("metrics"), dict) for record in records)
+    records = [record for record in records if isinstance(record.get("metrics"), dict)]
     groups: dict[tuple, list[dict]] = defaultdict(list)
     for record in records:
         # 모델만 같아도 프롬프트, 입력 그래프, 실시간 기준이 다르면 별도 실험이다.
@@ -69,36 +62,28 @@ def summarize(records: list[dict]) -> dict:
             if item["metrics"].get("absolute_distance_error") is not None
         ]
         # 성공률 계열은 0~1 값이고, 시간·입력 크기 계열은 산술 평균이다.
-        summaries.append({
-            "provider": provider,
-            "model": model,
-            "prompt_strategy": prompt_strategy,
-            "route_graph_file": graph_file,
-            "run_count": len(items),
-            "json_response_success_rate": _rate(items, "json_response_success"),
-            "valid_path_rate": _rate(items, "valid_path"),
-            "shortest_path_match_rate": _rate(items, "shortest_path_match"),
-            "shortest_distance_match_rate": _rate(items, "shortest_distance_match"),
-            "mean_absolute_distance_error": (
-                mean(distance_errors) if distance_errors else None
-            ),
-            "mean_response_time_seconds": mean(
-                item["metrics"]["response_time_seconds"] for item in items
-            ),
-            "realtime_deadline_seconds": realtime_deadline,
-            "realtime_deadline_success_rate": _rate(
-                items, "meets_realtime_deadline"
-            ),
-            "timeout_rate": _rate(items, "timed_out"),
-            "first_attempt_success_rate": _rate(items, "first_attempt_success"),
-            "retry_success_rate": _rate(items, "retry_success"),
-            "mean_input_character_count": mean(
-                item["metrics"]["input_character_count"] for item in items
-            ),
-            "mean_estimated_input_tokens": mean(
-                item["metrics"]["estimated_input_tokens"] for item in items
-            ),
-        })
+        summaries.append(
+            {
+                "provider": provider,
+                "model": model,
+                "prompt_strategy": prompt_strategy,
+                "route_graph_file": graph_file,
+                "run_count": len(items),
+                "json_response_success_rate": _rate(items, "json_response_success"),
+                "valid_path_rate": _rate(items, "valid_path"),
+                "shortest_path_match_rate": _rate(items, "shortest_path_match"),
+                "shortest_distance_match_rate": _rate(items, "shortest_distance_match"),
+                "mean_absolute_distance_error": (mean(distance_errors) if distance_errors else None),
+                "mean_response_time_seconds": mean(item["metrics"]["response_time_seconds"] for item in items),
+                "realtime_deadline_seconds": realtime_deadline,
+                "realtime_deadline_success_rate": _rate(items, "meets_realtime_deadline"),
+                "timeout_rate": _rate(items, "timed_out"),
+                "first_attempt_success_rate": _rate(items, "first_attempt_success"),
+                "retry_success_rate": _rate(items, "retry_success"),
+                "mean_input_character_count": mean(item["metrics"]["input_character_count"] for item in items),
+                "mean_estimated_input_tokens": mean(item["metrics"]["estimated_input_tokens"] for item in items),
+            }
+        )
 
     # generated_at은 집계 파일이 언제 갱신됐는지 확인하기 위한 UTC 시각이다.
     return {
@@ -112,16 +97,9 @@ def summarize(records: list[dict]) -> dict:
 def write_summary(result_path: Path, output_path: Path) -> dict:
     """JSONL 파일을 읽고 집계 결과를 JSON 파일로 저장한다."""
     # 빈 줄은 JSONL 레코드가 아니므로 건너뛴다.
-    records = [
-        json.loads(line)
-        for line in result_path.read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    ]
+    records = [json.loads(line) for line in result_path.read_text(encoding="utf-8").splitlines() if line.strip()]
     summary = summarize(records)
-    output_path.write_text(
-        json.dumps(summary, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
+    output_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return summary
 
 
@@ -129,16 +107,8 @@ def main() -> int:
     """기본 결과 파일을 집계하거나 CLI에서 지정한 경로를 처리한다."""
     simulation_dir = Path(__file__).resolve().parents[1]
     parser = argparse.ArgumentParser(description="LLM 경로 비교 결과를 집계합니다.")
-    parser.add_argument(
-        "--input",
-        type=Path,
-        default=simulation_dir / "llm_route_comparisons.jsonl",
-    )
-    parser.add_argument(
-        "--output",
-        type=Path,
-        default=simulation_dir / "llm_route_summary.json",
-    )
+    parser.add_argument("--input", type=Path, default=simulation_dir / "llm_route_comparisons.jsonl")
+    parser.add_argument("--output", type=Path, default=simulation_dir / "llm_route_summary.json")
     args = parser.parse_args()
     # 파일 저장 후 같은 내용을 터미널에도 출력해 즉시 확인할 수 있게 한다.
     summary = write_summary(args.input, args.output)

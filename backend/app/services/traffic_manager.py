@@ -29,8 +29,8 @@ class SegmentPermission:
 
 
 class TrafficManager:
-    def __init__(self, robots: dict[str, dict[str, Any]], reservations=None, *,
-                 speed_mps: float, safety_margin: float):
+    # TrafficManager의 초기 상태를 설정한다.
+    def __init__(self, robots: dict[str, dict[str, Any]], reservations=None, *, speed_mps: float, safety_margin: float):
         if not all(math.isfinite(v) and v > 0 for v in (speed_mps, safety_margin)):
             raise ValueError("속도와 안전 여유는 유한한 양수여야 합니다.")
         self._robots = robots
@@ -45,18 +45,22 @@ class TrafficManager:
         # 연결이 끊긴 주행 로봇의 남은 경로. 재연결해 실제 점유를 확인할 때까지 다른 로봇에 양보하지 않는다.
         self._protected_resources = {}
 
+    # 로봇이 점유 중인 자원을 보호 목록에 넣는다.
     def protect_resources(self, robot_id, resources):
         with self.lock:
             self._protected_resources[robot_id] = set(resources)
 
+    # 로봇의 보호 자원 목록을 해제한다.
     def clear_protected_resources(self, robot_id):
         with self.lock:
             self._protected_resources.pop(robot_id, None)
 
+    # 다른 로봇이 자원을 보호 중인지 확인한다.
     def is_resource_protected(self, robot_id, resource):
         with self.lock:
-            return any(owner != robot_id and resource in resources
-                       for owner, resources in self._protected_resources.items())
+            return any(
+                owner != robot_id and resource in resources for owner, resources in self._protected_resources.items()
+            )
 
     def reset_after_stop(self):
         """전체 실행 종료 및 점유 보존이 확인된 상태에서 계획만 초기화한다."""
@@ -71,10 +75,10 @@ class TrafficManager:
             self._protected_resources.clear()
             self._request_sequence = 0
 
+    # 진행 중인 주행 요청이 있는지 확인한다.
     def has_active_requests(self) -> bool:
         with self.lock:
-            return bool(self._concession) or any(
-                robot["goal_node"] is not None for robot in self._robots.values())
+            return bool(self._concession) or any(robot["goal_node"] is not None for robot in self._robots.values())
 
     def request_navigation_after_stop(self, robot_id, goal_node, *, now, graph, required_path=None):
         """기존 실행 정지와 점유 갱신 후 새 요청을 접수하고 예약한다."""
@@ -95,7 +99,8 @@ class TrafficManager:
                 if not fixed or fixed[0] != robot["occupied_node"] or fixed[-1] != goal_node:
                     raise ValueError("LLM 경로의 출발·목적지와 로봇 상태가 다릅니다.")
                 if any(n not in planner.nodes for n in fixed) or any(
-                        not any(n == b for n, _ in planner.edges[a]) for a, b in zip(fixed, fixed[1:])):
+                    not any(n == b for n, _ in planner.edges[a]) for a, b in zip(fixed, fixed[1:])
+                ):
                     raise ValueError("LLM 경로에 존재하지 않는 노드·유향 간선이 있습니다.")
                 # 모델 결과의 방문 제한을 예약 경계에서도 다시 확인한다.
                 steps = list(zip(fixed, fixed[1:]))
@@ -127,6 +132,7 @@ class TrafficManager:
             self._release_schedule(robot)
             robot["route"] = None
 
+    # 정지 후 경로 예약이 가능할 때까지 대기한다.
     def wait_for_reservation_after_stop(self, robot_id):
         with self.lock:
             self._wait_for_reservation(self._robots[robot_id])
@@ -156,6 +162,7 @@ class TrafficManager:
             if index == len(route["node_ids"]) - 1:
                 self._finish_route(robot)
 
+    # 로봇이 간선에 진입한 점유 상태를 확정한다.
     def confirm_edge_occupancy(self, robot_id):
         with self.lock:
             robot = self._robots[robot_id]
@@ -176,15 +183,23 @@ class TrafficManager:
                 return False
             return True
 
+    # 자원이 다른 로봇에 의해 막혔는지 확인한다.
     def is_resource_blocked(self, robot_id, resource, *, now, graph) -> bool:
         with self.lock:
             self._validate_time(now)
-            return self.is_resource_protected(robot_id, resource) or any(
-                other["robot_id"] != robot_id and occupied_resource(other, graph) == resource
-                       for other in self._robots.values()) or any(
-                row.robot_id != robot_id and row.resource == resource and row.end > now
-                for row in self._reservations.snapshot())
+            return (
+                self.is_resource_protected(robot_id, resource)
+                or any(
+                    other["robot_id"] != robot_id and occupied_resource(other, graph) == resource
+                    for other in self._robots.values()
+                )
+                or any(
+                    row.robot_id != robot_id and row.resource == resource and row.end > now
+                    for row in self._reservations.snapshot()
+                )
+            )
 
+    # 예약 계산에 사용할 시간을 검증한다.
     @staticmethod
     def _validate_time(value):
         if not math.isfinite(value) or value < 0:
@@ -210,33 +225,41 @@ class TrafficManager:
                 raise ValueError("경로 진행 인덱스가 올바르지 않습니다.")
             resource = edge_key(nodes[index], nodes[index + 1])
             target = node_key(nodes[index + 1])
-            rows = [row for row in self._reservations.snapshot()
-                    if row.robot_id == robot_id and row.navigation_id == robot["navigation_id"]
-                    and row.segment_index == index]
+            rows = [
+                row
+                for row in self._reservations.snapshot()
+                if row.robot_id == robot_id
+                and row.navigation_id == robot["navigation_id"]
+                and row.segment_index == index
+            ]
             edge = next((row for row in rows if row.resource == resource), None)
             destination = next((row for row in rows if row.resource == target), None)
             if edge is None or destination is None:
                 return SegmentPermission("replan", "missing_reservation")
             if now <= route["segment_departures"][index]:
                 return SegmentPermission("waiting", "departure_time")
-            if any(other is not robot and occupied_resource(other, graph) in (resource, target)
-                   for other in self._robots.values()):
+            if any(
+                other is not robot and occupied_resource(other, graph) in (resource, target)
+                for other in self._robots.values()
+            ):
                 return SegmentPermission("replan", "occupied")
-            if (self.is_resource_protected(robot_id, resource)
-                    or self.is_resource_protected(robot_id, target)):
+            if self.is_resource_protected(robot_id, resource) or self.is_resource_protected(robot_id, target):
                 return SegmentPermission("replan", "offline_robot_route")
-            if (expected_arrival_at + self.safety_margin > edge.end + 1e-6
-                    or expected_arrival_at + self.safety_margin > destination.end + 1e-6):
+            if (
+                expected_arrival_at + self.safety_margin > edge.end + 1e-6
+                or expected_arrival_at + self.safety_margin > destination.end + 1e-6
+            ):
                 return SegmentPermission("replan", "schedule_overrun")
             return SegmentPermission("allowed", "reserved")
 
+    # 로봇의 기존 예약 일정을 해제한다.
     def _release_schedule(self, robot):
         # 호출자는 실행 종료/정지를 확인해야 한다. 위치·점유는 유지한다.
-        requests = {row.navigation_id for row in self._reservations.snapshot()
-                    if row.robot_id == robot["robot_id"]}
+        requests = {row.navigation_id for row in self._reservations.snapshot() if row.robot_id == robot["robot_id"]}
         for navigation_id in requests:
             self._reservations.release_request(robot["robot_id"], navigation_id)
 
+    # 예약을 기다리는 로봇을 대기열에 넣는다.
     def _wait_for_reservation(self, robot):
         robot["status"] = "WAITING"
         if robot["route"] is not None:
@@ -245,9 +268,9 @@ class TrafficManager:
         self._release_schedule(robot)
         self._pending.setdefault(robot["robot_id"], None)
 
+    # 로봇의 경로 예약을 시도한다.
     def _try_schedule(self, robot, now, graph, planner):
-        others = [row for row in self._reservations.snapshot()
-                  if row.robot_id != robot["robot_id"]]
+        others = [row for row in self._reservations.snapshot() if row.robot_id != robot["robot_id"]]
         blocked = {}
         for row in others:
             blocked.setdefault(row.resource, []).append((row.start, row.end))
@@ -262,17 +285,29 @@ class TrafficManager:
             route = other["route"]
             scheduled = route is not None and route.get("departure_at") is not None
             # 예정 시각이 지나도 실제 점유가 남아 있으면 해제하지 않는다.
-            until = max((row.end for row in others
-                         if row.robot_id == other["robot_id"] and row.resource == resource
-                         and row.start <= now < row.end), default=math.inf) if scheduled else math.inf
-            blocked.setdefault(resource, []).append((max(0., now - self.safety_margin), until))
+            until = (
+                max(
+                    (
+                        row.end
+                        for row in others
+                        if row.robot_id == other["robot_id"] and row.resource == resource and row.start <= now < row.end
+                    ),
+                    default=math.inf,
+                )
+                if scheduled
+                else math.inf
+            )
+            blocked.setdefault(resource, []).append((max(0.0, now - self.safety_margin), until))
 
         resource = occupied_resource(robot, graph)
         plan = planner.plan_timed(
             self._concession.get(robot["robot_id"], {}).get("node", robot["goal_node"]),
-            (robot["x"], robot["y"]), robot["occupied_node"],
+            (robot["x"], robot["y"]),
+            robot["occupied_node"],
             resource[1:] if resource[0] == "edge" else None,
-            blocked=blocked, now=now, speed_mps=self.speed_mps,
+            blocked=blocked,
+            now=now,
+            speed_mps=self.speed_mps,
             safety_margin=self.safety_margin,
             required_path=self._required_paths.get(robot["robot_id"]),
         )
@@ -284,14 +319,22 @@ class TrafficManager:
         for start, end in zip(node_ids, node_ids[1:]):
             ax, ay = planner.nodes[start]
             bx, by = planner.nodes[end]
-            waypoint_yaws.append(math.atan2(by - ay, bx - ax)
-                                 if math.hypot(bx - ax, by - ay) > 1e-9 else waypoint_yaws[-1])
+            waypoint_yaws.append(
+                math.atan2(by - ay, bx - ax) if math.hypot(bx - ax, by - ay) > 1e-9 else waypoint_yaws[-1]
+            )
         departure = departures[0] if departures else now
         batch = build_schedule(
-            robot["robot_id"], robot["navigation_id"], node_ids, planner.nodes,
-            (robot["x"], robot["y"]), robot["occupied_node"], now=now,
-            departure_at=departure, speed_mps=self.speed_mps,
-            safety_margin=self.safety_margin, segment_departures=departures,
+            robot["robot_id"],
+            robot["navigation_id"],
+            node_ids,
+            planner.nodes,
+            (robot["x"], robot["y"]),
+            robot["occupied_node"],
+            now=now,
+            departure_at=departure,
+            speed_mps=self.speed_mps,
+            safety_margin=self.safety_margin,
+            segment_departures=departures,
         )
         if not self._reservations.replace_request(robot["robot_id"], robot["navigation_id"], batch):
             return False
@@ -300,8 +343,12 @@ class TrafficManager:
             self._finish_route(robot)
         else:
             robot["route"] = {
-                "node_ids": node_ids, "edge_ids": edge_ids, "waypoint_yaws": waypoint_yaws,
-                "segment_index": 0, "phase": "ready", "departure_at": departure,
+                "node_ids": node_ids,
+                "edge_ids": edge_ids,
+                "waypoint_yaws": waypoint_yaws,
+                "segment_index": 0,
+                "phase": "ready",
+                "departure_at": departure,
                 "segment_departures": departures,
                 "route_source": "llm" if robot["robot_id"] in self._required_paths else "algorithm",
             }
@@ -309,6 +356,7 @@ class TrafficManager:
         return True
 
     # 대피 도착은 원래 명령의 완료가 아니므로, 실제 점유를 유지
+    # 도착한 로봇의 경로 예약을 완료 처리한다.
     def _finish_route(self, robot):
         robot["route"] = None
         self._release_schedule(robot)
@@ -321,7 +369,8 @@ class TrafficManager:
             robot["request_order"] = None
             robot["status"] = "IDLE"
 
-    #양보 후보 검증은 실제 로봇/공용 예약표를 변경하지 않음
+    # 양보 후보 검증은 실제 로봇/공용 예약표를 변경하지 않음
+    # 경로 계획에 사용할 로봇 상태 사본을 만든다.
     def _planning_copy(self):
         trial = copy(self)
         trial.lock = RLock()
@@ -333,19 +382,31 @@ class TrafficManager:
         trial._reservations = ReservationTable()
         rows = self._reservations.snapshot()
         for robot_id, navigation_id in {(r.robot_id, r.navigation_id) for r in rows}:
-            trial._reservations.try_commit(robot_id, navigation_id, tuple(
-                r for r in rows if (r.robot_id, r.navigation_id) == (robot_id, navigation_id)))
+            trial._reservations.try_commit(
+                robot_id,
+                navigation_id,
+                tuple(r for r in rows if (r.robot_id, r.navigation_id) == (robot_id, navigation_id)),
+            )
         return trial
 
     # 진행 중인 양보는 완료/취소까지 유지하여 왕복 양보를 방지
+    # 로봇 간 교착 상태를 해소한다.
     def _resolve_deadlock(self, now, graph, planner):
         if self._concession or not self._pending:
             return
         # LLM 경로는 양보 경로로 바꾸지 않고 동일 경로의 예약을 기다린다.
-        waiting = sorted((rid for rid in self._pending if rid not in self._required_paths), key=lambda rid: self._robots[rid]["request_order"])
-        parked = [rid for rid, robot in self._robots.items()
-                  if robot["status"] == "IDLE" and robot["goal_node"] is None
-                  and robot["route"] is None and not robot["stop_requested"]]
+        waiting = sorted(
+            (rid for rid in self._pending if rid not in self._required_paths),
+            key=lambda rid: self._robots[rid]["request_order"],
+        )
+        parked = [
+            rid
+            for rid, robot in self._robots.items()
+            if robot["status"] == "IDLE"
+            and robot["goal_node"] is None
+            and robot["route"] is None
+            and not robot["stop_requested"]
+        ]
         occupied = {rid: occupied_resource(self._robots[rid], graph) for rid in waiting}
         dependencies = {}
         for rid in waiting:
@@ -365,6 +426,7 @@ class TrafficManager:
             resources.update(edge_key(a, b) for a, b in zip(path, path[1:]))
             dependencies[rid] = {other for other in waiting if other != rid and occupied[other] in resources}
 
+        # 목적지에 도달할 수 있는지 확인한다.
         def reachable(start):
             seen, todo = set(), list(dependencies[start])
             while todo:
@@ -376,8 +438,7 @@ class TrafficManager:
 
         reach = {rid: reachable(rid) for rid in waiting}
         for priority in waiting:
-            cycle = [rid for rid in waiting if rid != priority
-                     and rid in reach[priority] and priority in reach[rid]]
+            cycle = [rid for rid in waiting if rid != priority and rid in reach[priority] and priority in reach[rid]]
             # 이동 요청이 없어도 이 로봇의 점유를 제외하면 길이 열리는지 검사
             blockers = []
             for rid in parked:
@@ -399,7 +460,8 @@ class TrafficManager:
                         continue
                     trial = self._planning_copy()
                     trial._concession[concession] = {
-                        "node": node, "priority": priority,
+                        "node": node,
+                        "priority": priority,
                         "navigation_id": self._robots[priority]["navigation_id"],
                     }
                     mover = trial._robots[concession]
@@ -449,7 +511,9 @@ class TrafficManager:
                             continue
                     points = [(robot["x"], robot["y"])] + [planner.nodes[n] for n in route["node_ids"][1:]]
                     distance = sum(math.dist(a, b) for a, b in zip(points, points[1:]))
-                    candidates.append((distance, -(robot["request_order"] or 0), node, concession, trial._concession[concession]))
+                    candidates.append(
+                        (distance, -(robot["request_order"] or 0), node, concession, trial._concession[concession])
+                    )
             for _, _, _, concession, maneuver in sorted(candidates):
                 robot = self._robots[concession]
                 previous_navigation = robot["navigation_id"]
@@ -462,6 +526,7 @@ class TrafficManager:
                 self._concession.pop(concession)
                 robot["navigation_id"] = previous_navigation
 
+    # 대기 중인 로봇의 경로 예약을 다시 시도한다.
     def _retry_waiting(self, now, graph, planner):
         for rid, maneuver in list(self._concession.items()):
             leader = self._robots[maneuver["priority"]]

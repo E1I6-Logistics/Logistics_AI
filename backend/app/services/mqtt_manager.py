@@ -9,6 +9,7 @@ from ..config import MQTT_BROKER_IP, MQTT_BROKER_PORT
 
 
 class MQTTManager:
+    # MQTTManager의 초기 상태를 설정한다.
     def __init__(self):
         self.broker_ip = MQTT_BROKER_IP
         self.broker_port = MQTT_BROKER_PORT
@@ -37,18 +38,25 @@ class MQTTManager:
     # MQTT 시작
     # =========================================================
 
+    # 관련을 시작한다.
     def start(self):
         if self.running:
             return
 
-        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] [INFO] [MQTT] "
-              f"브로커 연결 시도 address={self.broker_ip}:{self.broker_port}", flush=True)
+        print(
+            f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] [INFO] [MQTT] "
+            f"브로커 연결 시도 address={self.broker_ip}:{self.broker_port}",
+            flush=True,
+        )
         try:
             self.client.connect(self.broker_ip, self.broker_port, 60)
         except Exception as exc:
-            print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] [ERROR] [MQTT] "
-                  f"브로커 연결 중 오류 address={self.broker_ip}:{self.broker_port} "
-                  f"error_type={type(exc).__name__} detail={exc}", flush=True)
+            print(
+                f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] [ERROR] [MQTT] "
+                f"브로커 연결 중 오류 address={self.broker_ip}:{self.broker_port} "
+                f"error_type={type(exc).__name__} detail={exc}",
+                flush=True,
+            )
             raise
 
         self.client.loop_start()
@@ -61,6 +69,7 @@ class MQTTManager:
     # MQTT 종료
     # =========================================================
 
+    # 관련을 정지한다.
     def stop(self):
         if not self.running:
             return
@@ -78,13 +87,20 @@ class MQTTManager:
     # Broker 연결 Callback
     # =========================================================
 
+    # 연결 이벤트를 처리한다.
     def _on_connect(self, client, userdata, flags, rc):
         if rc != 0:
-            print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] [ERROR] [MQTT] "
-                  f"브로커 연결 실패 address={self.broker_ip}:{self.broker_port} code={rc}", flush=True)
+            print(
+                f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] [ERROR] [MQTT] "
+                f"브로커 연결 실패 address={self.broker_ip}:{self.broker_port} code={rc}",
+                flush=True,
+            )
             return
-        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] [INFO] [MQTT] "
-              f"브로커 연결 완료 address={self.broker_ip}:{self.broker_port}", flush=True)
+        print(
+            f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] [INFO] [MQTT] "
+            f"브로커 연결 완료 address={self.broker_ip}:{self.broker_port}",
+            flush=True,
+        )
 
         client.subscribe("+/status")
         client.subscribe("+/ack")
@@ -97,6 +113,7 @@ class MQTTManager:
     # 메시지 수신
     # =========================================================
 
+    # message 이벤트를 처리한다.
     def _on_message(self, client, userdata, msg):
         topic_parts = msg.topic.split("/")
 
@@ -110,9 +127,12 @@ class MQTTManager:
             data = json.loads(msg.payload.decode())
 
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-            print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] [ERROR] [MQTT] "
-                  f"메시지 해석 실패 omx={omx_id} topic={msg.topic} "
-                  f"error_type={type(exc).__name__} detail={exc}", flush=True)
+            print(
+                f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] [ERROR] [MQTT] "
+                f"메시지 해석 실패 omx={omx_id} topic={msg.topic} "
+                f"error_type={type(exc).__name__} detail={exc}",
+                flush=True,
+            )
             return
 
         # =============================================
@@ -127,8 +147,7 @@ class MQTTManager:
 
             self.omx_devices[omx_id] = OMX(omx_id=omx_id, mqtt_client=self.client)
 
-            print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] [INFO] [MQTT] New OMX discovered: "
-                  f"{omx_id}", flush=True)
+            print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] [INFO] [MQTT] New OMX discovered: " f"{omx_id}", flush=True)
 
         omx = self.omx_devices[omx_id]
 
@@ -158,20 +177,23 @@ class MQTTManager:
                     self._canceled_jobs.discard(key)
                     callback = None
                     if canceled:
-                        same_job_still_pending = any(
-                            row[1] == key[1] for row in self._pending_jobs
-                        )
+                        same_job_still_pending = any(row[1] == key[1] for row in self._pending_jobs)
                         if not same_job_still_pending:
                             callback = self._cancel_callbacks.pop(key[1], None)
                 if callback is not None:
                     callback()
                 if pending and not canceled and self.result_callback is not None:
-                    self.result_callback(omx, {"job_id": key[1], "success": False,
-                                               "message": "OMX ACK rejected"})
+                    self.result_callback(omx, {"job_id": key[1], "success": False, "message": "OMX ACK rejected"})
 
         elif message_type == "progress":
             omx.update_progress(data)
-            print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] [INFO] [MQTT] PROGRESS: " f"{omx_id} / " f"{omx.current_count}/" f"{omx.total_count}", flush=True)
+            print(
+                f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] [INFO] [MQTT] PROGRESS: "
+                f"{omx_id} / "
+                f"{omx.current_count}/"
+                f"{omx.total_count}",
+                flush=True,
+            )
 
         elif message_type == "result":
             omx.update_result(data)
@@ -184,9 +206,7 @@ class MQTTManager:
                 self._canceled_jobs.discard(key)
                 callback = None
                 if canceled:
-                    same_job_still_pending = any(
-                        row[1] == key[1] for row in self._pending_jobs
-                    )
+                    same_job_still_pending = any(row[1] == key[1] for row in self._pending_jobs)
                     if not same_job_still_pending:
                         callback = self._cancel_callbacks.pop(key[1], None)
             if callback is not None:
@@ -194,13 +214,17 @@ class MQTTManager:
             if pending and not canceled and self.result_callback is not None:
                 self.result_callback(omx, data)
             elif not pending or canceled:
-                print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] [WARN] [MQTT] ignored duplicate/stale Result: "
-                      f"omx={omx_id} job_id={key[1]}", flush=True)
+                print(
+                    f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] [WARN] [MQTT] ignored duplicate/stale Result: "
+                    f"omx={omx_id} job_id={key[1]}",
+                    flush=True,
+                )
 
     # =========================================================
     # OMX 작업 명령
     # =========================================================
 
+    # 작업을 전송한다.
     def send_job(self, omx_id, job_id, items):
         omx = self.get_omx(omx_id)
 
@@ -230,11 +254,15 @@ class MQTTManager:
             if active and callback is not None:
                 self._cancel_callbacks[job_id] = callback
         if active:
-            print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] [WARN] [MQTT] FMS job invalidated "
-                  f"job_id={job_id} omx={[key[0] for key in active]} "
-                  "waiting for OMX terminal message", flush=True)
+            print(
+                f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] [WARN] [MQTT] FMS job invalidated "
+                f"job_id={job_id} omx={[key[0] for key in active]} "
+                "waiting for OMX terminal message",
+                flush=True,
+            )
         return not active
 
+    # 활성 작업 여부를 확인한다.
     def has_active_job(self, job_id):
         with self._pending_lock:
             return any(key[1] == job_id for key in self._pending_jobs)
@@ -243,9 +271,11 @@ class MQTTManager:
     # OMX 조회
     # =========================================================
 
+    # OMX를 조회한다.
     def get_omx(self, omx_id):
         return self.omx_devices.get(omx_id)
 
+    # 모든 OMX 장치 상태를 반환한다.
     def get_all_omx(self):
         return self.omx_devices
 
@@ -253,6 +283,7 @@ class MQTTManager:
     # Result Callback
     # =========================================================
 
+    # 작업 결과를 받을 콜백을 등록한다.
     def set_result_callback(self, callback):
         self.result_callback = callback
 
@@ -260,6 +291,7 @@ class MQTTManager:
     # 연결 확인
     # =========================================================
 
+    # MQTT 서버 연결과 재연결을 반복 관리한다.
     def _connection_loop(self):
         while self.running:
 
@@ -270,7 +302,10 @@ class MQTTManager:
                 omx.check_connection(timeout=5)
 
                 if was_connected and not omx.connected:
-                    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] [WARN] [MQTT] OMX OFFLINE: " f"{omx.omx_id}", flush=True)
+                    print(
+                        f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] [WARN] [MQTT] OMX OFFLINE: " f"{omx.omx_id}",
+                        flush=True,
+                    )
 
             time.sleep(1)
 

@@ -3,6 +3,7 @@ import time
 from backend.app.services.mqtt_manager import mqtt_manager
 
 
+# 결과 이벤트를 처리한다.
 def on_result(robot, data):
     print()
     print("==============================")

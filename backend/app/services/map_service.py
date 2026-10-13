@@ -26,6 +26,7 @@ from ..config import MAP_DIR, MAP_YAML_PATH
 
 
 # Map YAML 및 이미지 메타데이터 로드 기능
+# 지도 메타데이터를 불러온다.
 def load_map_metadata() -> dict[str, Any]:
 
     # Map YAML 파일 존재 여부 확인
@@ -64,24 +65,9 @@ def load_map_metadata() -> dict[str, Any]:
         "image_name": image_path.name,
         "resolution": resolution,
         "origin": origin,
-        "negate": int(
-            map_yaml.get(
-                "negate",
-                0,
-            )
-        ),
-        "occupied_thresh": float(
-            map_yaml.get(
-                "occupied_thresh",
-                0.65,
-            )
-        ),
-        "free_thresh": float(
-            map_yaml.get(
-                "free_thresh",
-                0.25,
-            )
-        ),
+        "negate": int(map_yaml.get("negate", 0)),
+        "occupied_thresh": float(map_yaml.get("occupied_thresh", 0.65)),
+        "free_thresh": float(map_yaml.get("free_thresh", 0.25)),
         "width": width,
         "height": height,
         "frame": "map",
@@ -94,6 +80,7 @@ def load_map_metadata() -> dict[str, Any]:
 
 
 # Frontend 공개용 Map 정보 생성 기능
+# 공개 지도 info를 조회한다.
 def get_public_map_info() -> dict[str, Any]:
 
     info = load_map_metadata()
@@ -118,6 +105,7 @@ def get_public_map_info() -> dict[str, Any]:
 
 
 # Map 원점, 해상도, 크기 기준 World 영역 계산 기능
+# 월드 범위를 조회한다.
 def get_world_bounds(map_info: dict[str, Any]) -> dict[str, float]:
 
     info = map_info or load_map_metadata()
@@ -184,6 +172,7 @@ def world_to_pixel(x: float, y: float) -> tuple[float, float]:
 
 
 # PGM Map 이미지를 PNG 바이트 데이터로 변환 기능
+# PGM 지도를 PNG 바이트로 변환한다.
 def pgm_to_png_bytes() -> bytes:
 
     info = load_map_metadata()

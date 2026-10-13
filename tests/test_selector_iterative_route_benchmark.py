@@ -23,11 +23,13 @@ class _OracleSelector:
     name = "laya"
     model = "fake-oracle"
 
+    # _OracleSelector의 초기 상태를 설정한다.
     def __init__(self):
         self.calls = 0
         self.states = []
         self.candidate_sets = []
 
+    # 현재 선택지에서 다음 경로 노드를 고른다.
     def select_choice(self, state, candidates, _instructions, *, question_id):
         self.calls += 1
         self.states.append(state)
@@ -39,9 +41,7 @@ class _OracleSelector:
             "choice": choice,
             "confidence": 0.9,
             "answer_confidence": 0.9,
-            "probabilities": {
-                key: (0.9 if key == choice else 0.1) for key in candidates
-            },
+            "probabilities": {key: (0.9 if key == choice else 0.1) for key in candidates},
             "state_truncated": False,
             "usage": {"input_tokens": 120},
             "total_duration_seconds": 0.01,
@@ -56,14 +56,12 @@ class _InvalidEdgeSelector:
     name = "kev"
     model = "fake-invalid"
 
+    # 현재 선택지에서 다음 경로 노드를 고른다.
     def select_choice(self, _state, _candidates, _instructions, *, question_id):
-        return {
-            "choice": "node_3",
-            "answer_confidence": 0.8,
-            "probabilities": {"node_3": 0.8},
-        }
+        return {"choice": "node_3", "answer_confidence": 0.8, "probabilities": {"node_3": 0.8}}
 
 
+# 벤치마크 테스트에 필요한 입력을 준비한다.
 def _fixture():
     return {
         "compact_graph": {
@@ -71,10 +69,7 @@ def _fixture():
             "directed": True,
             "nodes": [0, 1, 2],
             "adjacency": {
-                "0": [
-                    {"to": 1, "weight": 1.0},
-                    {"to": 2, "weight": 3.0},
-                ],
+                "0": [{"to": 1, "weight": 1.0}, {"to": 2, "weight": 3.0}],
                 "1": [{"to": 2, "weight": 1.0}],
                 "2": [],
             },
@@ -88,15 +83,12 @@ def _fixture():
 
 class SelectorIterativeRouteBenchmarkTest(unittest.TestCase):
     # 같은 seed는 동일한 5개 경로를 만들고 Start·Docking 집합은 겹치지 않아야 한다.
+    # 무작위 사례가 재현 가능하고 겹치지 않으며 도킹 노드를 목표로 하는지 검증한다.
     def test_random_cases_are_reproducible_disjoint_and_target_docking_nodes(self):
         first = _prepare(case_count=5, route_seed=20261006)
         second = _prepare(case_count=5, route_seed=20261006)
-        first_pairs = [
-            (case["start"], case["target"]) for case in first["cases"]
-        ]
-        second_pairs = [
-            (case["start"], case["target"]) for case in second["cases"]
-        ]
+        first_pairs = [(case["start"], case["target"]) for case in first["cases"]]
+        second_pairs = [(case["start"], case["target"]) for case in second["cases"]]
         starts = {start for start, _target in first_pairs}
         targets = {target for _start, target in first_pairs}
 
@@ -106,25 +98,17 @@ class SelectorIterativeRouteBenchmarkTest(unittest.TestCase):
         self.assertEqual(len(targets), 5)
         self.assertTrue(starts.isdisjoint(targets))
         self.assertTrue(targets.issubset(set(range(7))))
-        self.assertTrue(
-            all(case["expected_path"][0] == case["start"] for case in first["cases"])
-        )
-        self.assertTrue(
-            all(case["expected_path"][-1] == case["target"] for case in first["cases"])
-        )
+        self.assertTrue(all(case["expected_path"][0] == case["start"] for case in first["cases"]))
+        self.assertTrue(all(case["expected_path"][-1] == case["target"] for case in first["cases"]))
 
     # 올바른 다음 노드를 두 번 고르면 최단 경로와 거리까지 일치해야 한다.
+    # 정답 선택기가 정확한 경로에 도달하는지 검증한다.
     def test_oracle_selector_reaches_exact_route(self):
         selector = _OracleSelector()
         result = _run_route(
             selector,
             _fixture(),
-            {
-                "start": 0,
-                "target": 2,
-                "expected_path": [0, 1, 2],
-                "expected_distance": 2.0,
-            },
+            {"start": 0, "target": 2, "expected_path": [0, 1, 2], "expected_distance": 2.0},
             "neighbors",
             0.15,
         )
@@ -141,6 +125,7 @@ class SelectorIterativeRouteBenchmarkTest(unittest.TestCase):
         self.assertTrue(result["full_graph_input_preserved"])
 
     # 기본 모드는 available_edges의 Node만 Laya·Kev·Ollama choice 후보로 사용한다.
+    # 기본 모드가 가용 간선으로 평가 기준을 만드는지 검증한다.
     def test_default_mode_builds_criteria_from_available_edges(self):
         selector = _OracleSelector()
         prepared = _fixture()
@@ -152,83 +137,47 @@ class SelectorIterativeRouteBenchmarkTest(unittest.TestCase):
         result = _run_route(
             selector,
             prepared,
-            {
-                "start": 0,
-                "target": 2,
-                "expected_path": [0, 1, 2],
-                "expected_distance": 2.0,
-            },
+            {"start": 0, "target": 2, "expected_path": [0, 1, 2], "expected_distance": 2.0},
             "neighbors",
             0.15,
         )
 
         self.assertIsNone(result["error"])
-        self.assertEqual(
-            selector.states[0]["available_edges"],
-            [
-                {"node": 1, "weight": 1},
-                {"node": 2, "weight": 3},
-            ],
-        )
-        self.assertEqual(
-            selector.candidate_sets[0],
-            {"node_1": "Node 1", "node_2": "Node 2"},
-        )
+        self.assertEqual(selector.states[0]["available_edges"], [{"node": 1, "weight": 1}, {"node": 2, "weight": 3}])
+        self.assertEqual(selector.candidate_sets[0], {"node_1": "Node 1", "node_2": "Node 2"})
         self.assertNotIn("node_3", selector.candidate_sets[0])
 
     # Context 모드는 criteria를 바꾸지 않고 available_edges만 추가해야 한다.
+    # 인접 문맥이 상태 문맥만 변경하는지 검증한다.
     def test_neighbor_context_changes_only_state_context(self):
         base_selector = _OracleSelector()
         context_selector = _OracleSelector()
-        case = {
-            "start": 0,
-            "target": 2,
-            "expected_path": [0, 1, 2],
-            "expected_distance": 2.0,
-        }
+        case = {"start": 0, "target": 2, "expected_path": [0, 1, 2], "expected_distance": 2.0}
 
-        base = _run_route(
-            base_selector, _fixture(), case, "all", 0.15, "full_graph_only"
-        )
-        context = _run_route(
-            context_selector, _fixture(), case, "all", 0.15, "neighbor_context"
-        )
+        base = _run_route(base_selector, _fixture(), case, "all", 0.15, "full_graph_only")
+        context = _run_route(context_selector, _fixture(), case, "all", 0.15, "neighbor_context")
 
         self.assertNotIn("available_edges", base_selector.states[0])
         self.assertEqual(
-            context_selector.states[0]["available_edges"],
-            [
-                {"node": 1, "weight": 1},
-                {"node": 2, "weight": 3},
-            ],
+            context_selector.states[0]["available_edges"], [{"node": 1, "weight": 1}, {"node": 2, "weight": 3}]
         )
-        self.assertEqual(
-            base["steps"][0]["candidates"],
-            context["steps"][0]["candidates"],
-        )
+        self.assertEqual(base["steps"][0]["candidates"], context["steps"][0]["candidates"])
         self.assertEqual(base["context_mode"], "full_graph_only")
         self.assertEqual(context["context_mode"], "neighbor_context")
 
     # 직전 Node는 available_edges와 criteria에서 제외해 즉시 왕복을 막는다.
+    # 바로 이전 노드를 후보에서 제외하는지 검증한다.
     def test_immediate_previous_node_is_not_a_candidate(self):
         selector = _OracleSelector()
         prepared = _fixture()
-        prepared["compact_graph"]["adjacency"]["1"] = [
-            {"to": 0, "weight": 1.0},
-            {"to": 2, "weight": 1.0},
-        ]
+        prepared["compact_graph"]["adjacency"]["1"] = [{"to": 0, "weight": 1.0}, {"to": 2, "weight": 1.0}]
         prepared["edges"].append((1, 0, 1.0))
         prepared["edge_weights"][(1, 0)] = 1.0
 
         result = _run_route(
             selector,
             prepared,
-            {
-                "start": 0,
-                "target": 2,
-                "expected_path": [0, 1, 2],
-                "expected_distance": 2.0,
-            },
+            {"start": 0, "target": 2, "expected_path": [0, 1, 2], "expected_distance": 2.0},
             "neighbors",
             0.15,
             "neighbor_context",
@@ -239,20 +188,20 @@ class SelectorIterativeRouteBenchmarkTest(unittest.TestCase):
         self.assertEqual(result["path"], [0, 1, 2])
         self.assertEqual(result["steps"][1]["previous_node"], 0)
         self.assertEqual(result["steps"][1]["candidates"], {"node_2": "Node 2"})
-        self.assertEqual(
-            result["steps"][1]["available_edges"],
-            [{"node": 2, "weight": 1}],
-        )
+        self.assertEqual(result["steps"][1]["available_edges"], [{"node": 2, "weight": 1}])
 
     # 직전 Node가 아니면 과거 방문 Node로 돌아간 뒤 Target에 도착할 수 있다.
+    # 이전 노드 재방문을 기록하면서 목적지에 도달하는지 검증한다.
     def test_older_revisit_is_recorded_and_route_can_reach_target(self):
         class _ScriptedSelector:
             name = "kev"
             model = "fake-revisit"
 
+            # _ScriptedSelector의 초기 상태를 설정한다.
             def __init__(self):
                 self.choices = iter(["node_1", "node_0", "node_3"])
 
+            # 현재 선택지에서 다음 경로 노드를 고른다.
             def select_choice(self, _state, candidates, _instructions, *, question_id):
                 choice = next(self.choices)
                 if choice not in candidates:
@@ -276,26 +225,15 @@ class SelectorIterativeRouteBenchmarkTest(unittest.TestCase):
                 },
             },
             "points": {0: (0.0, 0.0), 1: (1.0, 0.0), 2: (2.0, 0.0), 3: (3.0, 0.0)},
-            "edges": [
-                (0, 1, 1.0), (0, 3, 4.0), (1, 0, 1.0),
-                (1, 2, 1.0), (2, 0, 1.0), (2, 3, 1.0),
-            ],
-            "edge_weights": {
-                (0, 1): 1.0, (0, 3): 4.0, (1, 0): 1.0,
-                (1, 2): 1.0, (2, 0): 1.0, (2, 3): 1.0,
-            },
+            "edges": [(0, 1, 1.0), (0, 3, 4.0), (1, 0, 1.0), (1, 2, 1.0), (2, 0, 1.0), (2, 3, 1.0)],
+            "edge_weights": {(0, 1): 1.0, (0, 3): 4.0, (1, 0): 1.0, (1, 2): 1.0, (2, 0): 1.0, (2, 3): 1.0},
             "nodes": [0, 1, 2, 3],
         }
 
         result = _run_route(
             _ScriptedSelector(),
             prepared,
-            {
-                "start": 0,
-                "target": 3,
-                "expected_path": [0, 1, 2, 3],
-                "expected_distance": 3.0,
-            },
+            {"start": 0, "target": 3, "expected_path": [0, 1, 2, 3], "expected_distance": 3.0},
             "neighbors",
             0.15,
             "neighbor_context",
@@ -312,10 +250,12 @@ class SelectorIterativeRouteBenchmarkTest(unittest.TestCase):
         self.assertTrue(result["steps"][2]["revisited"])
 
     # 삼각형 순환도 동일 방향 Edge를 두 번째 사용하기 전에 중단한다.
+    # 삼각 순환에서 방향 간선 재사용 전에 멈추는지 검증한다.
     def test_triangle_cycle_stops_before_reusing_directed_edge(self):
         class _MustNotRunSelector:
             name = "laya"
 
+            # 현재 선택지에서 다음 경로 노드를 고른다.
             def select_choice(self, *args, **kwargs):
                 raise AssertionError("단일 후보 순환에서는 selector를 호출하면 안 됩니다.")
 
@@ -340,12 +280,7 @@ class SelectorIterativeRouteBenchmarkTest(unittest.TestCase):
         result = _run_route(
             _MustNotRunSelector(),
             prepared,
-            {
-                "start": 0,
-                "target": 3,
-                "expected_path": [0, 1, 2, 3],
-                "expected_distance": 3.0,
-            },
+            {"start": 0, "target": 3, "expected_path": [0, 1, 2, 3], "expected_distance": 3.0},
             "neighbors",
             0.15,
             "neighbor_context",
@@ -360,10 +295,12 @@ class SelectorIterativeRouteBenchmarkTest(unittest.TestCase):
         self.assertIn("순환 방지 조건", result["error"])
 
     # 일반 후보가 없으면 아직 사용하지 않은 역방향 Edge로 한 번 복귀할 수 있다.
+    # 사용하지 않은 역방향 간선의 되돌아가기를 허용하는지 검증한다.
     def test_unused_reverse_edge_is_allowed_as_backtrack(self):
         class _MustNotRunSelector:
             name = "laya"
 
+            # 현재 선택지에서 다음 경로 노드를 고른다.
             def select_choice(self, *args, **kwargs):
                 raise AssertionError("단일 후보 backtrack에서는 selector를 호출하면 안 됩니다.")
 
@@ -372,11 +309,7 @@ class SelectorIterativeRouteBenchmarkTest(unittest.TestCase):
                 "type": "CompactAdjacencyGraph",
                 "directed": True,
                 "nodes": [0, 1, 2],
-                "adjacency": {
-                    "0": [{"to": 1, "weight": 1}],
-                    "1": [{"to": 0, "weight": 1}],
-                    "2": [],
-                },
+                "adjacency": {"0": [{"to": 1, "weight": 1}], "1": [{"to": 0, "weight": 1}], "2": []},
             },
             "points": {0: (0.0, 0.0), 1: (1.0, 0.0), 2: (2.0, 0.0)},
             "edges": [(0, 1, 1.0), (1, 0, 1.0)],
@@ -387,12 +320,7 @@ class SelectorIterativeRouteBenchmarkTest(unittest.TestCase):
         result = _run_route(
             _MustNotRunSelector(),
             prepared,
-            {
-                "start": 0,
-                "target": 2,
-                "expected_path": [0, 1, 2],
-                "expected_distance": 2.0,
-            },
+            {"start": 0, "target": 2, "expected_path": [0, 1, 2], "expected_distance": 2.0},
             "neighbors",
             0.15,
             max_steps=4,
@@ -404,8 +332,8 @@ class SelectorIterativeRouteBenchmarkTest(unittest.TestCase):
         self.assertTrue(result["steps"][1]["backtrack"])
         self.assertIn("순환 방지 조건", result["error"])
 
-
     # 전체 노드 모드에서 없는 간선을 고르면 첫 실패 단계와 원인을 남겨야 한다.
+    # 잘못된 간선 선택을 기록하는지 검증한다.
     def test_invalid_edge_choice_is_recorded(self):
         prepared = _fixture()
         prepared["nodes"].append(3)
@@ -415,12 +343,7 @@ class SelectorIterativeRouteBenchmarkTest(unittest.TestCase):
         result = _run_route(
             _InvalidEdgeSelector(),
             prepared,
-            {
-                "start": 0,
-                "target": 2,
-                "expected_path": [0, 1, 2],
-                "expected_distance": 2.0,
-            },
+            {"start": 0, "target": 2, "expected_path": [0, 1, 2], "expected_distance": 2.0},
             "all",
             0.15,
         )
@@ -433,28 +356,23 @@ class SelectorIterativeRouteBenchmarkTest(unittest.TestCase):
         self.assertEqual(summary["state_truncation_unreported_trial_count"], 0)
 
     # 단일 후보는 모델 오류로 처리하지 않고 API 호출 없는 강제 이동으로 기록한다.
+    # 후보가 하나면 선택기를 호출하지 않고 강제 이동하는지 검증한다.
     def test_single_candidate_is_forced_without_selector_call(self):
         class _MustNotRunSelector:
             name = "laya"
 
+            # 현재 선택지에서 다음 경로 노드를 고른다.
             def select_choice(self, *args, **kwargs):
                 raise AssertionError("단일 후보에서 selector를 호출하면 안 됩니다.")
 
         prepared = _fixture()
-        prepared["compact_graph"]["adjacency"]["0"] = [
-            {"to": 1, "weight": 1.0}
-        ]
+        prepared["compact_graph"]["adjacency"]["0"] = [{"to": 1, "weight": 1.0}]
         prepared["edges"] = [(0, 1, 1.0), (1, 2, 1.0)]
         prepared["edge_weights"] = {(0, 1): 1.0, (1, 2): 1.0}
         result = _run_route(
             _MustNotRunSelector(),
             prepared,
-            {
-                "start": 0,
-                "target": 2,
-                "expected_path": [0, 1, 2],
-                "expected_distance": 2.0,
-            },
+            {"start": 0, "target": 2, "expected_path": [0, 1, 2], "expected_distance": 2.0},
             "neighbors",
             0.15,
         )
@@ -468,27 +386,18 @@ class SelectorIterativeRouteBenchmarkTest(unittest.TestCase):
         self.assertIsNone(summary["step_realtime_met_rate"])
         self.assertTrue(all(step["forced_step"] for step in result["steps"]))
 
-
     # 정수 weight 맵을 명시하면 모델 입력에서도 정수 표현을 유지해야 한다.
+    # 명시적으로 제공한 정수 노드 그래프를 사용하는지 검증한다.
     def test_explicit_integer_graph_is_used(self):
-        prepared = _prepare(
-            graph_path=Path("routes/test_int.geojson"),
-            case_count=1,
-            route_seed=20260928,
-        )
+        prepared = _prepare(graph_path=Path("routes/test_int.geojson"), case_count=1, route_seed=20260928)
 
         self.assertEqual(prepared["graph_path"].name, "test_int.geojson")
-        self.assertEqual(
-            prepared["compact_graph"]["adjacency"]["0"],
-            [{"to": 10, "weight": 51}],
-        )
+        self.assertEqual(prepared["compact_graph"]["adjacency"]["0"], [{"to": 10, "weight": 51}])
 
     # all-pairs는 13개 Node에서 도킹 0~6과 동일한 7쌍을 제외한 84쌍이다.
+    # 모든 출발지와 도킹 노드 조합을 만드는지 검증한다.
     def test_all_pairs_generates_every_start_to_docking_pair(self):
-        prepared = _prepare(
-            graph_path=Path("routes/test_int.geojson"),
-            case_mode="all-pairs",
-        )
+        prepared = _prepare(graph_path=Path("routes/test_int.geojson"), case_mode="all-pairs")
 
         pairs = {(case["start"], case["target"]) for case in prepared["cases"]}
         self.assertEqual(len(pairs), 84)
@@ -497,11 +406,13 @@ class SelectorIterativeRouteBenchmarkTest(unittest.TestCase):
         self.assertIsNone(prepared["route_seed"])
 
     # 서버·checkpoint 사전 점검 실패는 trial이 아니라 benchmark 실패로 기록한다.
+    # 사전 점검 실패를 실행 기록에 실패로 표시하는지 검증한다.
     def test_preflight_failure_marks_manifest_failed(self):
         class _UnavailableSelector:
             name = "kev"
             model = "kev-4b"
 
+            # runtime를 확인하고 준비한다.
             def _ensure_runtime(self):
                 raise RuntimeError("checkpoint mismatch")
 
@@ -524,8 +435,8 @@ class SelectorIterativeRouteBenchmarkTest(unittest.TestCase):
             self.assertIn("checkpoint mismatch", manifest["failure"])
             self.assertIn("instructions_sha256", manifest["settings"])
 
-
     # JSON 설정은 Graph hash와 공통 옵션을 검증하고 모델별 최종 설정을 만든다.
+    # 반복형 Ollama 설정이 선택된 모델을 찾는지 검증한다.
     def test_iterative_ollama_config_resolves_selected_models(self):
         # 실행용 모델 설정을 바꾸지 않고 독립된 설정에서 모델 선택 처리를 확인한다.
         config = json.loads(Path("simulation/evaluation/selector_iterative_benchmark.json").read_text())
@@ -538,33 +449,29 @@ class SelectorIterativeRouteBenchmarkTest(unittest.TestCase):
             resolved = load_iterative_config(config_path, ["qwen3:4b", "phi4:14b"])
 
         self.assertEqual(resolved["graph_path"].name, "test_int.geojson")
-        self.assertEqual(
-            [model["name"] for model in resolved["models"]],
-            ["qwen3:4b", "phi4:14b"],
-        )
+        self.assertEqual([model["name"] for model in resolved["models"]], ["qwen3:4b", "phi4:14b"])
         self.assertFalse(resolved["models"][0]["think"])
         self.assertEqual(resolved["models"][0]["options"]["num_ctx"], 4096)
         self.assertEqual(resolved["models"][1]["options"]["num_predict"], 512)
 
     # JSON에 없는 모델명은 조용히 건너뛰지 않고 실행 전에 오류로 막는다.
+    # 반복형 Ollama 설정이 알 수 없는 모델을 거부하는지 검증한다.
     def test_iterative_ollama_config_rejects_unknown_model(self):
         with self.assertRaisesRegex(ValueError, "not present in config"):
-            load_iterative_config(
-                Path("simulation/evaluation/selector_iterative_benchmark.json"),
-                ["missing:model"],
-            )
+            load_iterative_config(Path("simulation/evaluation/selector_iterative_benchmark.json"), ["missing:model"])
 
     # 다중 모델 실행기는 모델별 하위 결과와 상위 matrix manifest를 만든다.
+    # 설정된 실행기가 결과 행렬과 모델별 결과를 저장하는지 검증한다.
     def test_configured_runner_writes_matrix_and_model_results(self):
         class _FirstCandidateSelector:
             name = "ollama"
             model = "fake:model"
 
-            def select_choice(
-                self, _state, candidates, _instructions, *, question_id
-            ):
+            # 현재 선택지에서 다음 경로 노드를 고른다.
+            def select_choice(self, _state, candidates, _instructions, *, question_id):
                 return {"choice": next(iter(candidates)), "probabilities": {}}
 
+            # 관련을 해제한다.
             def release(self):
                 pass
 
@@ -577,9 +484,7 @@ class SelectorIterativeRouteBenchmarkTest(unittest.TestCase):
                 json.dumps(
                     {
                         "graph": {"path": str(graph_path), "sha256": graph_hash},
-                        "ollama_defaults": {
-                            "options": {"num_ctx": 4096, "num_predict": 512}
-                        },
+                        "ollama_defaults": {"options": {"num_ctx": 4096, "num_predict": 512}},
                         "models": [{"name": "fake:model"}],
                         "settings": {
                             "case_mode": "random",
@@ -598,37 +503,27 @@ class SelectorIterativeRouteBenchmarkTest(unittest.TestCase):
             )
             output = temporary / "output"
             with patch(
-                "simulation.evaluation.selector_iterative_route_benchmark."
-                "_build_configured_ollama_selector",
+                "simulation.evaluation.selector_iterative_route_benchmark." "_build_configured_ollama_selector",
                 return_value=_FirstCandidateSelector(),
             ):
-                matrix = run_configured_benchmarks(
-                    config_path, output, progress=False
-                )
+                matrix = run_configured_benchmarks(config_path, output, progress=False)
 
             self.assertEqual(matrix["status"], "complete")
-            self.assertTrue(
-                (output / "selector_iterative_matrix_manifest.json").is_file()
-            )
+            self.assertTrue((output / "selector_iterative_matrix_manifest.json").is_file())
             self.assertTrue((output / "fake-model" / "manifest.json").is_file())
 
     # 모델 항목의 options는 공통값 중 필요한 값만 안전하게 덮어쓴다.
+    # 모델별 선택 사항이 기본값을 덮어쓰는지 검증한다.
     def test_model_options_override_defaults(self):
         models = _resolve_model_specs(
             {
-                "ollama_defaults": {
-                    "timeout_seconds": 120,
-                    "options": {"num_ctx": 4096, "num_predict": 512},
-                },
-                "models": [
-                    {"name": "small", "options": {"num_ctx": 2048}},
-                ],
+                "ollama_defaults": {"timeout_seconds": 120, "options": {"num_ctx": 4096, "num_predict": 512}},
+                "models": [{"name": "small", "options": {"num_ctx": 2048}}],
             }
         )
 
         self.assertEqual(models[0]["options"], {"num_ctx": 2048, "num_predict": 512})
         self.assertEqual(models[0]["timeout_seconds"], 120)
-
 
 
 if __name__ == "__main__":

@@ -9,16 +9,10 @@ import re
 # ============================================================
 
 # backend 형식 robot1, robot01 등의 Robot ID 패턴 생성
-_BACKEND_ID_RE = re.compile(
-    r"^robot0*([1-9][0-9]*)$",
-    re.IGNORECASE,
-)
+_BACKEND_ID_RE = re.compile(r"^robot0*([1-9][0-9]*)$", re.IGNORECASE)
 
 # UI 형식 R-01, R01, R1 등의 Robot ID 패턴 생성
-_UI_ID_RE = re.compile(
-    r"^R-?0*([1-9][0-9]*)$",
-    re.IGNORECASE,
-)
+_UI_ID_RE = re.compile(r"^R-?0*([1-9][0-9]*)$", re.IGNORECASE)
 
 
 # 다양한 Robot ID 형식을 backend 표준 형식으로 변환 기능
@@ -63,6 +57,7 @@ def normalize_robot_id(robot_id: str) -> str:
 
 
 # backend Robot ID를 Frontend 표시용 ID로 변환 기능
+# 화면 로봇 ID를 변환한다.
 def to_ui_robot_id(robot_id: str) -> str:
 
     # 입력 Robot ID를 backend 표준 형식으로 변환

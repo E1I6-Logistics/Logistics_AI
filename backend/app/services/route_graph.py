@@ -43,6 +43,7 @@ from ..config import ROUTE_GRAPH_PATH
 
 
 # Route Graph GeoJSON 파일 로드 기능
+# 경로 그래프를 불러온다.
 def load_route_graph() -> dict[str, Any]:
     if not ROUTE_GRAPH_PATH.exists():
         raise FileNotFoundError(f"Route Graph 파일 없음: {ROUTE_GRAPH_PATH}")
@@ -54,6 +55,7 @@ def load_route_graph() -> dict[str, Any]:
 
 
 # Node Features 추출 기능
+# 지도에서 노드 형식의 항목을 추출한다.
 def _node_features(graph: dict[str, Any]) -> dict[str, dict[str, Any]]:
     result: dict[str, dict[str, Any]] = {}
     for feature in graph.get("features", []):
@@ -72,6 +74,7 @@ def _node_features(graph: dict[str, Any]) -> dict[str, dict[str, Any]]:
 
 
 # Node 정보 조회 기능 -> 문자열 또는 정수를 Node ID로 조회 가능
+# 지정한 노드의 정보를 조회한다.
 def get_node(node_id: str | int) -> dict[str, Any]:
     feature = _node_features(load_route_graph()).get(str(node_id))
     if feature is None:
@@ -88,9 +91,11 @@ def get_node(node_id: str | int) -> dict[str, Any]:
 
 
 # Node 목록 조회 기능 -> ID 기준 정렬, 문자열 ID는 뒤로
+# 노드를 목록으로 반환한다.
 def list_nodes() -> list[dict[str, Any]]:
     nodes = [get_node(node_id) for node_id in _node_features(load_route_graph())]
 
+    # 노드 정렬에 사용할 키를 만든다.
     def sort_key(node: dict[str, Any]):
         try:
             return 0, int(node["id"])
@@ -100,6 +105,7 @@ def list_nodes() -> list[dict[str, Any]]:
     return sorted(nodes, key=sort_key)
 
 
+# 간선 IDS를 찾는다.
 def find_edge_ids(graph: dict[str, Any], node_ids: list[str]) -> list[str]:
     # (출발 노드, 도착 노드) -> 엣지 ID
     edge_lookup = {}
@@ -133,6 +139,7 @@ def find_edge_ids(graph: dict[str, Any], node_ids: list[str]) -> list[str]:
 
 # current_node 를 새로 식별하기 위해 가장 가까운 노드를 찾아 현재 노드 결정
 # tolerance_m 은 "이 거리 안에 있으면 노드에 도착했다고 볼 것인가" -> 값은 지도 간격과 위치 측정 정확도에 맞춰 정해야 함
+# 현재 노드를 찾는다.
 def locate_current_node(nodes, x, y, tolerance_m):
     if not nodes or not all(math.isfinite(v) for v in (x, y)):
         return None
@@ -143,6 +150,7 @@ def locate_current_node(nodes, x, y, tolerance_m):
     return nearest_id if distance <= tolerance_m else None
 
 
+# 가장 가까운 노드를 찾는다.
 def find_nearest_node(nodes, x: float, y: float):
     if not nodes or not all(math.isfinite(v) for v in (x, y)):
         return None

@@ -1,4 +1,5 @@
 """웹과 같은 API로 시나리오 하나 실행: python3 tests/traffic_scenarios.py cycle"""
+
 import argparse
 import json
 from pathlib import Path
@@ -7,6 +8,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 
+# 명령행 프로그램의 실행 절차를 시작한다.
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("scenario", help="traffic_scenarios.json에 정의된 name")
@@ -15,6 +17,7 @@ def main():
         config = json.loads(Path(__file__).with_suffix(".json").read_text(encoding="utf-8"))
         base_url = config["base_url"].rstrip("/")
 
+        # 관련을 요청한다.
         def request(path, payload=None):
             data = None if payload is None else json.dumps(payload).encode()
             req = Request(base_url + path, data=data, headers={"Content-Type": "application/json"})
@@ -34,7 +37,7 @@ def main():
                 previous = display
             if state["state"] not in ("running", "stopping"):
                 return 0 if state["state"] == "completed" else 1
-            time.sleep(.5)
+            time.sleep(0.5)
     except HTTPError as exc:
         print(exc.read().decode(), flush=True)
     except (ValueError, KeyError, OSError, URLError) as exc:

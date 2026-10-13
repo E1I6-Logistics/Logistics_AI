@@ -52,19 +52,23 @@ INSTRUCTIONS = {
 }
 
 
+# 현재 UTC 시각을 문자열로 반환한다.
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+# 평가 결과를 JSON 문자열로 변환한다.
 def _json_dump(path: Path, value: Any) -> None:
     path.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
+# 평가 결과를 JSONL 파일에 덧붙인다.
 def _append_jsonl(path: Path, value: dict[str, Any]) -> None:
     with path.open("a", encoding="utf-8") as stream:
         stream.write(json.dumps(value, ensure_ascii=False) + "\n")
 
 
+# 측정값의 백분위수를 계산한다.
 def _percentile(values: list[float], fraction: float) -> float | None:
     if not values:
         return None
@@ -76,6 +80,7 @@ def _percentile(values: list[float], fraction: float) -> float | None:
     return ordered[lower] + (ordered[upper] - ordered[lower]) * (position - lower)
 
 
+# 응답 지연 시간을 계산한다.
 def _latency(values: list[float]) -> dict[str, Any]:
     return {
         "count": len(values),
@@ -87,9 +92,7 @@ def _latency(values: list[float]) -> dict[str, Any]:
     }
 
 
-def enumerate_all_simple_paths(
-    graph: dict[str, Any], start: int, target: int
-) -> list[tuple[list[int], float]]:
+def enumerate_all_simple_paths(graph: dict[str, Any], start: int, target: int) -> list[tuple[list[int], float]]:
     """Return every directed path without repeated nodes, ordered only internally."""
     points, edges = build_route_inputs(graph, require_stored_weight=True)
     adjacency: dict[int, list[tuple[int, float]]] = {node: [] for node in points}
@@ -100,6 +103,7 @@ def enumerate_all_simple_paths(
 
     routes: list[tuple[list[int], float]] = []
 
+    # 그래프에서 방문할 항목을 처리한다.
     def visit(node: int, path: list[int], distance: float) -> None:
         if node == target:
             routes.append((path.copy(), distance))
@@ -115,21 +119,18 @@ def enumerate_all_simple_paths(
     return routes
 
 
+# 관련을 준비한다.
 def _prepare() -> dict[str, Any]:
     graph_bytes = GRAPH_PATH.read_bytes()
     graph = json.loads(graph_bytes)
     config = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
     points, edges = build_route_inputs(graph, require_stored_weight=True)
-    compact_graph = build_compact_route_graph(
-        graph, GRAPH_PATH.name, require_stored_weight=True
-    )
+    compact_graph = build_compact_route_graph(graph, GRAPH_PATH.name, require_stored_weight=True)
     cases = []
     for configured in config["cases"]:
         start, target = int(configured["start"]), int(configured["goal"])
         routes = enumerate_all_simple_paths(graph, start, target)
-        baseline = plan_route(
-            str(start), str(target), graph, require_stored_weight=True
-        )
+        baseline = plan_route(str(start), str(target), graph, require_stored_weight=True)
         expected_path = [int(node) for node in baseline["node_ids"]]
         expected_distance = float(baseline["cost"])
         if routes[0][0] != expected_path or not math.isclose(
@@ -155,9 +156,8 @@ def _prepare() -> dict[str, Any]:
     }
 
 
-def _build_request(
-    prepared: dict[str, Any], case: dict[str, Any], language: str, seed: int
-) -> dict[str, Any]:
+# 요청을 생성한다.
+def _build_request(prepared: dict[str, Any], case: dict[str, Any], language: str, seed: int) -> dict[str, Any]:
     shuffled = [(path.copy(), distance) for path, distance in case["routes"]]
     random.Random(seed).shuffle(shuffled)
     candidates: dict[str, str] = {}
@@ -185,6 +185,7 @@ def _build_request(
     }
 
 
+# 경로 선택지의 진단 정보를 만든다.
 def _option_diagnostics(
     usage: Any, question_id: str, candidate_count: int, selector_name: str
 ) -> tuple[int | None, bool | None]:
@@ -199,6 +200,7 @@ def _option_diagnostics(
     return distinct, distinct == candidate_count if isinstance(distinct, int) else None
 
 
+# 시행을 실행한다.
 def _run_trial(
     selector: Any,
     prepared: dict[str, Any],
@@ -213,22 +215,17 @@ def _run_trial(
         order_seed += 10_000_000
     request = _build_request(prepared, case, language, order_seed)
     question_id = f"{language}_all_routes_{case['start']}_to_{case['target']}_{repeat}"
-    input_character_count = len(json.dumps(
-        {
-            "state": request["state"],
-            "instructions": request["instructions"],
-            "criteria": request["candidates"],
-        },
-        ensure_ascii=False,
-        separators=(",", ":"),
-    ))
+    input_character_count = len(
+        json.dumps(
+            {"state": request["state"], "instructions": request["instructions"], "criteria": request["candidates"]},
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+    )
     started = time.perf_counter()
     try:
         result = selector.select_choice(
-            request["state"],
-            request["candidates"],
-            request["instructions"],
-            question_id=question_id,
+            request["state"], request["candidates"], request["instructions"], question_id=question_id
         )
         wall_seconds = time.perf_counter() - started
         choice = str(result.get("choice", ""))
@@ -236,8 +233,7 @@ def _run_trial(
         if selected_path is None:
             raise ValueError(f"후보에 없는 선택: {choice!r}")
         validated_path, selected_distance = validate_and_calculate_path_distance(
-            prepared["points"], prepared["edges"], selected_path,
-            case["start"], case["target"],
+            prepared["points"], prepared["edges"], selected_path, case["start"], case["target"]
         )
         probabilities = dict(result.get("probabilities") or {})
         usage = result.get("usage")
@@ -256,10 +252,7 @@ def _run_trial(
             "answer_confidence": result.get("answer_confidence"),
             "probabilities": probabilities,
             "probability_count": len(probabilities),
-            "probability_complete": (
-                len(probabilities) == len(request["candidates"])
-                if probabilities else None
-            ),
+            "probability_complete": (len(probabilities) == len(request["candidates"]) if probabilities else None),
             "usage": usage,
             "input_character_count": input_character_count,
             "input_tokens": input_tokens,
@@ -309,6 +302,7 @@ def _run_trial(
         }
 
 
+# 평가 결과를 요약한다.
 def _summarize(rows: list[dict[str, Any]]) -> dict[str, Any]:
     successful = [row for row in rows if row["error"] is None]
     return {
@@ -316,61 +310,73 @@ def _summarize(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "successful_request_count": len(successful),
         "error_count": len(rows) - len(successful),
         "correct_count": sum(row["correct"] is True for row in rows),
-        "accuracy": (
-            sum(row["correct"] is True for row in rows) / len(rows) if rows else None
-        ),
-        "random_baseline_accuracy": (
-            mean(1 / row["candidate_count"] for row in rows) if rows else None
-        ),
-        "state_truncated_count": sum(
-            row.get("state_truncated") is True for row in successful
-        ),
+        "accuracy": (sum(row["correct"] is True for row in rows) / len(rows) if rows else None),
+        "random_baseline_accuracy": (mean(1 / row["candidate_count"] for row in rows) if rows else None),
+        "state_truncated_count": sum(row.get("state_truncated") is True for row in successful),
         "state_truncation_unreported_count": sum(
             not isinstance(row.get("state_truncated"), bool) for row in successful
         ),
         "option_completeness_unreported_count": sum(
-            row.get("selector_name") == "laya"
-            and row.get("options_complete") is None
-            for row in successful
+            row.get("selector_name") == "laya" and row.get("options_complete") is None for row in successful
         ),
-        "incomplete_option_trial_count": sum(
-            row.get("options_complete") is False for row in successful
-        ),
-        "incomplete_probability_trial_count": sum(
-            row.get("probability_complete") is False for row in successful
-        ),
+        "incomplete_option_trial_count": sum(row.get("options_complete") is False for row in successful),
+        "incomplete_probability_trial_count": sum(row.get("probability_complete") is False for row in successful),
         "wall_latency": _latency([row["wall_seconds"] for row in successful]),
-        "model_total_latency": _latency([
-            row["model_total_seconds"] for row in successful
-            if row["model_total_seconds"] is not None
-        ]),
+        "model_total_latency": _latency(
+            [row["model_total_seconds"] for row in successful if row["model_total_seconds"] is not None]
+        ),
     }
 
 
+# 평가 결과를 CSV 파일에 기록한다.
 def _write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
     fields = [
-        "timestamp", "selector_name", "requested_model", "response_model",
-        "language", "start_node", "target_node", "repeat",
-        "candidate_count", "candidate_order_seed", "expected_choice", "choice",
-        "expected_path", "selected_path", "expected_distance", "selected_distance",
-        "correct", "confidence", "answer_confidence", "probability_count",
-        "probability_complete", "distinct_option_count", "options_complete",
-        "state_truncated", "wall_seconds", "model_total_seconds", "eval_seconds",
-        "realtime_met", "input_character_count", "input_tokens",
-        "candidate_paths", "usage", "probabilities", "error",
+        "timestamp",
+        "selector_name",
+        "requested_model",
+        "response_model",
+        "language",
+        "start_node",
+        "target_node",
+        "repeat",
+        "candidate_count",
+        "candidate_order_seed",
+        "expected_choice",
+        "choice",
+        "expected_path",
+        "selected_path",
+        "expected_distance",
+        "selected_distance",
+        "correct",
+        "confidence",
+        "answer_confidence",
+        "probability_count",
+        "probability_complete",
+        "distinct_option_count",
+        "options_complete",
+        "state_truncated",
+        "wall_seconds",
+        "model_total_seconds",
+        "eval_seconds",
+        "realtime_met",
+        "input_character_count",
+        "input_tokens",
+        "candidate_paths",
+        "usage",
+        "probabilities",
+        "error",
     ]
     with path.open("w", encoding="utf-8-sig", newline="") as stream:
         writer = csv.DictWriter(stream, fieldnames=fields)
         writer.writeheader()
         for source in rows:
             row = {field: source.get(field) for field in fields}
-            for field in (
-                "expected_path", "selected_path", "candidate_paths", "usage", "probabilities"
-            ):
+            for field in ("expected_path", "selected_path", "candidate_paths", "usage", "probabilities"):
                 row[field] = json.dumps(source.get(field), ensure_ascii=False, separators=(",", ":"))
             writer.writerow(row)
 
 
+# 벤치마크 사례를 실행하고 결과를 저장한다.
 def run_benchmark(
     output: Path,
     *,
@@ -422,8 +428,7 @@ def run_benchmark(
             "weight_rule": "GeoJSON properties.weight exactly",
         },
         "instructions_sha256": {
-            language: hashlib.sha256(text.encode("utf-8")).hexdigest()
-            for language, text in INSTRUCTIONS.items()
+            language: hashlib.sha256(text.encode("utf-8")).hexdigest() for language, text in INSTRUCTIONS.items()
         },
         "routes": [
             {
@@ -442,8 +447,13 @@ def run_benchmark(
     for language_index, language in enumerate(("ko", "en")):
         for warmup in range(1, warmups + 1):
             _run_trial(
-                selector, prepared, prepared["cases"][0], language,
-                -warmup, seed + language_index * 10_000_000, deadline,
+                selector,
+                prepared,
+                prepared["cases"][0],
+                language,
+                -warmup,
+                seed + language_index * 10_000_000,
+                deadline,
             )
             if progress:
                 print(f"{language} warmup {warmup}/{warmups} complete")
@@ -453,9 +463,7 @@ def run_benchmark(
     for case in prepared["cases"]:
         for language in ("ko", "en"):
             for repeat in range(1, repeats + 1):
-                result = _run_trial(
-                    selector, prepared, case, language, repeat, seed, deadline
-                )
+                result = _run_trial(selector, prepared, case, language, repeat, seed, deadline)
                 last_result = result
                 row = {
                     "timestamp": _utc_now(),
@@ -485,17 +493,15 @@ def run_benchmark(
 
     route_groups = []
     for case in prepared["cases"]:
-        selected = [
-            row for row in rows
-            if row["start_node"] == case["start"]
-            and row["target_node"] == case["target"]
-        ]
-        route_groups.append({
-            "start_node": case["start"],
-            "target_node": case["target"],
-            "candidate_count": len(case["routes"]),
-            **_summarize(selected),
-        })
+        selected = [row for row in rows if row["start_node"] == case["start"] and row["target_node"] == case["target"]]
+        route_groups.append(
+            {
+                "start_node": case["start"],
+                "target_node": case["target"],
+                "candidate_count": len(case["routes"]),
+                **_summarize(selected),
+            }
+        )
     language_groups = [
         {"language": language, **_summarize([row for row in rows if row["language"] == language])}
         for language in ("ko", "en")
@@ -527,6 +533,7 @@ def run_benchmark(
     return summary
 
 
+# 명령행 프로그램의 실행 절차를 시작한다.
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path)
@@ -537,13 +544,7 @@ def main() -> int:
     args = parser.parse_args()
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     output = args.output or RESULTS_ROOT / f"selector-all-routes-{timestamp}"
-    summary = run_benchmark(
-        output,
-        repeats=args.repeats,
-        warmups=args.warmups,
-        seed=args.seed,
-        deadline=args.deadline,
-    )
+    summary = run_benchmark(output, repeats=args.repeats, warmups=args.warmups, seed=args.seed, deadline=args.deadline)
     print(f"results: {output.resolve()}")
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     return 0

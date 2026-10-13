@@ -9,10 +9,12 @@ from ..ros2.ros_gateway import ros_gateway
 router = APIRouter(prefix="/api/connections", tags=["connections"])
 
 
+# 연결을 조회한다.
 @router.get("")
 async def get_connections():
     if mode_manager.mode == "simulation":
         from ..services.mock_data import mock_fms
+
         return {"devices": mock_fms.connections()}
 
     try:

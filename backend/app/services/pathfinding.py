@@ -3,6 +3,7 @@ import heapq
 import math
 from .reservation import node_key, edge_key
 
+
 # decorator
 @dataclass(frozen=True)
 class PathResult:
@@ -11,52 +12,60 @@ class PathResult:
     estimated_travel_time_s: float
     speed_mps: float
 
+    # dict를 변환한다.
     def to_dict(self):
-        return dict(route=list(self.route), total_distance_m=self.total_distance_m,
-                    estimated_travel_time_s=self.estimated_travel_time_s,
-                    speed_mps=self.speed_mps, algorithm='astar_distance')
+        return dict(
+            route=list(self.route),
+            total_distance_m=self.total_distance_m,
+            estimated_travel_time_s=self.estimated_travel_time_s,
+            speed_mps=self.speed_mps,
+            algorithm="astar_distance",
+        )
+
 
 class DistanceAStar:
+    # DistanceAStar의 초기 상태를 설정한다.
     def __init__(self, graph):
         self.nodes = {}
-        for feature in graph['features']:
-            geometry = feature.get('geometry') or {}
-            if geometry.get('type') != 'Point':
+        for feature in graph["features"]:
+            geometry = feature.get("geometry") or {}
+            if geometry.get("type") != "Point":
                 continue
 
-            node = str(feature['properties']['id'])
-            coords = geometry.get('coordinates', [])
-            if len(coords) <2 or node in self.nodes:
-                raise ValueError('노드 좌표 누락 또는 중복 ID')
-            
+            node = str(feature["properties"]["id"])
+            coords = geometry.get("coordinates", [])
+            if len(coords) < 2 or node in self.nodes:
+                raise ValueError("노드 좌표 누락 또는 중복 ID")
+
             point = tuple(float(v) for v in coords[:2])
             if not all(math.isfinite(v) for v in point):
-                raise ValueError('노드 좌표는 유한한 값이어야 한다.')
+                raise ValueError("노드 좌표는 유한한 값이어야 한다.")
 
             self.nodes[node] = point
 
         if not self.nodes:
-            raise ValueError('그래프에 노드가 없습니다.')
-        
+            raise ValueError("그래프에 노드가 없습니다.")
+
         self.edges = {node: [] for node in self.nodes}
-        for feature in graph['features']:
-            props = feature.get('properties') or {}
-            if 'startid' not in props and 'endid' not in props:
+        for feature in graph["features"]:
+            props = feature.get("properties") or {}
+            if "startid" not in props and "endid" not in props:
                 continue
 
-            start,end = str(props.get('startid')), str(props.get('endid'))
+            start, end = str(props.get("startid")), str(props.get("endid"))
             if start not in self.nodes or end not in self.nodes:
-                raise ValueError('엣지가 존재하지 않는 노드를 참조합니다.')
-            
+                raise ValueError("엣지가 존재하지 않는 노드를 참조합니다.")
+
             self.edges[start].append((end, math.dist(self.nodes[start], self.nodes[end])))
 
+    # 관련을 계획한다.
     def plan(self, start, end, speed_mps=0.025):
         start, end = str(start), str(end)
         if start not in self.nodes or end not in self.nodes:
-            raise ValueError('출발 또는 목적지 노드가 존재하지 않습니다.')
+            raise ValueError("출발 또는 목적지 노드가 존재하지 않습니다.")
         if not math.isfinite(speed_mps) or speed_mps <= 0:
-            raise ValueError('속도는 유한한 양수여야 합니다.')
-        
+            raise ValueError("속도는 유한한 양수여야 합니다.")
+
         heuristic = lambda node: math.dist(self.nodes[node], self.nodes[end])
         queue = [(heuristic(start), 0.0, start)]
         distances = {start: 0.0}
@@ -79,25 +88,42 @@ class DistanceAStar:
                     previous[neighbor] = node
                     heapq.heappush(queue, (candidate + heuristic(neighbor), candidate, neighbor))
 
-        raise ValueError('방향성 그래프에서 도달 가능한 경로가 없습니다.')
+        raise ValueError("방향성 그래프에서 도달 가능한 경로가 없습니다.")
 
     # 다른 로봇의 예약을 기준으로 가장 이른 도착 경로를 탐색. 시간 기준
     # blocked: 노드·통로별로 사용할 수 없는 시간 구간 -> 안전 여유가 반영된 기존 예약과 실제 점유를 전달.
     # 구간 중간 출발은 허용 방향별 끝점을 모두 비교
-    def plan_timed(self, end, position, current_node, occupied_edge=None, *,
-                   blocked, now, speed_mps, safety_margin, required_path=None):
+    # 시간 기반을 계획한다.
+    def plan_timed(
+        self,
+        end,
+        position,
+        current_node,
+        occupied_edge=None,
+        *,
+        blocked,
+        now,
+        speed_mps,
+        safety_margin,
+        required_path=None
+    ):
         end = str(end)
         if end not in self.nodes:
-            raise ValueError('목적지 노드가 존재하지 않습니다.')
-        if (not all(math.isfinite(v) for v in (now, speed_mps, safety_margin, *position))
-                or now < 0 or speed_mps <= 0 or safety_margin <= 0 or len(position) != 2):
-            raise ValueError('시간·속도·안전 여유·좌표가 올바르지 않습니다.')
+            raise ValueError("목적지 노드가 존재하지 않습니다.")
+        if (
+            not all(math.isfinite(v) for v in (now, speed_mps, safety_margin, *position))
+            or now < 0
+            or speed_mps <= 0
+            or safety_margin <= 0
+            or len(position) != 2
+        ):
+            raise ValueError("시간·속도·안전 여유·좌표가 올바르지 않습니다.")
         if current_node is not None:
             current_node = str(current_node)
             if current_node not in self.nodes or math.dist(position, self.nodes[current_node]) > 1e-6:
-                raise ValueError('현재 노드와 실제 위치가 일치하지 않습니다.')
+                raise ValueError("현재 노드와 실제 위치가 일치하지 않습니다.")
         elif occupied_edge is None or any(n not in self.nodes for n in occupied_edge):
-            raise ValueError('구간 중간 출발에는 점유 통로가 필요합니다.')
+            raise ValueError("구간 중간 출발에는 점유 통로가 필요합니다.")
 
         # LLM 경로는 노드 순서를 고정하고, 예약 가능한 출발 시각만 계산한다.
         fixed = tuple(str(node) for node in required_path) if required_path is not None else None
@@ -132,6 +158,7 @@ class DistanceAStar:
             intervals[node] = safe
 
         # 특정 다음 구간의 가장 빠른 출발 계산
+        # 가장 이른 예약 가능 시간을 찾는다.
         def earliest(arrival, source_end, target_interval, resource, duration, on_edge=False):
             lower, upper = target_interval
             departure = max(arrival, lower - duration)
@@ -147,14 +174,14 @@ class DistanceAStar:
                     if departure - margin < finish:
                         departure = math.nextafter(departure, math.inf)
             reached = departure + duration
-            if (not math.isfinite(reached) or departure > source_end
-                    or reached < lower or reached > upper):
+            if not math.isfinite(reached) or departure > source_end or reached < lower or reached > upper:
                 return None
             return departure, reached
 
         best, parents, seeds, queue = {}, {}, {}, []
 
         # 직선 이동 시간은 대기나 우회를 제외한 예상치 -> 목적지에 빨리 도착할 가능성이 높은 상태부터 검사
+        # 경로 탐색 대기열에 항목을 추가한다.
         def push(state, arrival):
             heuristic = math.dist(self.nodes[state[0]], self.nodes[end]) / speed_mps
             heapq.heappush(queue, (arrival + heuristic, arrival, state))
@@ -202,17 +229,15 @@ class DistanceAStar:
                     departures.append(departure)
                 prefix, initial_departures = seeds[state]
                 return {
-                    'node_ids': prefix + list(reversed(suffix)),
-                    'segment_departures': initial_departures + list(reversed(departures)),
+                    "node_ids": prefix + list(reversed(suffix)),
+                    "segment_departures": initial_departures + list(reversed(departures)),
                 }
             outgoing = self.edges[node]
             if fixed is not None:
-                outgoing = [(n, d) for n, d in outgoing
-                            if progress + 1 < len(fixed) and n == fixed[progress + 1]]
+                outgoing = [(n, d) for n, d in outgoing if progress + 1 < len(fixed) and n == fixed[progress + 1]]
             for neighbor, distance in outgoing:
                 for i, interval in enumerate(intervals[neighbor]):
-                    move = earliest(arrival, source_end, interval, edge_key(node, neighbor),
-                                    distance / speed_mps)
+                    move = earliest(arrival, source_end, interval, edge_key(node, neighbor), distance / speed_mps)
                     if move is None:
                         continue
                     departure, reached = move

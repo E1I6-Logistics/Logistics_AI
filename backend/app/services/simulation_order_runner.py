@@ -12,16 +12,19 @@ from .workstation_manager import workstation_manager
 
 
 class SimulationOrderRunner:
+    # SimulationOrderRunner의 초기 상태를 설정한다.
     def __init__(self):
         self.work_seconds = float(os.getenv("FMS_SIMULATION_WORK_SECONDS", "1.5"))
         self.tasks = {}
 
+    # 관련을 시작한다.
     def start(self, order_id):
         if order_id not in self.tasks:
             task = asyncio.create_task(self.run(order_id), name=f"simulation-order-{order_id}")
             self.tasks[order_id] = task
             task.add_done_callback(lambda _task: self.tasks.pop(order_id, None))
 
+    # 복구를 시작한다.
     def start_recovery(self, order_id, robot_id):
         key = f"recovery:{robot_id}"
         if key not in self.tasks:
@@ -29,13 +32,15 @@ class SimulationOrderRunner:
             self.tasks[key] = task
             task.add_done_callback(lambda _task: self.tasks.pop(key, None))
 
+    # 실패한 주문의 로봇을 복귀시킨다.
     async def recover(self, order_id, robot_id):
         from .order_manager import order_manager
+
         order = order_manager.orders[order_id]
 
+        # 현재 작업이 유효한지 확인한다.
         def valid():
-            return (mode_manager.mode == "simulation"
-                    and order_manager.recovering.get(robot_id) == order_id)
+            return mode_manager.mode == "simulation" and order_manager.recovering.get(robot_id) == order_id
 
         try:
             if not valid():
@@ -56,14 +61,12 @@ class SimulationOrderRunner:
                 snapshot = mock_fms.robot_snapshot(robot_id, "simulation")
                 if snapshot["connection_state"] != "ONLINE" or snapshot.get("stop_requested"):
                     raise ValueError("복귀 중 연결 또는 정지 상태가 변경되었습니다.")
-                if (snapshot["occupied_node"] == station and snapshot["goal_node"] is None
-                        and snapshot["route"] is None):
+                if snapshot["occupied_node"] == station and snapshot["goal_node"] is None and snapshot["route"] is None:
                     order["recovery_status"] = "RETURNED"
                     return
                 if monotonic() - started > 180:
                     raise ValueError("실패 후 복귀 제한 시간(180초)을 초과했습니다.")
-                if (snapshot["status"] == "IDLE" and snapshot["route"] is None
-                        and snapshot["goal_node"] is None):
+                if snapshot["status"] == "IDLE" and snapshot["route"] is None and snapshot["goal_node"] is None:
                     await dispatch_order_route(recovery, station, snapshot["occupied_node"], valid=valid)
                 await asyncio.sleep(0.1)
         except asyncio.CancelledError:
@@ -76,12 +79,14 @@ class SimulationOrderRunner:
                 mock_fms.stop_robot(robot_id)
                 order["recovery_status"] = "BLOCKED"
                 order["recovery_error"] = str(exc)
-                print(f"[ORDER RECOVERY FAILED] name={order['order_name']} "
-                      f"robot={robot_id} reason={exc}", flush=True)
+                print(
+                    f"[ORDER RECOVERY FAILED] name={order['order_name']} " f"robot={robot_id} reason={exc}", flush=True
+                )
         finally:
             if order_manager.recovering.get(robot_id) == order_id:
                 order_manager.recovering.pop(robot_id, None)
 
+    # 관련을 종료한다.
     async def shutdown(self):
         tasks = list(self.tasks.values())
         for task in tasks:
@@ -92,6 +97,7 @@ class SimulationOrderRunner:
     async def _wait_for_pickup_turn(self, order):
         """Keep robots with the same pickup from blocking one another."""
         from .order_manager import order_manager
+
         order_id = order["order_id"]
         robot_id = order["robot_id"]
         pickups = set(order["pickup_nodes"])
@@ -101,9 +107,11 @@ class SimulationOrderRunner:
                 for previous in order_manager.orders.values():
                     if previous["order_id"] == order_id:
                         break
-                    if (previous["mode"] == "simulation"
-                            and previous["status"] == "IN_PROGRESS"
-                            and pickups.intersection(previous["pickup_nodes"])):
+                    if (
+                        previous["mode"] == "simulation"
+                        and previous["status"] == "IN_PROGRESS"
+                        and pickups.intersection(previous["pickup_nodes"])
+                    ):
                         blocked = True
                         break
             if not blocked:
@@ -112,19 +120,23 @@ class SimulationOrderRunner:
             await asyncio.sleep(0.1)
         return False
 
+    # 모의 로봇을 다음 목적지로 이동시킨다.
     async def _move(self, order, node, phase):
         from .order_manager import order_manager
+
         order_id, robot_id = order["order_id"], order["robot_id"]
         if not order_manager.is_current(order_id, robot_id, phase):
             return False
         snapshot = mock_fms.robot_snapshot(robot_id, "simulation")
         start = snapshot["occupied_node"]
-        if (snapshot["goal_node"] is not None or snapshot["route"] is not None
-                or (start is None and order["driving_mode"] == "llm")):
+        if (
+            snapshot["goal_node"] is not None
+            or snapshot["route"] is not None
+            or (start is None and order["driving_mode"] == "llm")
+        ):
             raise ValueError("로봇의 출발 노드를 확인할 수 없습니다.")
         await dispatch_order_route(
-            order, node, start,
-            valid=lambda: order_manager.is_current(order_id, robot_id, phase),
+            order, node, start, valid=lambda: order_manager.is_current(order_id, robot_id, phase)
         )
         order["_held_node"] = None
         retry_count = 0
@@ -141,13 +153,16 @@ class SimulationOrderRunner:
             # TrafficManager can finish a yield at an intermediate node.
             # Request the same destination again from that confirmed node.
             if snapshot["goal_node"] is None and snapshot["route"] is None:
-                if (snapshot["status"] == "IDLE" and
-                        (snapshot["occupied_node"] is not None or snapshot["occupied_edge"] is not None)):
+                if snapshot["status"] == "IDLE" and (
+                    snapshot["occupied_node"] is not None or snapshot["occupied_edge"] is not None
+                ):
                     retry_count += 1
                     if retry_count > 10:
                         raise ValueError("목적지 재요청 횟수를 초과했습니다.")
                     await dispatch_order_route(
-                        order, node, snapshot["occupied_node"],
+                        order,
+                        node,
+                        snapshot["occupied_node"],
                         valid=lambda: order_manager.is_current(order_id, robot_id, phase),
                     )
                 elif snapshot["status"] != "WAITING":
@@ -155,22 +170,29 @@ class SimulationOrderRunner:
             await asyncio.sleep(0.1)
         return False
 
+    # 픽업 또는 작업대에서 모의 작업을 수행한다.
     async def _work(self, order, phase):
         from .order_manager import order_manager
+
         await asyncio.sleep(self.work_seconds)
         if not order_manager.is_current(order["order_id"], order["robot_id"], phase):
             return False
         snapshot = mock_fms.robot_snapshot(order["robot_id"], "simulation")
-        if (snapshot.get("connection_state") != "ONLINE"
-                or snapshot["status"] != "IDLE"
-                or order.get("_held_node") is None
-                or snapshot["occupied_node"] != order.get("_held_node")
-                or snapshot["route"] is not None or snapshot["goal_node"] is not None):
+        if (
+            snapshot.get("connection_state") != "ONLINE"
+            or snapshot["status"] != "IDLE"
+            or order.get("_held_node") is None
+            or snapshot["occupied_node"] != order.get("_held_node")
+            or snapshot["route"] is not None
+            or snapshot["goal_node"] is not None
+        ):
             raise ValueError("모의 작업 중 연결 또는 작업 위치가 변경되었습니다.")
         return True
 
+    # 관련을 실행한다.
     async def run(self, order_id):
         from .order_manager import order_manager
+
         order = order_manager.orders[order_id]
         robot_id = order["robot_id"]
         try:
@@ -207,7 +229,10 @@ class SimulationOrderRunner:
             order_manager.set_phase(order_id, "WORKING_AT_WORKSTATION")
             if not await self._work(order, "WORKING_AT_WORKSTATION"):
                 return
-            print(f"[ORDER SIM] robot={robot_id} workstation=N{order['workstation_node']} simulated work complete", flush=True)
+            print(
+                f"[ORDER SIM] robot={robot_id} workstation=N{order['workstation_node']} simulated work complete",
+                flush=True,
+            )
             with order_manager.lock:
                 if not order_manager.is_current(order_id, robot_id, "WORKING_AT_WORKSTATION"):
                     return
@@ -224,30 +249,34 @@ class SimulationOrderRunner:
             if snapshot["occupied_node"] is None:
                 raise ValueError("복귀 출발 노드를 확인할 수 없습니다.")
             await dispatch_order_route(
-                order, station, snapshot["occupied_node"],
+                order,
+                station,
+                snapshot["occupied_node"],
                 valid=lambda: order_manager.returning.get(robot_id) == order_id,
             )
             order["_held_node"] = None
             return_retries = 0
-            while (mode_manager.mode == "simulation"
-                   and order_manager.returning.get(robot_id) == order_id):
+            while mode_manager.mode == "simulation" and order_manager.returning.get(robot_id) == order_id:
                 snapshot = mock_fms.robot_snapshot(robot_id, "simulation")
                 if snapshot["connection_state"] != "ONLINE" or snapshot.get("stop_requested"):
                     raise ValueError("복귀 중 로봇 연결 또는 정지 상태가 변경되었습니다.")
-                if (snapshot["occupied_node"] == station and snapshot["goal_node"] is None
-                        and snapshot["route"] is None):
+                if snapshot["occupied_node"] == station and snapshot["goal_node"] is None and snapshot["route"] is None:
                     order_manager.returning.pop(robot_id, None)
                     order["phase"] = "COMPLETED"
                     return
-                if (snapshot["goal_node"] is None and snapshot["route"] is None
-                        and snapshot["status"] == "IDLE"
-                        and (snapshot["occupied_node"] is not None
-                             or snapshot["occupied_edge"] is not None)):
+                if (
+                    snapshot["goal_node"] is None
+                    and snapshot["route"] is None
+                    and snapshot["status"] == "IDLE"
+                    and (snapshot["occupied_node"] is not None or snapshot["occupied_edge"] is not None)
+                ):
                     return_retries += 1
                     if return_retries > 10:
                         raise ValueError("복귀 목적지 재요청 횟수를 초과했습니다.")
                     await dispatch_order_route(
-                        order, station, snapshot["occupied_node"],
+                        order,
+                        station,
+                        snapshot["occupied_node"],
                         valid=lambda: order_manager.returning.get(robot_id) == order_id,
                     )
                 await asyncio.sleep(0.1)

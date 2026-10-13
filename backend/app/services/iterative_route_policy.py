@@ -29,6 +29,7 @@ NEXT_NODE_INSTRUCTIONS = (
 
 MAX_VISITS_PER_NODE = 2
 
+
 # 다음 노드 후보를 만들고, 직전 노드로 되돌아갈 수 있는지 결정
 def next_node_options(
     compact_graph: dict[str, Any],
@@ -42,16 +43,17 @@ def next_node_options(
     max_visits_per_node: int = MAX_VISITS_PER_NODE,
 ) -> dict[str, Any]:
     """
-    이미 사용한 방향성 간선·방문 상한을 넘는 노드는 제외한다. 
-    직전 노드는 다른 후보가 없을 때만 허용한다. 
+    이미 사용한 방향성 간선·방문 상한을 넘는 노드는 제외한다.
+    직전 노드는 다른 후보가 없을 때만 허용한다.
     neighbors는 연결 노드만, all은 전체 노드를 후보로 둔다.
     """
     if candidate_scope not in {"neighbors", "all"}:
         raise ValueError(f"Unsupported candidate_scope: {candidate_scope}")
-    
+
     previous_node = path[-2] if len(path) >= 2 else None
     raw_edges = get_available_edges(compact_graph, current)
 
+    # 주어진 경로 선택이 허용되는지 확인한다.
     def allowed(node: int, *, allow_previous: bool) -> bool:
         return (
             node != current
@@ -60,26 +62,16 @@ def next_node_options(
             and visit_counts.get(node, 0) < max_visits_per_node
         )
 
-    strict_edges = [
-        edge for edge in raw_edges
-        if allowed(int(edge["node"]), allow_previous=False)
-    ]
-    recovery_edges = [
-        edge for edge in raw_edges
-        if allowed(int(edge["node"]), allow_previous=True)
-    ]
+    strict_edges = [edge for edge in raw_edges if allowed(int(edge["node"]), allow_previous=False)]
+    recovery_edges = [edge for edge in raw_edges if allowed(int(edge["node"]), allow_previous=True)]
     backtrack_allowed = not strict_edges and bool(recovery_edges)
     available_edges = recovery_edges if backtrack_allowed else strict_edges
 
     if candidate_scope == "neighbors":
         candidate_nodes = [int(edge["node"]) for edge in available_edges]
     else:
-        strict_nodes = [
-            node for node in nodes if allowed(node, allow_previous=False)
-        ]
-        recovery_nodes = [
-            node for node in nodes if allowed(node, allow_previous=True)
-        ]
+        strict_nodes = [node for node in nodes if allowed(node, allow_previous=False)]
+        recovery_nodes = [node for node in nodes if allowed(node, allow_previous=True)]
         backtrack_allowed = not strict_nodes and bool(recovery_nodes)
         candidate_nodes = recovery_nodes if backtrack_allowed else strict_nodes
 
@@ -90,6 +82,7 @@ def next_node_options(
         "backtrack_allowed": backtrack_allowed,
         "prevented_candidate_count": len(raw_edges) - len(available_edges),
     }
+
 
 # 모델이 다음 노드를 선택할 때 사용할 입력 데이터 구성
 def next_node_state(
@@ -111,7 +104,7 @@ def next_node_state(
     """
     if context_mode not in {"neighbor_context", "full_graph_only"}:
         raise ValueError(f"Unsupported context_mode: {context_mode}")
-    
+
     state = {
         "route_graph": compact_graph,
         "current_node": current,
@@ -120,9 +113,7 @@ def next_node_state(
         "visited_nodes": path,
         "visit_counts": dict(sorted(visit_counts.items())),
         "max_visits_per_node": max_visits_per_node,
-        "used_edges": [
-            {"from": start, "to": end} for start, end in sorted(used_edges)
-        ],
+        "used_edges": [{"from": start, "to": end} for start, end in sorted(used_edges)],
         "backtrack_allowed": options["backtrack_allowed"],
         "accumulated_distance": accumulated_distance,
     }

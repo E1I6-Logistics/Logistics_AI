@@ -3,10 +3,14 @@ import math
 import json
 import zenoh
 
+
+# 목적지 received 이벤트를 처리한다.
 def on_goal_received(sample):
-    payload = sample.payload.to_bytes().decode('utf-8')
+    payload = sample.payload.to_bytes().decode("utf-8")
     print(f"\n[Robot1 Goal 수신] -> {payload}\n")
 
+
+# 명령행 프로그램의 실행 절차를 시작한다.
 def main():
     conf = zenoh.Config()
     conf.insert_json5("connect/endpoints", '["tcp/127.0.0.1:7447"]')
@@ -33,10 +37,10 @@ def main():
                 "y": round(y, 2),
                 "yaw": round(yaw, 2),
                 "battery": round(battery, 1),
-                "status": "NAVIGATING"
+                "status": "NAVIGATING",
             }
 
-            session.put("robot1/telemetry", json.dumps(payload).encode('utf-8'))
+            session.put("robot1/telemetry", json.dumps(payload).encode("utf-8"))
             print(f"[전송] robot1 | x={payload['x']}, y={payload['y']}, 배터리={payload['battery']}%", end="\r")
 
             angle += 0.05
@@ -45,6 +49,7 @@ def main():
         print("\n가상 로봇 종료")
     finally:
         session.close()
+
 
 if __name__ == "__main__":
     main()

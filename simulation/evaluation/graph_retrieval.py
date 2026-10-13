@@ -14,6 +14,7 @@ from typing import Any
 from simulation.services.route_service import compact_graph_edges
 
 
+# 그래프에서 도달 가능한 노드를 찾는다.
 def _reachable(seed: int, adjacency: dict[int, list[int]]) -> set[int]:
     visited = {seed}
     queue = deque([seed])
@@ -52,27 +53,18 @@ def retrieve_path_relevant_graph(
     can_reach_target = _reachable(target_id, reverse)
     relevant_nodes = reachable_from_start.intersection(can_reach_target)
     relevant_edges = [
-        edge
-        for edge in normalized_edges
-        if edge["from"] in relevant_nodes and edge["to"] in relevant_nodes
+        edge for edge in normalized_edges if edge["from"] in relevant_nodes and edge["to"] in relevant_nodes
     ]
 
     adjacency_index = []
     adjacency_map: dict[str, list[dict[str, int | float]]] = {}
     for node in sorted(relevant_nodes):
         neighbors = sorted(
-            (
-                {"node": edge["to"], "distance": edge["weight"]}
-                for edge in relevant_edges
-                if edge["from"] == node
-            ),
+            ({"node": edge["to"], "distance": edge["weight"]} for edge in relevant_edges if edge["from"] == node),
             key=lambda item: (item["node"], item["distance"]),
         )
         adjacency_index.append({"node": node, "neighbors": neighbors})
-        adjacency_map[str(node)] = [
-            {"to": item["node"], "weight": item["distance"]}
-            for item in neighbors
-        ]
+        adjacency_map[str(node)] = [{"to": item["node"], "weight": item["distance"]} for item in neighbors]
 
     metadata = {
         "enabled": True,
@@ -105,9 +97,7 @@ def retrieve_path_relevant_graph(
             "weight_rule": graph.get("weight_rule"),
             "nodes": sorted(relevant_nodes),
             "node_coordinates": [
-                item
-                for item in graph.get("node_coordinates", [])
-                if int(item["id"]) in relevant_nodes
+                item for item in graph.get("node_coordinates", []) if int(item["id"]) in relevant_nodes
             ],
             "edges": relevant_edges,
             "adjacency": adjacency_index,
@@ -128,24 +118,14 @@ def full_graph_metadata(graph: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def ground_truth_coverage(
-    retrieved_graph: dict[str, Any], expected_path: list[int]
-) -> dict[str, Any]:
+def ground_truth_coverage(retrieved_graph: dict[str, Any], expected_path: list[int]) -> dict[str, Any]:
     """Measure retrieval recall after ground truth is known; never feed it to the model."""
     nodes = {int(node) for node in retrieved_graph.get("nodes", [])}
-    edges = {
-        (int(edge["from"]), int(edge["to"]))
-        for edge in compact_graph_edges(retrieved_graph)
-    }
+    edges = {(int(edge["from"]), int(edge["to"])) for edge in compact_graph_edges(retrieved_graph)}
     path_nodes = {int(node) for node in expected_path}
     path_edges = set(zip(expected_path, expected_path[1:]))
     return {
-        "ground_truth_node_recall": (
-            len(path_nodes.intersection(nodes)) / len(path_nodes) if path_nodes else 1.0
-        ),
-        "ground_truth_edge_recall": (
-            len(path_edges.intersection(edges)) / len(path_edges) if path_edges else 1.0
-        ),
-        "ground_truth_path_available": path_nodes.issubset(nodes)
-        and path_edges.issubset(edges),
+        "ground_truth_node_recall": (len(path_nodes.intersection(nodes)) / len(path_nodes) if path_nodes else 1.0),
+        "ground_truth_edge_recall": (len(path_edges.intersection(edges)) / len(path_edges) if path_edges else 1.0),
+        "ground_truth_path_available": path_nodes.issubset(nodes) and path_edges.issubset(edges),
     }

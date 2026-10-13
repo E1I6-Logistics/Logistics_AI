@@ -27,7 +27,7 @@ from .base import LLMPathProvider
 # 이 시점에 한 번 로드해야 Mock Fleet의 LLM_PROVIDER 활성화 검사에도 반영된다.
 # 이미 셸에 설정된 값은 덮어쓰지 않는다.
 
-#프로세스의 환경변수에 넣고, 그다음 os.getenv()가 그 값을 가져온다.
+# 프로세스의 환경변수에 넣고, 그다음 os.getenv()가 그 값을 가져온다.
 load_dotenv(Path(__file__).resolve().parents[4] / "simulation" / ".env", override=False)
 
 
@@ -46,9 +46,7 @@ def get_provider() -> LLMPathProvider:
 
     if provider_key not in _PROVIDERS:
         available = ", ".join(sorted(_PROVIDERS))
-        raise RuntimeError(
-            f"알 수 없는 LLM_PROVIDER: '{provider_key}' (사용 가능: {available})"
-        )
+        raise RuntimeError(f"알 수 없는 LLM_PROVIDER: '{provider_key}' (사용 가능: {available})")
 
     # 선택된 provider의 SDK와 구현만 이 시점에 불러온다.
     module_name, class_name = _PROVIDERS[provider_key]

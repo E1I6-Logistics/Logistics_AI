@@ -19,11 +19,7 @@ class RouteSelector(ABC):
     name = "base"
 
     @abstractmethod
-    def select_route(
-        self,
-        state: str | dict[str, Any],
-        candidates: Mapping[str, str],
-    ) -> dict[str, Any]:
+    def select_route(self, state: str | dict[str, Any], candidates: Mapping[str, str]) -> dict[str, Any]:
         """후보 ID와 설명을 받아 선택 결과와 신뢰도를 반환한다."""
         raise NotImplementedErro
 
@@ -35,13 +31,12 @@ _SELECTORS: dict[str, tuple[str, str]] = {
 }
 
 
+# 선택기를 조회한다.
 def get_selector() -> RouteSelector:
     selector_key = os.getenv("ROUTE_SELECTOR", "laya").strip().lower()
     if selector_key not in _SELECTORS:
         available = ", ".join(sorted(_SELECTORS))
-        raise RuntimeError(
-            f"알 수 없는 ROUTE_SELECTOR: '{selector_key}' (사용 가능: {available})"
-        )
+        raise RuntimeError(f"알 수 없는 ROUTE_SELECTOR: '{selector_key}' (사용 가능: {available})")
 
     module_name, class_name = _SELECTORS[selector_key]
     module = import_module(module_name, package=__package__)

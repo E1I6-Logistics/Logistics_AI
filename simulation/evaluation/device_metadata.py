@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 
+# 평가 장치의 종류를 판별한다.
 def _device_kind(device: str | None) -> str:
     normalized = (device or "").strip().lower()
     if normalized.startswith(("cuda", "mps", "xpu", "gpu")):
@@ -20,12 +21,11 @@ def _device_kind(device: str | None) -> str:
 
 def git_metadata(root: Path) -> dict[str, Any]:
     """Record the exact source state used by a benchmark run."""
+
+    # 관련을 실행한다.
     def run(*arguments: str) -> str | None:
         try:
-            return subprocess.check_output(
-                ["git", *arguments], cwd=root, text=True,
-                stderr=subprocess.DEVNULL,
-            ).strip()
+            return subprocess.check_output(["git", *arguments], cwd=root, text=True, stderr=subprocess.DEVNULL).strip()
         except (OSError, subprocess.CalledProcessError):
             return None
 
@@ -36,18 +36,14 @@ def git_metadata(root: Path) -> dict[str, Any]:
     }
 
 
-def selector_device_metadata(
-    selector: Any, result: Mapping[str, Any] | None = None
-) -> dict[str, Any]:
+def selector_device_metadata(selector: Any, result: Mapping[str, Any] | None = None) -> dict[str, Any]:
     """Read the actual Laya/Kev runtime device after at least one inference."""
     runtime: Mapping[str, Any] = {}
     if isinstance(result, Mapping) and isinstance(result.get("runtime"), Mapping):
         runtime = result["runtime"]
     if not runtime:
         inference = getattr(selector, "last_inference", None)
-        if isinstance(inference, Mapping) and isinstance(
-            inference.get("runtime"), Mapping
-        ):
+        if isinstance(inference, Mapping) and isinstance(inference.get("runtime"), Mapping):
             runtime = inference["runtime"]
 
     requested = getattr(selector, "device", None)
@@ -76,24 +72,12 @@ def selector_device_metadata(
     }
 
 
-def ollama_model_device_metadata(
-    payload: Mapping[str, Any], model_name: str
-) -> dict[str, Any]:
+def ollama_model_device_metadata(payload: Mapping[str, Any], model_name: str) -> dict[str, Any]:
     """Classify Ollama CPU/GPU placement from the official /api/ps fields."""
     models = payload.get("models", [])
-    loaded = next(
-        (
-            item for item in models
-            if item.get("name") == model_name or item.get("model") == model_name
-        ),
-        None,
-    )
+    loaded = next((item for item in models if item.get("name") == model_name or item.get("model") == model_name), None)
     if loaded is None:
-        return {
-            "source": "ollama_api_ps",
-            "kind": "unknown",
-            "error": "model was not present in /api/ps",
-        }
+        return {"source": "ollama_api_ps", "kind": "unknown", "error": "model was not present in /api/ps"}
 
     size = int(loaded.get("size") or 0)
     size_vram = int(loaded.get("size_vram") or 0)

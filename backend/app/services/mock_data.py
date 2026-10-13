@@ -1,5 +1,3 @@
-
-
 from __future__ import annotations
 
 from copy import deepcopy
@@ -26,28 +24,25 @@ _MOCK_ROBOT_DEFINITIONS = {
     "robot3": {"node_id": "2", "status": "IDLE", "battery": 64.0},
 }
 
-_MOCK_CONNECTIONS = {
-    "10.10.141.225": "robot1",
-    "10.10.141.221": "robot2",
-    "10.10.141.222": "robot3",
-}
+_MOCK_CONNECTIONS = {"10.10.141.225": "robot1", "10.10.141.221": "robot2", "10.10.141.222": "robot3"}
 
 
 class MockFmsStore:
     """Volatile state used only to keep the frontend contract operational."""
 
     # MockFmsStore - FMS 상태를 유지하는 임시 저장소
+    # MockFmsStore의 초기 상태를 설정한다.
     def __init__(self, reservations=None) -> None:
         self._robots: dict[str, dict[str, Any]] = {}
         self._traffic = TrafficManager(
-            self._robots, reservations, speed_mps=SIMULATION_SPEED_MPS,
-            safety_margin=RESERVATION_MARGIN_S,
+            self._robots, reservations, speed_mps=SIMULATION_SPEED_MPS, safety_margin=RESERVATION_MARGIN_S
         )
         self._lock = self._traffic.lock
         self._last_tick = monotonic()
         self._blocked_ips: set[str] = set()
         self.reset()
 
+    # 관련을 초기화한다.
     def reset(self) -> None:
         with self._lock:
             self._traffic.reset_after_stop()
@@ -76,6 +71,7 @@ class MockFmsStore:
                     "connection_state": "ONLINE",
                 }
 
+    # 로봇을 조회한다.
     def _get_robot(self, robot_id: str) -> dict[str, Any]:
         backend_id = normalize_robot_id(robot_id)
         robot = self._robots.get(backend_id)
@@ -106,6 +102,7 @@ class MockFmsStore:
             self._traffic.retry_waiting(now, graph, planner)
 
     # 프론트에 보낼 Robot 상태 Snapshot 생성 기능
+    # 현재 상태의 복사본을 만든다.
     @staticmethod
     def _snapshot(robot: dict[str, Any], mode: str) -> dict[str, Any]:
         result = deepcopy(robot)
@@ -123,16 +120,19 @@ class MockFmsStore:
         return result
 
     # 전체 Robot 상태 반환 기능
+    # 모든 모의 로봇의 현재 상태를 반환한다.
     def robot_snapshots(self, mode: str) -> list[dict[str, Any]]:
         with self._lock:
             return [self._snapshot(robot, mode) for robot in self._robots.values()]
 
     # 한가지 Robot 상태 반환 기능
+    # 지정한 모의 로봇의 현재 상태를 반환한다.
     def robot_snapshot(self, robot_id: str, mode: str) -> dict[str, Any]:
         with self._lock:
             return self._snapshot(self._get_robot(robot_id), mode)
 
     # 현재 연결 상태를 Mock으로 반환
+    # 현재 연결 상태 목록을 반환한다.
     def connections(self) -> list[dict[str, Any]]:
         with self._lock:
             return [
@@ -148,10 +148,9 @@ class MockFmsStore:
             ]
 
     # 공통 리스폰 생성 기능
+    # 모의 명령의 응답 데이터를 만든다.
     @staticmethod
-    def _command_response(
-        robot_id: str, command: str, target: dict[str, Any] | None
-    ) -> dict[str, Any]:
+    def _command_response(robot_id: str, command: str, target: dict[str, Any] | None) -> dict[str, Any]:
         backend_id = normalize_robot_id(robot_id)
         return {
             "success": True,
@@ -164,7 +163,6 @@ class MockFmsStore:
             "mock": True,
         }
 
-    
     def navigate_to_node(self, robot_id: str, node_id: str | int, *, required_path=None) -> dict[str, Any]:
         """가상 로봇의 이동 요청을 공통 교통 제어 서비스에 전달한다."""
         with self._lock:
@@ -174,16 +172,14 @@ class MockFmsStore:
             graph = load_route_graph()
             # 시뮬레이션은 이 잠금 안에서 즉시 정지할 수 있다.
             self._traffic.request_navigation_after_stop(
-                robot["robot_id"], target["id"], now=monotonic(), graph=graph, required_path=required_path,
+                robot["robot_id"], target["id"], now=monotonic(), graph=graph, required_path=required_path
             )
             already_arrived = robot["goal_node"] is None
             response_route = deepcopy(robot["route"])  # 응답 경로는 잠금 안에서 복사하는 편이 좋음
             waiting = robot["status"] == "WAITING"
 
         result = self._command_response(
-            robot_id,
-            "goal-node",
-            {"node_id": target["id"], "x": target["x"], "y": target["y"]},
+            robot_id, "goal-node", {"node_id": target["id"], "x": target["x"], "y": target["y"]}
         )
 
         if already_arrived:
@@ -203,9 +199,7 @@ class MockFmsStore:
             graph = load_route_graph()
             path_plan = DistanceAStar(graph)
             x, y = float(x), float(y)
-            occupied_node, occupied_edge = locate_occupancy(
-                graph, path_plan.nodes, x, y,
-            )
+            occupied_node, occupied_edge = locate_occupancy(graph, path_plan.nodes, x, y)
 
             robot = self._get_robot(robot_id)
             probe = dict(robot, occupied_node=occupied_node, occupied_edge=occupied_edge)
@@ -228,11 +222,7 @@ class MockFmsStore:
                 }
             )
 
-        return self._command_response(
-            robot_id,
-            "goal",
-            {"target_x": float(x), "target_y": float(y)},
-        )
+        return self._command_response(robot_id, "goal", {"target_x": float(x), "target_y": float(y)})
 
     def stop_robot(self, robot_id: str) -> dict[str, Any]:
         """가상 로봇을 즉시 정지하고 요청을 취소한다."""
@@ -251,13 +241,21 @@ class MockFmsStore:
         return {
             "type": "ack",
             "data": self._command_response(
-                robot_id,
-                "cmd_vel",
-                {"linear_x": float(linear_x), "angular_z": float(angular_z)},
+                robot_id, "cmd_vel", {"linear_x": float(linear_x), "angular_z": float(angular_z)}
             ),
         }
 
-    def advance_mock_robot(self, robot_id: str, dt: float, speed_mps: float = SIMULATION_SPEED_MPS, *, now: float | None = None, graph=None, nodes=None) -> None:
+    # 모의 로봇을 진행한다.
+    def advance_mock_robot(
+        self,
+        robot_id: str,
+        dt: float,
+        speed_mps: float = SIMULATION_SPEED_MPS,
+        *,
+        now: float | None = None,
+        graph=None,
+        nodes=None,
+    ) -> None:
         # 방어 코드
         if not math.isfinite(dt) or not math.isfinite(speed_mps):
             return
@@ -305,7 +303,7 @@ class MockFmsStore:
                 remaining = min(remaining, speed_mps * max(0.0, now - departure))
                 finish = now + (distance - remaining) / speed_mps
                 permission = self._traffic.check_segment_permission(
-                    robot["robot_id"], now=now, expected_arrival_at=finish, graph=graph,
+                    robot["robot_id"], now=now, expected_arrival_at=finish, graph=graph
                 )
                 if permission.decision == "replan":
                     # mock 실행은 즉시 정지한다. 실제 실행기는 정지 확인 후 호출해야 한다.

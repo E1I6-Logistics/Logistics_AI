@@ -9,12 +9,7 @@ class LLMPathProvider(ABC):
     name: str = "base"
 
     @abstractmethod
-    def compute_shortest_path(
-        self,
-        raw_graph: dict,
-        start_id: int,
-        target_id: int,
-    ) -> dict:
+    def compute_shortest_path(self, raw_graph: dict, start_id: int, target_id: int) -> dict:
         """
         LLM에 raw_graph, start_id, target_id를 전달해 경로를 계산시킨다.
 
@@ -93,11 +88,7 @@ class LLMPathProvider(ABC):
         "type": "object",
         "additionalProperties": False,
         "properties": {
-            "path": {
-                "type": "array",
-                "items": {"type": "integer"},
-                "minItems": 1,
-            },
+            "path": {"type": "array", "items": {"type": "integer"}, "minItems": 1},
             "reported_total_distance": {"type": "number"},
         },
         "required": ["path", "reported_total_distance"],
@@ -108,24 +99,11 @@ class LLMPathProvider(ABC):
         "type": "object",
         "additionalProperties": False,
         "properties": {
-            "reasoning_steps": {
-                "type": "array",
-                "items": {"type": "string"},
-                "minItems": 1,
-                "maxItems": 8,
-            },
-            "path": {
-                "type": "array",
-                "items": {"type": "integer"},
-                "minItems": 1,
-            },
+            "reasoning_steps": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 8},
+            "path": {"type": "array", "items": {"type": "integer"}, "minItems": 1},
             "reported_total_distance": {"type": "number"},
         },
-        "required": [
-            "reasoning_steps",
-            "path",
-            "reported_total_distance",
-        ],
+        "required": ["reasoning_steps", "path", "reported_total_distance"],
     }
 
     @staticmethod
@@ -138,23 +116,16 @@ class LLMPathProvider(ABC):
             raise RuntimeError(f"{var_name} 환경변수가 설정되지 않았습니다.")
         return value
 
-    def build_llm_input(
-        self,
-        raw_graph: dict,
-        start_id: int,
-        target_id: int,
-    ) -> dict:
+    def build_llm_input(self, raw_graph: dict, start_id: int, target_id: int) -> dict:
         """세 provider가 공통으로 사용하는 입력 JSON 형태."""
         return {
             "route_graph": raw_graph,
             "start_node": start_id,
             "target_node": target_id,
-            "required_path_endpoints": {
-                "first": start_id,
-                "last": target_id,
-            },
+            "required_path_endpoints": {"first": start_id, "last": target_id},
         }
 
+    # 그래프 경로 선택용 모델 지침을 만든다.
     def instructions_for_graph(self, graph: dict) -> str:
         if graph.get("type") == "CompactRouteGraph":
             return self.COMPACT_INSTRUCTIONS

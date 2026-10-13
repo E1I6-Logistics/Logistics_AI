@@ -9,14 +9,17 @@ from simulation.services.route_service import build_route_inputs
 MOCK_DIR = Path(__file__).resolve().parent / "mock"
 
 
+# 그래프를 불러온다.
 def load_graph():
     return json.loads((MOCK_DIR / "route_graph.geojson").read_text(encoding="utf-8"))
 
 
+# responses를 불러온다.
 def load_responses():
     return json.loads((MOCK_DIR / "llm_responses.json").read_text(encoding="utf-8"))
 
 
+# 경로 평가에 사용할 입력 사례를 만든다.
 def route_inputs():
     # 비교 테스트도 서비스가 해석한 최종 edge weight를 그대로 사용한다.
     return build_route_inputs(load_graph())

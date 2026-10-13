@@ -32,9 +32,7 @@ def selected_provider_config() -> tuple[str, str]:
     """Validate only the credentials needed by the selected provider."""
     provider = os.getenv("LLM_PROVIDER", "").strip().lower()
     if provider not in {"openai", "anthropic", "ollama"}:
-        raise ValueError(
-            "simulation/.env에 LLM_PROVIDER를 openai, anthropic 또는 ollama로 설정하세요."
-        )
+        raise ValueError("simulation/.env에 LLM_PROVIDER를 openai, anthropic 또는 ollama로 설정하세요.")
 
     model_name = f"{provider.upper()}_MODEL"
     model = os.getenv(model_name, "").strip()
@@ -80,17 +78,12 @@ def run_compare(args: argparse.Namespace) -> int:
     """Run one code-versus-LLM route comparison."""
     llm_graph_path = resolve_llm_route_graph_path(args.llm_graph)
     llm_graph = validate_selected_llm_graph(llm_graph_path)
-    print(
-        f"LLM 입력 그래프: {llm_graph_path.name} " f"({llm_graph.get('type', 'GeoJSON')})",
-        flush=True,
-    )
+    print(f"LLM 입력 그래프: {llm_graph_path.name} " f"({llm_graph.get('type', 'GeoJSON')})", flush=True)
 
     print("경로 그래프와 코드 최단 경로를 계산합니다...", flush=True)
     graph = load_route_graph()
     points, edges = build_route_inputs(graph)
-    baseline = [
-        int(node_id) for node_id in plan_route(str(args.start), str(args.goal), graph)["node_ids"]
-    ]
+    baseline = [int(node_id) for node_id in plan_route(str(args.start), str(args.goal), graph)["node_ids"]]
     print(f"코드 경로: {baseline}", flush=True)
 
     if args.dry_run:
@@ -101,13 +94,7 @@ def run_compare(args: argparse.Namespace) -> int:
     print(f"{provider} 모델 {model}에 요청 중...", flush=True)
     started = monotonic()
     result = compare_path_with_llm(
-        points,
-        edges,
-        args.start,
-        args.goal,
-        baseline,
-        route_graph_path=llm_graph_path,
-        max_attempts=args.max_attempts,
+        points, edges, args.start, args.goal, baseline, route_graph_path=llm_graph_path, max_attempts=args.max_attempts
     )
     print(f"응답 완료: {monotonic() - started:.1f}초", flush=True)
     print(f"상태: {result['status']}")
@@ -139,10 +126,7 @@ def run_build_compact(args: argparse.Namespace) -> int:
 
     graph = json.loads(source_path.read_text(encoding="utf-8"))
     compact = build_compact_route_graph(graph, source_path.name)
-    output_path.write_text(
-        json.dumps(compact, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
+    output_path.write_text(json.dumps(compact, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(f"Compact Graph 생성 완료: {output_path}")
     print(f"노드 {len(compact['nodes'])}개, 엣지 {len(compact['edges'])}개")
     return 0
@@ -156,48 +140,34 @@ def run_summarize(args: argparse.Namespace) -> int:
     return 0
 
 
+# 명령행 인자 해석기를 구성한다.
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="FMS 경로 모델 평가 도구")
     commands = parser.add_subparsers(dest="command", required=True)
 
-    compare_parser = commands.add_parser(
-        "compare", description="코드 최단 경로와 LLM 경로를 비교합니다."
-    )
+    compare_parser = commands.add_parser("compare", description="코드 최단 경로와 LLM 경로를 비교합니다.")
     compare_parser.add_argument("--start", type=int, required=True)
     compare_parser.add_argument("--goal", type=int, required=True)
+    compare_parser.add_argument("--dry-run", action="store_true", help="LLM 호출 없이 코드 경로만 확인")
     compare_parser.add_argument(
-        "--dry-run", action="store_true", help="LLM 호출 없이 코드 경로만 확인"
+        "--llm-graph", default=None, metavar="FILE", help="LLM에 전달할 routes 폴더의 원본 또는 Compact Graph"
     )
-    compare_parser.add_argument(
-        "--llm-graph",
-        default=None,
-        metavar="FILE",
-        help="LLM에 전달할 routes 폴더의 원본 또는 Compact Graph",
-    )
-    compare_parser.add_argument(
-        "--max-attempts",
-        type=int,
-        default=None,
-        help="LLM 최대 시도 횟수",
-    )
+    compare_parser.add_argument("--max-attempts", type=int, default=None, help="LLM 최대 시도 횟수")
     compare_parser.set_defaults(handler=run_compare)
 
-    compact_parser = commands.add_parser(
-        "build-compact", description="GeoJSON을 LLM용 Compact Graph로 변환합니다."
-    )
+    compact_parser = commands.add_parser("build-compact", description="GeoJSON을 LLM용 Compact Graph로 변환합니다.")
     compact_parser.add_argument("--source", default="test.geojson")
     compact_parser.add_argument("--output", default="test_compact_graph.geojson")
     compact_parser.set_defaults(handler=run_build_compact)
 
-    summary_parser = commands.add_parser(
-        "summarize", description="LLM 경로 비교 결과를 집계합니다."
-    )
+    summary_parser = commands.add_parser("summarize", description="LLM 경로 비교 결과를 집계합니다.")
     summary_parser.add_argument("--input", type=Path, default=LLM_RESULT_PATH)
     summary_parser.add_argument("--output", type=Path, default=LLM_SUMMARY_PATH)
     summary_parser.set_defaults(handler=run_summarize)
     return parser
 
 
+# 명령행 프로그램의 실행 절차를 시작한다.
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:

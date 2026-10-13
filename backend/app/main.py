@@ -40,11 +40,12 @@ from .services.mqtt_manager import mqtt_manager
 # Uvicorn 자체 로그에도 날짜와 시각을 표시한다.
 for logger_name in ("uvicorn.error", "uvicorn.access"):
     for handler in logging.getLogger(logger_name).handlers:
-        handler.setFormatter(logging.Formatter(
-            "[%(asctime)s] [%(levelname)s] [UVICORN] %(message)s",
-            datefmt="%Y-%m-%d %H:%M:%S"))
+        handler.setFormatter(
+            logging.Formatter("[%(asctime)s] [%(levelname)s] [UVICORN] %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
+        )
 
 
+# 서버 시작과 종료 시 필요한 자원을 관리한다.
 @asynccontextmanager
 async def lifespan(app: FastAPI):
 
@@ -68,10 +69,7 @@ async def lifespan(app: FastAPI):
 
     ros_thread.start()
 
-    simulation_task = asyncio.create_task(
-        run_mock_simulation(),
-        name="mock-simulation",
-    )
+    simulation_task = asyncio.create_task(run_mock_simulation(), name="mock-simulation")
 
     navigation_task = asyncio.create_task(run_real_navigation(), name="real-navigation")
 
@@ -81,6 +79,7 @@ async def lifespan(app: FastAPI):
     finally:
         await scenario_manager.shutdown()
         from .services.simulation_order_runner import simulation_order_runner
+
         await simulation_order_runner.shutdown()
         navigation_task.cancel()
         with suppress(asyncio.CancelledError):
@@ -103,18 +102,10 @@ async def lifespan(app: FastAPI):
             mqtt_manager.stop()
 
 
-app = FastAPI(
-    title="E1I6 Logistics FMS API",
-    version="3.0.0",
-    lifespan=lifespan,
-)
+app = FastAPI(title="E1I6 Logistics FMS API", version="3.0.0", lifespan=lifespan)
 
 app.add_middleware(
-    CORSMiddleware,
-    allow_origins=CORS_ORIGINS,
-    allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    CORSMiddleware, allow_origins=CORS_ORIGINS, allow_credentials=False, allow_methods=["*"], allow_headers=["*"]
 )
 
 app.include_router(map_router)
@@ -128,6 +119,7 @@ app.include_router(omx_router)
 app.include_router(scenarios_router)
 
 
+# 서비스 기본 정보를 반환한다.
 @app.get("/")
 async def root():
     return {
@@ -139,17 +131,15 @@ async def root():
     }
 
 
+# 서비스의 정상 동작 상태를 반환한다.
 @app.get("/health")
 async def health():
     mode = mode_manager.mode
 
-    return {
-        "status": "ok",
-        "mode": mode,
-        "data_source": "mock" if mode == "simulation" else "ros2",
-    }
+    return {"status": "ok", "mode": mode, "data_source": "mock" if mode == "simulation" else "ros2"}
 
 
+# 모의 시뮬레이션을 실행한다.
 async def run_mock_simulation() -> None:
     interval = 0.1  # 약 10Hz
     previous_time = monotonic()
@@ -163,28 +153,29 @@ async def run_mock_simulation() -> None:
 
         mode = mode_manager.mode
         from .services.order_manager import order_manager
+
         try:
             await order_manager.tick()
         except Exception as exc:
-            print(f"[{strftime('%Y-%m-%d %H:%M:%S')}] [ERROR] [ORDER LOOP] "
-                  f"error_type={type(exc).__name__} detail={exc!r}", flush=True)
+            print(
+                f"[{strftime('%Y-%m-%d %H:%M:%S')}] [ERROR] [ORDER LOOP] "
+                f"error_type={type(exc).__name__} detail={exc!r}",
+                flush=True,
+            )
         if mode != "simulation":
             continue
 
         # 실제 모드 시작/실행에는 시뮬레이션 모듈이 필요하지 않다.
         from .services.mock_data import mock_fms
+
         mock_fms.advance_simulation(dt, now)
 
         # 갱신 후의 상태를 웹에 전송
         for state in mock_fms.robot_snapshots(mode):
-            await manager.broadcast(
-                {
-                    "type": "telemetry",
-                    "data": state,
-                }
-            )
+            await manager.broadcast({"type": "telemetry", "data": state})
 
 
+# 실제 주행을 실행한다.
 async def run_real_navigation() -> None:
     # 화면 모드가 바뀌어도 이미 접수한 실제 ROS 요청의 관리를 계속한다.
     while True:
@@ -192,5 +183,8 @@ async def run_real_navigation() -> None:
         try:
             ros_gateway.advance_navigation()
         except (ValueError, RuntimeError) as exc:
-            print(f"[{strftime('%Y-%m-%d %H:%M:%S')}] [ERROR] [MAIN REAL NAV ERROR] "
-                  f"주행 상태 확인 중 오류 error_type={type(exc).__name__} detail={exc!r}", flush=True)
+            print(
+                f"[{strftime('%Y-%m-%d %H:%M:%S')}] [ERROR] [MAIN REAL NAV ERROR] "
+                f"주행 상태 확인 중 오류 error_type={type(exc).__name__} detail={exc!r}",
+                flush=True,
+            )

@@ -3,6 +3,7 @@ import time
 
 
 class OMX:
+    # OMX의 초기 상태를 설정한다.
     def __init__(self, omx_id, mqtt_client):
         self.omx_id = omx_id
         self.mqtt_client = mqtt_client
@@ -26,6 +27,7 @@ class OMX:
     # Main -> OMX 명령
     # =========================================================
 
+    # 명령을 전송한다.
     def send_command(self, job_id, items):
         self.job_id = job_id
         self.items = items
@@ -45,6 +47,7 @@ class OMX:
     # OMX -> Main 상태 처리
     # =========================================================
 
+    # 상태를 갱신한다.
     def update_status(self, data):
         self.connected = True
         self.last_seen = time.time()
@@ -52,6 +55,7 @@ class OMX:
         if "state" in data:
             self.state = data["state"]
 
+    # 응답을 갱신한다.
     def update_ack(self, data):
         self.connected = True
         self.last_seen = time.time()
@@ -63,6 +67,7 @@ class OMX:
         else:
             self.state = "REJECTED"
 
+    # 진행을 갱신한다.
     def update_progress(self, data):
         self.connected = True
         self.last_seen = time.time()
@@ -74,6 +79,7 @@ class OMX:
 
         self.state = "WORKING"
 
+    # 결과를 갱신한다.
     def update_result(self, data):
         self.connected = True
         self.last_seen = time.time()
@@ -93,6 +99,7 @@ class OMX:
     # 연결 상태
     # =========================================================
 
+    # 연결을 확인한다.
     def check_connection(self, timeout=5):
         elapsed = time.time() - self.last_seen
 
@@ -105,8 +112,12 @@ class OMX:
     # MQTT Publish
     # =========================================================
 
+    # 관련을 발행한다.
     def _publish(self, topic, payload):
         message = json.dumps(payload)
         self.mqtt_client.publish(topic, message)
 
-        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] [INFO] [OMX:{self.omx_id}] " f"Published {topic}: {payload}", flush=True)
+        print(
+            f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] [INFO] [OMX:{self.omx_id}] " f"Published {topic}: {payload}",
+            flush=True,
+        )

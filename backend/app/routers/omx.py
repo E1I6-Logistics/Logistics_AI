@@ -13,6 +13,7 @@ OMX_POSITIONS = {
 router = APIRouter(prefix="/api/omx", tags=["omx"])
 
 
+# 연결된 OMX 장치 목록을 반환한다.
 @router.get("")
 async def get_omx_devices():
     result = []

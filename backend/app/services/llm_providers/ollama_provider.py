@@ -14,6 +14,7 @@ from .base import LLMPathProvider
 class OllamaPathProvider(LLMPathProvider):
     name = "ollama"
 
+    # OllamaPathProvider의 초기 상태를 설정한다.
     def __init__(
         self,
         model: str | None = None,
@@ -27,31 +28,19 @@ class OllamaPathProvider(LLMPathProvider):
         output_schema: dict[str, Any] | None = None,
     ):
         self.model = model or self._require_env("OLLAMA_MODEL")
-        self.options = options or {
-            "temperature": 0,
-            "seed": 20260928,
-            "num_ctx": 4096,
-            "num_predict": 512,
-        }
+        self.options = options or {"temperature": 0, "seed": 20260928, "num_ctx": 4096, "num_predict": 512}
         self.keep_alive = keep_alive
         self.think = think
         self.instructions = instructions
         self.output_schema = output_schema or self.OUTPUT_SCHEMA
         self.host = host or os.getenv("OLLAMA_HOST")
         self.timeout_seconds = (
-            timeout_seconds
-            if timeout_seconds is not None
-            else float(os.getenv("LLM_TIMEOUT_SECONDS", "60"))
+            timeout_seconds if timeout_seconds is not None else float(os.getenv("LLM_TIMEOUT_SECONDS", "60"))
         )
-        self.client = ollama.Client(
-            host=self.host,
-            timeout=self.timeout_seconds,
-        )
+        self.client = ollama.Client(host=self.host, timeout=self.timeout_seconds)
         self.last_inference = None
 
-    def _response_diagnostics(
-        self, raw: dict[str, Any], requested_think: bool | None
-    ) -> dict[str, Any]:
+    def _response_diagnostics(self, raw: dict[str, Any], requested_think: bool | None) -> dict[str, Any]:
         """Record ignored think control and exhausted output budgets."""
         message = raw.get("message") or {}
         content = message.get("content") or ""
@@ -67,16 +56,11 @@ class OllamaPathProvider(LLMPathProvider):
             "eval_count": raw.get("eval_count"),
             "output_budget": self.options.get("num_predict"),
             "output_budget_exhausted": done_reason == "length",
-            "think_control_ignored": requested_think is False
-            and bool(thinking.strip()),
+            "think_control_ignored": requested_think is False and bool(thinking.strip()),
         }
 
     def request_structured(
-        self,
-        *,
-        instructions: str,
-        payload: dict[str, Any],
-        output_schema: dict[str, Any],
+        self, *, instructions: str, payload: dict[str, Any], output_schema: dict[str, Any]
     ) -> dict[str, Any]:
         """Make one schema-constrained request for either benchmark strategy."""
         self.last_inference = None
@@ -84,12 +68,7 @@ class OllamaPathProvider(LLMPathProvider):
             model=self.model,
             messages=[
                 {"role": "system", "content": instructions},
-                {
-                    "role": "user",
-                    "content": json.dumps(
-                        payload, ensure_ascii=False, separators=(",", ":")
-                    ),
-                },
+                {"role": "user", "content": json.dumps(payload, ensure_ascii=False, separators=(",", ":"))},
             ],
             format=output_schema,
             options=self.options,
@@ -102,17 +81,9 @@ class OllamaPathProvider(LLMPathProvider):
             request["think"] = False
 
         response = self.client.chat(**request)
-        raw = (
-            response.model_dump(mode="json")
-            if hasattr(response, "model_dump")
-            else dict(response)
-        )
+        raw = response.model_dump(mode="json") if hasattr(response, "model_dump") else dict(response)
         diagnostics = self._response_diagnostics(raw, request.get("think"))
-        self.last_inference = {
-            "request": request,
-            "response": raw,
-            "diagnostics": diagnostics,
-        }
+        self.last_inference = {"request": request, "response": raw, "diagnostics": diagnostics}
         content = response["message"]["content"]
         if not content:
             raise RuntimeError(
@@ -126,12 +97,7 @@ class OllamaPathProvider(LLMPathProvider):
             )
         return json.loads(content)
 
-    def compute_shortest_path(
-        self,
-        raw_graph: dict,
-        start_id: int,
-        target_id: int,
-    ) -> dict:
+    def compute_shortest_path(self, raw_graph: dict, start_id: int, target_id: int) -> dict:
         """Request a complete path in one API call."""
         return self.request_structured(
             instructions=self.instructions or self.instructions_for_graph(raw_graph),

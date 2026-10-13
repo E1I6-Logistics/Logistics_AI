@@ -11,6 +11,7 @@ from backend.app.services.simulation_order_runner import simulation_order_runner
 from backend.app.services.workstation_manager import workstation_manager
 
 
+# 테스트 사이에 공유 상태를 초기화한다.
 def _reset(monkeypatch):
     mode_manager.set_mode("simulation", "algorithm")
     mock_fms.reset()
@@ -24,26 +25,34 @@ def _reset(monkeypatch):
     simulation_order_runner.work_seconds = 0.01
     visits = []
 
+    # 테스트 로봇을 지정한 노드에 도착시킨다.
     def arrive(robot_id, node_id, *, required_path=None):
         node = str(node_id)
         visits.append((robot_id, node, required_path))
         with mock_fms._lock:
             robot = mock_fms._robots[robot_id]
-            robot.update(occupied_node=node, current_node=node, occupied_edge=None,
-                         goal_node=None, route=None, status="IDLE", stop_requested=False)
+            robot.update(
+                occupied_node=node,
+                current_node=node,
+                occupied_edge=None,
+                goal_node=None,
+                route=None,
+                status="IDLE",
+                stop_requested=False,
+            )
         return {"status": "SUCCESS"}
 
     monkeypatch.setattr(mock_fms, "navigate_to_node", arrive)
     return visits
 
 
+# 시뮬레이션이 픽업대와 작업대를 거쳐 복귀하는지 검증한다.
 def test_simulation_pickups_then_workstation_then_return(monkeypatch):
     visits = _reset(monkeypatch)
 
+    # 주문 흐름을 재현하는 테스트 시나리오를 실행한다.
     async def scenario():
-        order = order_manager.create_order(
-            items={"A": 1, "B": 0, "C": 2, "D": 0}, total_quantity=3,
-        )
+        order = order_manager.create_order(items={"A": 1, "B": 0, "C": 2, "D": 0}, total_quantity=3)
         assert order["workstation_node"] is None
         await order_manager.tick()
         assert order_manager.get_order(order["order_id"])["robot_id"] == "robot1"
@@ -56,6 +65,7 @@ def test_simulation_pickups_then_workstation_then_return(monkeypatch):
     asyncio.run(scenario())
 
 
+# 네 가지 운영 모드가 각 기능 정책을 따르는지 검증한다.
 @pytest.mark.parametrize("environment", ["simulation", "real"])
 @pytest.mark.parametrize("operation", ["algorithm", "ai"])
 def test_four_operating_modes_use_feature_policies(monkeypatch, environment, operation):
@@ -64,19 +74,28 @@ def test_four_operating_modes_use_feature_policies(monkeypatch, environment, ope
     from backend.app.routers.orders import create_order
     from backend.app.schemas.order import CreateOrderRequest
     from backend.app.services import route_model_catalog
+
     monkeypatch.setattr(route_model_catalog, "require_enabled_model", lambda *_: None)
 
+    # 주문 흐름을 재현하는 테스트 시나리오를 실행한다.
     async def scenario():
         result = await set_mode(ModeRequest(mode=environment, operation_mode=operation))
         assert (result["mode"], result["operation_mode"]) == (environment, operation)
         assert (await get_mode())["operation_mode"] == operation
         assert result["feature_engines"] == {
             "route": "ai" if operation == "ai" else "algorithm",
-            "dispatch": "algorithm", "workstation": "algorithm",
+            "dispatch": "algorithm",
+            "workstation": "algorithm",
         }
-        order = await create_order(CreateOrderRequest(
-            items={"A": 1, "B": 0, "C": 0, "D": 0}, total_quantity=1,
-            operation_mode=operation, selector="laya", model="test"))
+        order = await create_order(
+            CreateOrderRequest(
+                items={"A": 1, "B": 0, "C": 0, "D": 0},
+                total_quantity=1,
+                operation_mode=operation,
+                selector="laya",
+                model="test",
+            )
+        )
         assert order["operation_mode"] == operation
         assert order["driving_mode"] == ("llm" if operation == "ai" else "standard")
         assert order["mode"] == environment
@@ -88,6 +107,7 @@ def test_four_operating_modes_use_feature_policies(monkeypatch, environment, ope
         mode_manager.set_mode("simulation", "algorithm")
 
 
+# 대기 주문이나 오래된 화면 정보로 모드 전환을 막는지 검증한다.
 def test_operation_switch_rejects_active_queue_and_stale_form(monkeypatch):
     _reset(monkeypatch)
     from fastapi import HTTPException
@@ -95,9 +115,9 @@ def test_operation_switch_rejects_active_queue_and_stale_form(monkeypatch):
     from backend.app.routers.orders import create_order
     from backend.app.schemas.order import CreateOrderRequest
 
+    # 주문 흐름을 재현하는 테스트 시나리오를 실행한다.
     async def scenario():
-        order = order_manager.create_order(
-            items={"A": 1, "B": 0, "C": 0, "D": 0}, total_quantity=1)
+        order = order_manager.create_order(items={"A": 1, "B": 0, "C": 0, "D": 0}, total_quantity=1)
         with pytest.raises(HTTPException) as blocked:
             await set_mode(ModeRequest(mode="simulation", operation_mode="ai"))
         assert blocked.value.status_code == 409
@@ -105,9 +125,9 @@ def test_operation_switch_rejects_active_queue_and_stale_form(monkeypatch):
         order_manager.cancel_order(order["order_id"])
         await set_mode(ModeRequest(mode="simulation", operation_mode="ai"))
         with pytest.raises(HTTPException) as stale:
-            await create_order(CreateOrderRequest(
-                items={"A": 1, "B": 0, "C": 0, "D": 0}, total_quantity=1,
-                operation_mode="algorithm"))
+            await create_order(
+                CreateOrderRequest(items={"A": 1, "B": 0, "C": 0, "D": 0}, total_quantity=1, operation_mode="algorithm")
+            )
         assert stale.value.status_code == 400
         assert len(order_manager.orders) == 1
 
@@ -117,15 +137,15 @@ def test_operation_switch_rejects_active_queue_and_stale_form(monkeypatch):
         mode_manager.set_mode("simulation", "algorithm")
 
 
+# 점유된 작업대 노드가 해제될 때까지 기다리는지 검증한다.
 def test_workstation_waits_until_occupied_node_is_released(monkeypatch):
     visits = _reset(monkeypatch)
     mock_fms._robots["robot2"]["occupied_node"] = "3"
     mock_fms._robots["robot3"]["occupied_node"] = "4"
 
+    # 주문 흐름을 재현하는 테스트 시나리오를 실행한다.
     async def scenario():
-        order = order_manager.create_order(
-            items={"A": 1, "B": 0, "C": 0, "D": 0}, total_quantity=1,
-        )
+        order = order_manager.create_order(items={"A": 1, "B": 0, "C": 0, "D": 0}, total_quantity=1)
         await order_manager.tick()
         await asyncio.sleep(0.05)
         waiting = order_manager.get_order(order["order_id"])
@@ -140,6 +160,7 @@ def test_workstation_waits_until_occupied_node_is_released(monkeypatch):
     asyncio.run(scenario())
 
 
+# 작업대가 중복 배정되지 않는지 검증한다.
 def test_workstation_assignment_is_unique(monkeypatch):
     _reset(monkeypatch)
     assert workstation_manager.choose("first", "simulation") == "3"
@@ -149,14 +170,14 @@ def test_workstation_assignment_is_unique(monkeypatch):
     assert workstation_manager.choose("third", "simulation") == "3"
 
 
+# 주문 완료 후 남은 대기 주문을 배차하는지 검증한다.
 def test_queue_dispatches_remaining_orders_after_completion(monkeypatch):
     _reset(monkeypatch)
 
+    # 주문 흐름을 재현하는 테스트 시나리오를 실행한다.
     async def scenario():
         for _ in range(5):
-            order_manager.create_order(
-                items={"A": 1, "B": 0, "C": 0, "D": 0}, total_quantity=1,
-            )
+            order_manager.create_order(items={"A": 1, "B": 0, "C": 0, "D": 0}, total_quantity=1)
         await order_manager.tick()
         assert sum(row["status"] == "PENDING" for row in order_manager.list_orders()) == 2
         for _ in range(100):
@@ -170,18 +191,16 @@ def test_queue_dispatches_remaining_orders_after_completion(monkeypatch):
     asyncio.run(scenario())
 
 
+# 실패 로봇의 복귀 중 다른 로봇이 대기 주문을 처리하는지 검증한다.
 def test_failed_robot_recovers_while_another_robot_handles_queue(monkeypatch):
     _reset(monkeypatch)
 
+    # 주문 흐름을 재현하는 테스트 시나리오를 실행한다.
     async def scenario():
-        first = order_manager.create_order(
-            items={"A": 1, "B": 0, "C": 0, "D": 0}, total_quantity=1,
-        )
+        first = order_manager.create_order(items={"A": 1, "B": 0, "C": 0, "D": 0}, total_quantity=1)
         await order_manager.tick()
         order_manager.fail(first["order_id"], "경로 요청 실패")
-        second = order_manager.create_order(
-            items={"A": 1, "B": 0, "C": 0, "D": 0}, total_quantity=1,
-        )
+        second = order_manager.create_order(items={"A": 1, "B": 0, "C": 0, "D": 0}, total_quantity=1)
         await order_manager.tick()
         assert order_manager.get_order(first["order_id"])["status"] == "FAILED"
         assert order_manager.get_order(second["order_id"])["robot_id"] == "robot2"
@@ -193,25 +212,24 @@ def test_failed_robot_recovers_while_another_robot_handles_queue(monkeypatch):
     asyncio.run(scenario())
 
 
+# 오래된 실패 주문을 취소해도 새 주문을 멈추지 않는지 검증한다.
 def test_cancelling_old_failure_does_not_stop_new_order(monkeypatch):
     _reset(monkeypatch)
 
+    # 주문 흐름을 재현하는 테스트 시나리오를 실행한다.
     async def scenario():
-        first = order_manager.create_order(
-            items={"A": 1, "B": 0, "C": 0, "D": 0}, total_quantity=1,
-        )
+        first = order_manager.create_order(items={"A": 1, "B": 0, "C": 0, "D": 0}, total_quantity=1)
         await order_manager.tick()
         order_manager.fail(first["order_id"], "경로 요청 실패")
         await order_manager.tick()
         await asyncio.gather(*list(simulation_order_runner.tasks.values()))
-        second = order_manager.create_order(
-            items={"A": 1, "B": 0, "C": 0, "D": 0}, total_quantity=1,
-        )
+        second = order_manager.create_order(items={"A": 1, "B": 0, "C": 0, "D": 0}, total_quantity=1)
         await order_manager.tick()
         assert order_manager.get_order(second["order_id"])["robot_id"] == "robot1"
         stopped = []
         original_stop = mock_fms.stop_robot
 
+        # 테스트에서 로봇 정지 요청을 기록한다.
         def record_stop(robot_id):
             stopped.append(robot_id)
             return original_stop(robot_id)
@@ -225,29 +243,43 @@ def test_cancelling_old_failure_does_not_stop_new_order(monkeypatch):
     asyncio.run(scenario())
 
 
+# 간선에서 경로가 끝나도 시뮬레이션이 재시도하는지 검증한다.
 def test_simulation_retries_after_traffic_route_ends_on_edge(monkeypatch):
     _reset(monkeypatch)
     calls = []
 
+    # 테스트에서 한 번 중단되는 상황을 재현한다.
     def interrupted_once(robot_id, node_id, *, required_path=None):
         calls.append(str(node_id))
         with mock_fms._lock:
             robot = mock_fms._robots[robot_id]
             if len(calls) == 1:
-                robot.update(occupied_node=None, occupied_edge="edge_0_7",
-                             goal_node=None, route=None, status="IDLE", stop_requested=False)
+                robot.update(
+                    occupied_node=None,
+                    occupied_edge="edge_0_7",
+                    goal_node=None,
+                    route=None,
+                    status="IDLE",
+                    stop_requested=False,
+                )
             else:
                 node = str(node_id)
-                robot.update(occupied_node=node, current_node=node, occupied_edge=None,
-                             goal_node=None, route=None, status="IDLE", stop_requested=False)
+                robot.update(
+                    occupied_node=node,
+                    current_node=node,
+                    occupied_edge=None,
+                    goal_node=None,
+                    route=None,
+                    status="IDLE",
+                    stop_requested=False,
+                )
         return {"status": "SUCCESS"}
 
     monkeypatch.setattr(mock_fms, "navigate_to_node", interrupted_once)
 
+    # 주문 흐름을 재현하는 테스트 시나리오를 실행한다.
     async def scenario():
-        order = order_manager.create_order(
-            items={"A": 1, "B": 0, "C": 0, "D": 0}, total_quantity=1,
-        )
+        order = order_manager.create_order(items={"A": 1, "B": 0, "C": 0, "D": 0}, total_quantity=1)
         await order_manager.tick()
         await asyncio.gather(*list(simulation_order_runner.tasks.values()))
         assert calls[:2] == ["5", "5"]
@@ -256,6 +288,7 @@ def test_simulation_retries_after_traffic_route_ends_on_edge(monkeypatch):
     asyncio.run(scenario())
 
 
+# 실제 모드에서 주행 완료 후 다음 주문을 배차하는지 검증한다.
 def test_real_dispatch_waits_for_navigation_to_finish(monkeypatch):
     from backend.app.models.robot import Robot, RobotState
     from backend.app.ros2.ros_gateway import ros_gateway
@@ -274,22 +307,22 @@ def test_real_dispatch_waits_for_navigation_to_finish(monkeypatch):
     assert available_robots("real", set()) == ["robot1"]
 
 
+# 앞선 픽업 주문이 대기해도 복귀 중인 로봇을 가로채지 않는지 검증한다.
 def test_returning_robot_is_not_preempted_while_earlier_pickup_waits(monkeypatch):
     _reset(monkeypatch)
 
+    # 주문 흐름을 재현하는 테스트 시나리오를 실행한다.
     async def scenario():
-        orders = [order_manager.create_order(
-            items={"A": 1, "B": 0, "C": 0, "D": 0}, total_quantity=1,
-        ) for _ in range(4)]
+        orders = [
+            order_manager.create_order(items={"A": 1, "B": 0, "C": 0, "D": 0}, total_quantity=1) for _ in range(4)
+        ]
         await order_manager.tick()
         first = order_manager.orders[orders[0]["order_id"]]
         first["status"] = "COMPLETED"
         first["phase"] = "RETURNING"
         order_manager.returning["robot1"] = first["order_id"]
         with mock_fms._lock:
-            mock_fms._robots["robot1"].update(
-                occupied_node="3", current_node="3", goal_node="0", status="NAVIGATING",
-            )
+            mock_fms._robots["robot1"].update(occupied_node="3", current_node="3", goal_node="0", status="NAVIGATING")
         await order_manager.tick()
         assert order_manager.get_order(orders[3]["order_id"])["status"] == "PENDING"
         await simulation_order_runner.shutdown()
@@ -297,14 +330,14 @@ def test_returning_robot_is_not_preempted_while_earlier_pickup_waits(monkeypatch
     asyncio.run(scenario())
 
 
+# 모의 작업 중 취소하면 기존 타이머가 무효화되는지 검증한다.
 def test_cancel_during_mock_work_invalidates_timer(monkeypatch):
     visits = _reset(monkeypatch)
     simulation_order_runner.work_seconds = 0.1
 
+    # 주문 흐름을 재현하는 테스트 시나리오를 실행한다.
     async def scenario():
-        order = order_manager.create_order(
-            items={"A": 1, "B": 0, "C": 0, "D": 0}, total_quantity=1,
-        )
+        order = order_manager.create_order(items={"A": 1, "B": 0, "C": 0, "D": 0}, total_quantity=1)
         await order_manager.tick()
         await asyncio.sleep(0.02)
         assert order_manager.get_order(order["order_id"])["phase"] == "WORKING_AT_PICKUP"
@@ -319,12 +352,15 @@ def test_cancel_during_mock_work_invalidates_timer(monkeypatch):
     asyncio.run(scenario())
 
 
+# 픽업 후 실패 시 점유를 풀고 재시도에 다른 로봇을 우선하는지 검증한다.
 def test_failure_after_pickup_clears_node_and_retry_prefers_another_robot(monkeypatch):
     _reset(monkeypatch)
     from backend.app.services import simulation_order_runner as runner_module
+
     original_dispatch = runner_module.dispatch_order_route
     fail_once = True
 
+    # 테스트에서 작업대 실패를 재현한다.
     async def fail_workstation(order, node, current_node, valid=None):
         nonlocal fail_once
         if str(node) == "3" and fail_once:
@@ -334,9 +370,9 @@ def test_failure_after_pickup_clears_node_and_retry_prefers_another_robot(monkey
 
     monkeypatch.setattr(runner_module, "dispatch_order_route", fail_workstation)
 
+    # 주문 흐름을 재현하는 테스트 시나리오를 실행한다.
     async def scenario():
-        order = order_manager.create_order(
-            items={"A": 2, "B": 0, "C": 0, "D": 0}, total_quantity=2)
+        order = order_manager.create_order(items={"A": 2, "B": 0, "C": 0, "D": 0}, total_quantity=2)
         order_id = order["order_id"]
         await order_manager.tick()
         await asyncio.gather(*list(simulation_order_runner.tasks.values()))
@@ -361,13 +397,14 @@ def test_failure_after_pickup_clears_node_and_retry_prefers_another_robot(monkey
     asyncio.run(scenario())
 
 
+# 전체 정지가 실패 복구 작업도 취소하는지 검증한다.
 def test_stop_all_cancels_failure_recovery(monkeypatch):
     _reset(monkeypatch)
     from backend.app.routers.commands import stop_all_robots
 
+    # 주문 흐름을 재현하는 테스트 시나리오를 실행한다.
     async def scenario():
-        order = order_manager.create_order(
-            items={"A": 1, "B": 0, "C": 0, "D": 0}, total_quantity=1)
+        order = order_manager.create_order(items={"A": 1, "B": 0, "C": 0, "D": 0}, total_quantity=1)
         await order_manager.tick()
         order_manager.fail(order["order_id"], "테스트 실패")
         assert order_manager.recovering
@@ -381,16 +418,18 @@ def test_stop_all_cancels_failure_recovery(monkeypatch):
     asyncio.run(scenario())
 
 
+# 복구 중인 로봇이 충전소 복귀 전까지 배차되지 않는지 검증한다.
 def test_failed_recovery_stays_unavailable_until_station_return(monkeypatch):
     _reset(monkeypatch)
     from backend.app.services import simulation_order_runner as runner_module
 
+    # 테스트에서 사용 불가한 경로를 반환한다.
     async def unavailable_route(*_args, **_kwargs):
         raise ValueError("복귀 경로 없음")
 
+    # 주문 흐름을 재현하는 테스트 시나리오를 실행한다.
     async def scenario():
-        first = order_manager.create_order(
-            items={"A": 1, "B": 0, "C": 0, "D": 0}, total_quantity=1)
+        first = order_manager.create_order(items={"A": 1, "B": 0, "C": 0, "D": 0}, total_quantity=1)
         await order_manager.tick()
         await asyncio.sleep(0)
         order_manager.fail(first["order_id"], "픽업 작업 실패")
@@ -399,8 +438,7 @@ def test_failed_recovery_stays_unavailable_until_station_return(monkeypatch):
         await asyncio.gather(*list(simulation_order_runner.tasks.values()))
         assert order_manager.get_order(first["order_id"])["recovery_status"] == "BLOCKED"
         assert mock_fms.robot_snapshot("robot1", "simulation")["occupied_node"] == "5"
-        second = order_manager.create_order(
-            items={"A": 1, "B": 0, "C": 0, "D": 0}, total_quantity=1)
+        second = order_manager.create_order(items={"A": 1, "B": 0, "C": 0, "D": 0}, total_quantity=1)
         await order_manager.tick()
         assert order_manager.get_order(second["order_id"])["robot_id"] == "robot2"
         mock_fms.navigate_to_node("robot1", "0")
@@ -411,14 +449,15 @@ def test_failed_recovery_stays_unavailable_until_station_return(monkeypatch):
     asyncio.run(scenario())
 
 
+# 픽업대 상태에 점유 주문과 대기 주문을 표시하는지 검증한다.
 def test_pickup_status_shows_occupant_order_and_waiting_orders(monkeypatch):
     _reset(monkeypatch)
     simulation_order_runner.work_seconds = 0.1
 
+    # 주문 흐름을 재현하는 테스트 시나리오를 실행한다.
     async def scenario():
         for _ in range(2):
-            order_manager.create_order(
-                items={"A": 1, "B": 0, "C": 0, "D": 0}, total_quantity=1)
+            order_manager.create_order(items={"A": 1, "B": 0, "C": 0, "D": 0}, total_quantity=1)
         await order_manager.tick()
         await asyncio.sleep(0.02)
         status = workstation_manager.pickup_status("simulation", order_manager.list_orders())
@@ -433,11 +472,14 @@ def test_pickup_status_shows_occupant_order_and_waiting_orders(monkeypatch):
     asyncio.run(scenario())
 
 
+# 작업대 선택 후에만 AI 경로를 요청하는지 검증한다.
 def test_ai_route_is_requested_only_after_workstation_selection(monkeypatch):
     visits = _reset(monkeypatch)
     from backend.app.services import route_model_catalog, order_route_dispatcher
+
     monkeypatch.setattr(route_model_catalog, "require_enabled_model", lambda *_: None)
 
+    # 테스트에서 경로 선택 결과를 미리 계산한다.
     async def preview(_function, _graph, start, target, **_options):
         snapshot = mock_fms.robot_snapshot("robot1", "simulation")
         assert snapshot["occupied_node"] == str(start)
@@ -450,10 +492,10 @@ def test_ai_route_is_requested_only_after_workstation_selection(monkeypatch):
     mock_fms._robots["robot2"]["occupied_node"] = "3"
     mock_fms._robots["robot3"]["occupied_node"] = "4"
 
+    # 주문 흐름을 재현하는 테스트 시나리오를 실행한다.
     async def scenario():
         order = order_manager.create_order(
-            items={"A": 1, "B": 0, "C": 0, "D": 0}, total_quantity=1,
-            driving_mode="llm", selector="laya", model="test",
+            items={"A": 1, "B": 0, "C": 0, "D": 0}, total_quantity=1, driving_mode="llm", selector="laya", model="test"
         )
         await order_manager.tick()
         await asyncio.sleep(0.05)
@@ -467,11 +509,14 @@ def test_ai_route_is_requested_only_after_workstation_selection(monkeypatch):
     asyncio.run(scenario())
 
 
+# 잘못된 AI 경로는 주행하지 않고 실패 로봇을 복귀시키는지 검증한다.
 def test_invalid_ai_route_is_not_driven_and_failure_returns_robot(monkeypatch):
     visits = _reset(monkeypatch)
     from backend.app.services import route_model_catalog, order_route_dispatcher
+
     monkeypatch.setattr(route_model_catalog, "require_enabled_model", lambda *_: None)
 
+    # 테스트에서 경로 선택 결과를 미리 계산한다.
     async def preview(_function, _graph, start, target, **_options):
         if str(target) == "3":
             raise ValueError("순환 방지 조건을 만족하는 이동 후보가 없습니다: current=10")
@@ -479,10 +524,11 @@ def test_invalid_ai_route_is_not_driven_and_failure_returns_robot(monkeypatch):
 
     monkeypatch.setattr(order_route_dispatcher.asyncio, "to_thread", preview)
 
+    # 주문 흐름을 재현하는 테스트 시나리오를 실행한다.
     async def scenario():
         order = order_manager.create_order(
-            items={"A": 1, "B": 0, "C": 0, "D": 0}, total_quantity=1,
-            driving_mode="llm", selector="laya", model="test")
+            items={"A": 1, "B": 0, "C": 0, "D": 0}, total_quantity=1, driving_mode="llm", selector="laya", model="test"
+        )
         await order_manager.tick()
         await asyncio.gather(*list(simulation_order_runner.tasks.values()))
         failed = order_manager.get_order(order["order_id"])
@@ -498,6 +544,7 @@ def test_invalid_ai_route_is_not_driven_and_failure_returns_robot(monkeypatch):
     asyncio.run(scenario())
 
 
+# 실제 MQTT 작업에서 마지막 픽업 후 작업대를 선택하는지 검증한다.
 def test_real_mqtt_uses_same_workstation_selection_after_last_pickup(monkeypatch):
     _reset(monkeypatch)
     from types import SimpleNamespace
@@ -513,6 +560,7 @@ def test_real_mqtt_uses_same_workstation_selection_after_last_pickup(monkeypatch
     monkeypatch.setattr(fleet_manager, "get_all_robots", lambda: [robot])
     moves = []
 
+    # 테스트에 사용할 경로를 만든다.
     async def route(_row, target, _start, valid=None):
         assert valid()
         moves.append(target)
@@ -520,24 +568,21 @@ def test_real_mqtt_uses_same_workstation_selection_after_last_pickup(monkeypatch
     monkeypatch.setattr(order_module, "dispatch_order_route", route)
     mode_manager.set_mode("real")
     try:
-        order = order_manager.create_order(
-            items={"A": 1, "B": 0, "C": 1, "D": 0}, total_quantity=2,
-        )
+        order = order_manager.create_order(items={"A": 1, "B": 0, "C": 1, "D": 0}, total_quantity=2)
         row = order_manager.orders[order["order_id"]]
         row.update(status="IN_PROGRESS", phase="WORKING_AT_PICKUP", robot_id="robot1")
         robot.assign_order(order["order_id"], row["items"], 2, ["5", "6"], None)
         robot.set_state(RobotState.WAITING)
-        order_manager.on_mqtt_result(SimpleNamespace(omx_id="omx1"),
-                                     {"job_id": order["order_id"], "success": True})
+        order_manager.on_mqtt_result(SimpleNamespace(omx_id="omx1"), {"job_id": order["order_id"], "success": True})
         assert row["phase"] == "MOVING_TO_PICKUP"
         robot.current_node = robot.occupied_node = "6"
         robot.set_state(RobotState.WAITING)
         row["phase"] = "WORKING_AT_PICKUP"
-        order_manager.on_mqtt_result(SimpleNamespace(omx_id="omx2"),
-                                     {"job_id": order["order_id"], "success": True})
+        order_manager.on_mqtt_result(SimpleNamespace(omx_id="omx2"), {"job_id": order["order_id"], "success": True})
         assert row["phase"] == "WAITING_WORKSTATION"
         assert row["workstation_node"] is None
 
+        # 테스트에서 경로를 선택하고 로봇을 이동시킨다.
         async def select_and_move():
             await order_manager._tick_real(row)
             await asyncio.gather(*list(order_manager._route_tasks.values()))
@@ -548,8 +593,7 @@ def test_real_mqtt_uses_same_workstation_selection_after_last_pickup(monkeypatch
         robot.current_node = robot.occupied_node = "3"
         robot.set_state(RobotState.WAITING)
         row["phase"] = "WORKING_AT_WORKSTATION"
-        order_manager.on_mqtt_result(SimpleNamespace(omx_id="omx3"),
-                                     {"job_id": order["order_id"], "success": True})
+        order_manager.on_mqtt_result(SimpleNamespace(omx_id="omx3"), {"job_id": order["order_id"], "success": True})
         assert row["status"] == "COMPLETED"
         assert row["phase"] == "RETURNING"
         assert robot.order_id is None
@@ -558,6 +602,7 @@ def test_real_mqtt_uses_same_workstation_selection_after_last_pickup(monkeypatch
         mode_manager.set_mode("simulation")
 
 
+# 시뮬레이션이 모의 주행으로 충전소에 복귀하는지 검증한다.
 def test_simulation_uses_real_mock_navigation_and_returns_to_station():
     mode_manager.set_mode("simulation")
     mock_fms.reset()
@@ -568,10 +613,9 @@ def test_simulation_uses_real_mock_navigation_and_returns_to_station():
     simulation_order_runner.tasks.clear()
     simulation_order_runner.work_seconds = 0.001
 
+    # 주문 흐름을 재현하는 테스트 시나리오를 실행한다.
     async def scenario():
-        order = order_manager.create_order(
-            items={"A": 1, "B": 0, "C": 0, "D": 0}, total_quantity=1,
-        )
+        order = order_manager.create_order(items={"A": 1, "B": 0, "C": 0, "D": 0}, total_quantity=1)
         start = monotonic()
         for step in range(2000):
             await order_manager.tick()
@@ -588,16 +632,15 @@ def test_simulation_uses_real_mock_navigation_and_returns_to_station():
     asyncio.run(scenario())
 
 
+# 주문 API가 로봇과 작업대 지정 없이 품목을 접수하는지 검증한다.
 def test_order_api_accepts_items_without_robot_or_workstation(monkeypatch):
     _reset(monkeypatch)
     from backend.app.routers.orders import create_order
     from backend.app.schemas.order import CreateOrderRequest
 
-    payload = CreateOrderRequest.model_validate({
-        "order_name": "ORDER-001",
-        "items": {"A": 2, "B": 1, "C": 0, "D": 2},
-        "total_quantity": 5,
-    })
+    payload = CreateOrderRequest.model_validate(
+        {"order_name": "ORDER-001", "items": {"A": 2, "B": 1, "C": 0, "D": 2}, "total_quantity": 5}
+    )
     created = asyncio.run(create_order(payload))
     assert created["order_name"] == "ORDER-001"
     assert created["robot_id"] is None

@@ -10,6 +10,7 @@ from ..services.route_graph import list_nodes, load_route_graph
 router = APIRouter(prefix="/api", tags=["map-route"])
 
 
+# 관제 지도 정보를 반환한다.
 @router.get("/map/info")
 async def get_map_info():
     try:
@@ -18,6 +19,7 @@ async def get_map_info():
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
+# 지도 이미지를 조회한다.
 @router.get("/map/image")
 async def get_map_image():
     try:
@@ -36,6 +38,7 @@ async def get_route_graph(raw: bool = Query(default=True)):
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
+# 경로 노드를 조회한다.
 @router.get("/route/nodes")
 async def get_route_nodes(include_pixel: bool = Query(default=True)):
     try:

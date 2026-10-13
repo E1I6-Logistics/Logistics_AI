@@ -12,6 +12,7 @@ from tests.fixtures import MOCK_DIR, load_graph, load_responses, route_inputs
 
 
 class LlmRouteComparisonTest(unittest.TestCase):
+    # 각 테스트에 필요한 초기 상태를 준비한다.
     def setUp(self):
         self.points, self.edges = route_inputs()
         self.responses = load_responses()
@@ -21,21 +22,18 @@ class LlmRouteComparisonTest(unittest.TestCase):
         self.summary_path = Path(self.temporary_directory.name) / "summary.json"
 
     # LLM 비교·저장 흐름을 변경했을 때 성공 결과와 지표가 기록되는지 확인한다.
+    # 모의 모델 결과를 비교하고 저장하는지 검증한다.
     def test_mocked_provider_result_is_compared_and_saved(self):
         with (
             patch.object(llm_route_comparison, "ROUTE_GRAPH_PATH", MOCK_DIR / "route_graph.geojson"),
             patch.object(llm_route_comparison, "LLM_RESULT_PATH", self.result_path),
             patch.object(llm_route_comparison, "LLM_SUMMARY_PATH", self.summary_path),
             patch.object(
-                llm_route_comparison,
-                "request_llm_shortest_path",
-                return_value=self.responses["alternative"],
+                llm_route_comparison, "request_llm_shortest_path", return_value=self.responses["alternative"]
             ) as request,
             patch.dict(os.environ, {"LLM_PROVIDER": "ollama", "OLLAMA_MODEL": "fixture-model"}),
         ):
-            result = llm_route_comparison.compare_path_with_llm(
-                self.points, self.edges, 1, 3, [1, 2, 3]
-            )
+            result = llm_route_comparison.compare_path_with_llm(self.points, self.edges, 1, 3, [1, 2, 3])
 
         request.assert_called_once_with(load_graph(), 1, 3)
         self.assertEqual(result["provider"], "ollama")
@@ -49,26 +47,20 @@ class LlmRouteComparisonTest(unittest.TestCase):
         self.assertTrue(result["metrics"]["meets_realtime_deadline"])
         self.assertGreater(result["metrics"]["input_character_count"], 0)
         self.assertEqual(json.loads(self.result_path.read_text(encoding="utf-8")), result)
-        self.assertEqual(
-            json.loads(self.summary_path.read_text(encoding="utf-8"))["total_run_count"],
-            1,
-        )
+        self.assertEqual(json.loads(self.summary_path.read_text(encoding="utf-8"))["total_run_count"], 1)
 
     # 실패 기록 방식을 변경했을 때 유효하지 않은 모델 경로가 실패로 남는지 확인한다.
+    # 잘못된 모델 경로를 실패로 기록하는지 검증한다.
     def test_invalid_model_path_is_recorded_as_failure(self):
         with (
             patch.object(llm_route_comparison, "ROUTE_GRAPH_PATH", MOCK_DIR / "route_graph.geojson"),
             patch.object(llm_route_comparison, "LLM_RESULT_PATH", self.result_path),
             patch.object(llm_route_comparison, "LLM_SUMMARY_PATH", self.summary_path),
             patch.object(
-                llm_route_comparison,
-                "request_llm_shortest_path",
-                return_value=self.responses["nonexistent_edge"],
+                llm_route_comparison, "request_llm_shortest_path", return_value=self.responses["nonexistent_edge"]
             ),
         ):
-            result = llm_route_comparison.compare_path_with_llm(
-                self.points, self.edges, 1, 3, [1, 2, 3]
-            )
+            result = llm_route_comparison.compare_path_with_llm(self.points, self.edges, 1, 3, [1, 2, 3])
 
         self.assertEqual(result["status"], "failed")
         self.assertFalse(result["metrics"]["valid_path"])
@@ -77,6 +69,7 @@ class LlmRouteComparisonTest(unittest.TestCase):
         self.assertTrue(self.result_path.exists())
 
     # 재시도 로직을 변경했을 때 두 번째 성공이 구분되어 기록되는지 확인한다.
+    # 재시도 성공 결과가 기록되는지 검증한다.
     def test_retry_success_is_recorded(self):
         with (
             patch.object(llm_route_comparison, "ROUTE_GRAPH_PATH", MOCK_DIR / "route_graph.geojson"),
@@ -85,19 +78,11 @@ class LlmRouteComparisonTest(unittest.TestCase):
             patch.object(
                 llm_route_comparison,
                 "request_llm_shortest_path",
-                side_effect=[
-                    self.responses["nonexistent_edge"],
-                    self.responses["matching"],
-                ],
+                side_effect=[self.responses["nonexistent_edge"], self.responses["matching"]],
             ),
         ):
             result = llm_route_comparison.compare_path_with_llm(
-                self.points,
-                self.edges,
-                1,
-                3,
-                [1, 2, 3],
-                max_attempts=2,
+                self.points, self.edges, 1, 3, [1, 2, 3], max_attempts=2
             )
 
         self.assertEqual(result["status"], "success")

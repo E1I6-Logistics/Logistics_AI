@@ -39,12 +39,12 @@ def locate_occupancy(graph, nodes, x: float, y: float, *, tolerance_m: float = 1
     return None, next(iter(matches.values()))
 
 
+# 로봇이 실제로 점유 중인 자원을 확인한다.
 def occupied_resource(robot, graph):
     if robot["occupied_node"] is not None:
         return node_key(robot["occupied_node"])
     for feature in graph["features"]:
         props = feature.get("properties") or {}
-        if (str(props.get("id")) == robot["occupied_edge"]
-                and "startid" in props and "endid" in props):
+        if str(props.get("id")) == robot["occupied_edge"] and "startid" in props and "endid" in props:
             return edge_key(props["startid"], props["endid"])
     raise ValueError("실제 점유 위치를 확인할 수 없습니다.")

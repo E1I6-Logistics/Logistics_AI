@@ -44,19 +44,13 @@ def _generation_rows(label: str, directory: Path) -> list[dict[str, Any]]:
             "output_budget_exhaustion_rate": row.get("output_budget_exhaustion_rate"),
             "think_control_ignored_rate": row.get("think_control_ignored_rate"),
             "mean_api_call_count": row.get("mean_api_call_count"),
-            "mean_input_prompt_eval_count": row.get(
-                "mean_input_prompt_eval_count"
-            ),
+            "mean_input_prompt_eval_count": row.get("mean_input_prompt_eval_count"),
             "mean_output_eval_count": row.get("mean_output_eval_count"),
             "mean_total_eval_count": row.get("mean_total_eval_count"),
             "mean_retrieved_node_count": row.get("mean_retrieved_node_count"),
             "mean_retrieved_edge_count": row.get("mean_retrieved_edge_count"),
-            "ground_truth_path_available_rate": row.get(
-                "ground_truth_path_available_rate"
-            ),
-            "retrieval_enabled": manifest.get("retrieval", {}).get(
-                "enabled", False
-            ),
+            "ground_truth_path_available_rate": row.get("ground_truth_path_available_rate"),
+            "retrieval_enabled": manifest.get("retrieval", {}).get("enabled", False),
             "comparison_scope": "five-route full-path generation",
             "directly_comparable": True,
         }
@@ -69,10 +63,7 @@ def _selector_row(label: str, directory: Path) -> dict[str, Any]:
     summary = _load(directory / "selector_latency_summary.json")
     samples_path = directory / "selector_latency_samples.csv"
     with samples_path.open(encoding="utf-8-sig", newline="") as stream:
-        samples = [
-            row for row in csv.DictReader(stream)
-            if row["question_type"] == "shortest_path"
-        ]
+        samples = [row for row in csv.DictReader(stream) if row["question_type"] == "shortest_path"]
     # 직관·일반 추론 문항은 생성 모델의 최단경로 시험과 관련이 없어 제외한다.
     successful = [row for row in samples if not row["error"]]
     times = [float(row["wall_seconds"]) for row in successful]
@@ -82,15 +73,10 @@ def _selector_row(label: str, directory: Path) -> dict[str, Any]:
         "experiment_mode": "DECISION_SELECTOR",
         "model": summary.get("requested_model"),
         "trial_count": len(samples),
-        "accuracy": (
-            mean(row["correct"].lower() == "true" for row in samples)
-            if samples else None
-        ),
+        "accuracy": (mean(row["correct"].lower() == "true" for row in samples) if samples else None),
         "valid_result_rate": len(successful) / len(samples) if samples else None,
         "median_seconds": median(times) if times else None,
-        "realtime_met_rate": mean(
-            row["realtime_met"].lower() == "true" for row in samples
-        ) if samples else None,
+        "realtime_met_rate": mean(row["realtime_met"].lower() == "true" for row in samples) if samples else None,
         "output_budget_exhaustion_rate": None,
         "think_control_ignored_rate": None,
         "mean_api_call_count": None,
@@ -106,6 +92,7 @@ def _selector_row(label: str, directory: Path) -> dict[str, Any]:
     }
 
 
+# 명령행 프로그램의 실행 절차를 시작한다.
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--generation", action="append", type=_spec, default=[])
@@ -122,18 +109,21 @@ def main() -> int:
         parser.error("--generation 또는 --selector 결과가 하나 이상 필요합니다")
     args.output.mkdir(parents=True, exist_ok=True)
     (args.output / "strategy_comparison.json").write_text(
-        json.dumps({
-            "note": (
-                "V1/V2 생성 모델끼리는 직접 비교할 수 있다. Laya/Kev는 이미 "
-                "제시된 후보를 선택하므로 생성 정확도와 같은 지표로 해석하지 않는다."
-            ),
-            "rows": rows,
-        }, ensure_ascii=False, indent=2) + "\n",
+        json.dumps(
+            {
+                "note": (
+                    "V1/V2 생성 모델끼리는 직접 비교할 수 있다. Laya/Kev는 이미 "
+                    "제시된 후보를 선택하므로 생성 정확도와 같은 지표로 해석하지 않는다."
+                ),
+                "rows": rows,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
         encoding="utf-8",
     )
-    with (args.output / "strategy_comparison.csv").open(
-        "w", encoding="utf-8-sig", newline=""
-    ) as stream:
+    with (args.output / "strategy_comparison.csv").open("w", encoding="utf-8-sig", newline="") as stream:
         writer = csv.DictWriter(stream, fieldnames=list(rows[0]))
         writer.writeheader()
         writer.writerows(rows)

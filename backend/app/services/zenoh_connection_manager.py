@@ -10,22 +10,23 @@ ZENOH_REST_BASE = "http://127.0.0.1:8001"
 
 class ZenohConnectionManager:
 
+    # ZenohConnectionManager의 초기 상태를 설정한다.
     def __init__(self):
         self._last_successful: list[dict[str, Any]] = []
 
+    # 최근 성공한 연결 시각을 반환한다.
     def last_successful(self) -> list[dict[str, Any]]:
         devices = []
         for device in self._last_successful:
             devices.append(device.copy())
         return devices
 
+    # JSON를 조회한다.
     def _get_json(self, path: str) -> list[dict[str, Any]]:
-        with urlopen(
-            f"{ZENOH_REST_BASE}{path}",
-            timeout=2.0,
-        ) as response:
+        with urlopen(f"{ZENOH_REST_BASE}{path}", timeout=2.0) as response:
             return json.load(response)
 
+    # Zenoh 세션 정보를 조회한다.
     def _get_sessions(self) -> dict[str, str]:
         data = self._get_json("/@/local/router")
 
@@ -59,6 +60,7 @@ class ZenohConnectionManager:
 
         return result
 
+    # 로봇 경로를 조회한다.
     def _get_robot_routes(self) -> dict[str, str]:
         routes = self._get_json("/@/*/ros2/route/**")
 
@@ -92,14 +94,18 @@ class ZenohConnectionManager:
 
         return result
 
+    # 현재 연결 상태 목록을 반환한다.
     def connections(self) -> list[dict[str, Any]]:
         try:
             sessions = self._get_sessions()
             robot_routes = self._get_robot_routes()
         except Exception as exc:
-            print(f"[{strftime('%Y-%m-%d %H:%M:%S')}] [ERROR] [ZENOH CONNECTIONS ERROR] "
-                  f"REST 연결 목록 조회 실패 error_type={type(exc).__name__} detail={exc!r}; "
-                  "기존 로봇 연결 상태 유지", flush=True)
+            print(
+                f"[{strftime('%Y-%m-%d %H:%M:%S')}] [ERROR] [ZENOH CONNECTIONS ERROR] "
+                f"REST 연결 목록 조회 실패 error_type={type(exc).__name__} detail={exc!r}; "
+                "기존 로봇 연결 상태 유지",
+                flush=True,
+            )
             # 조회 자체가 실패했다. 이 결과로 로봇을 연결 해제하면 안 된다.
             raise ConnectionError("Zenoh 연결 목록 조회 실패") from exc
 

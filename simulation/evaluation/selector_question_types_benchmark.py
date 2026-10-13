@@ -16,9 +16,7 @@ from typing import Any, Callable
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from simulation.evaluation.device_metadata import (
-    git_metadata, selector_device_metadata,
-)
+from simulation.evaluation.device_metadata import git_metadata, selector_device_metadata
 from simulation.evaluation.graph_path import resolve_graph_path
 from simulation.route_selector import get_selector
 from simulation.services.route_service import build_compact_route_graph, plan_route
@@ -49,50 +47,63 @@ def _blocked_route_state(language: str) -> dict[str, Any]:
         "target_node": 2,
         "planned_route": planned_nodes,
         "blocked_nodes": [planned_nodes[1]],
-        "route_graph": build_compact_route_graph(
-            graph, graph_path.name, require_stored_weight=True
-        ),
+        "route_graph": build_compact_route_graph(graph, graph_path.name, require_stored_weight=True),
         "rule": rule,
     }
 
+
 CASES = (
     {
-        "id": "ko_choice", "language": "ko", "question_type": "choice",
+        "id": "ko_choice",
+        "language": "ko",
+        "question_type": "choice",
         "state": "창고 경고등은 빨간색입니다.",
         "instructions": "경고등의 색상을 선택하세요.",
         "criteria": {"red": "빨간색", "blue": "파란색", "green": "초록색", "yellow": "노란색", "white": "흰색"},
         "expected": "red",
     },
     {
-        "id": "en_choice", "language": "en", "question_type": "choice",
+        "id": "en_choice",
+        "language": "en",
+        "question_type": "choice",
         "state": "The warehouse warning light is red.",
         "instructions": "Choose the color of the warning light.",
         "criteria": {"red": "Red", "blue": "Blue", "green": "Green", "yellow": "Yellow", "white": "White"},
         "expected": "red",
     },
     {
-        "id": "ko_score", "language": "ko", "question_type": "score",
+        "id": "ko_score",
+        "language": "ko",
+        "question_type": "score",
         "state": "현재 작업의 긴급도는 5단계 중 가장 높은 5단계입니다.",
         "instructions": "작업의 긴급도를 평가하세요.",
         "criteria": ["매우 낮음", "낮음", "보통", "높음", "매우 높음"],
-        "expected_min": 3.5, "expected_max": 4.0,
+        "expected_min": 3.5,
+        "expected_max": 4.0,
     },
     {
-        "id": "en_score", "language": "en", "question_type": "score",
+        "id": "en_score",
+        "language": "en",
+        "question_type": "score",
         "state": "The task has the highest urgency level, level 5 out of 5.",
         "instructions": "Rate the urgency of the task.",
         "criteria": ["Very low", "Low", "Medium", "High", "Very high"],
-        "expected_min": 3.5, "expected_max": 4.0,
+        "expected_min": 3.5,
+        "expected_max": 4.0,
     },
     {
-        "id": "ko_noul", "language": "ko", "question_type": "noul",
+        "id": "ko_noul",
+        "language": "ko",
+        "question_type": "noul",
         "state": "3번 로봇은 장애물을 감지한 뒤 완전히 정지했습니다.",
         "instructions": "3번 로봇이 정지한 상태입니까?",
         "criteria": {"true": "정지함", "false": "움직이는 중"},
         "expected_boolean": True,
     },
     {
-        "id": "en_noul", "language": "en", "question_type": "noul",
+        "id": "en_noul",
+        "language": "en",
+        "question_type": "noul",
         "state": "Robot 3 detected an obstacle and came to a complete stop.",
         "instructions": "Is robot 3 stopped?",
         "criteria": {"true": "Stopped", "false": "Still moving"},
@@ -125,10 +136,12 @@ CASES = (
 )
 
 
+# 현재 UTC 시각을 문자열로 반환한다.
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+# 측정값의 백분위수를 계산한다.
 def _percentile(values: list[float], percentile: float) -> float | None:
     if not values:
         return None
@@ -140,6 +153,7 @@ def _percentile(values: list[float], percentile: float) -> float | None:
     return ordered[lower] + (ordered[upper] - ordered[lower]) * (position - lower)
 
 
+# 측정값의 통계치를 계산한다.
 def _stats(values: list[float]) -> dict[str, Any]:
     return {
         "count": len(values),
@@ -151,6 +165,7 @@ def _stats(values: list[float]) -> dict[str, Any]:
     }
 
 
+# 평가 결과를 요약한다.
 def _summarize(rows: list[dict[str, Any]]) -> dict[str, Any]:
     successful = [row for row in rows if row["error"] is None]
     return {
@@ -160,23 +175,22 @@ def _summarize(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "correct_count": sum(bool(row["correct"]) for row in rows),
         "accuracy": sum(bool(row["correct"]) for row in rows) / len(rows) if rows else None,
         "wall_latency": _stats([row["wall_seconds"] for row in successful]),
-        "model_total_latency": _stats([row["model_total_seconds"] for row in successful if row["model_total_seconds"] is not None]),
+        "model_total_latency": _stats(
+            [row["model_total_seconds"] for row in successful if row["model_total_seconds"] is not None]
+        ),
         "model_eval_latency": _stats([row["eval_seconds"] for row in successful if row["eval_seconds"] is not None]),
     }
 
 
+# 질문 유형별 평가 사례를 실행한다.
 def _call_case(selector: Any, case: dict[str, Any]) -> tuple[Any, dict[str, Any]]:
     question_type = case["question_type"]
     if question_type == "choice":
-        result = selector.select_choice(
-            case["state"], case["criteria"], case["instructions"], question_id=case["id"]
-        )
+        result = selector.select_choice(case["state"], case["criteria"], case["instructions"], question_id=case["id"])
         value = result["choice"]
         correct = value == case["expected"]
     elif question_type == "score":
-        result = selector.evaluate_score(
-            case["state"], case["criteria"], case["instructions"], question_id=case["id"]
-        )
+        result = selector.evaluate_score(case["state"], case["criteria"], case["instructions"], question_id=case["id"])
         value = result["score"]
         correct = case["expected_min"] <= value <= case["expected_max"]
     else:
@@ -188,9 +202,14 @@ def _call_case(selector: Any, case: dict[str, Any]) -> tuple[Any, dict[str, Any]
     return value, {**result, "correct": correct}
 
 
+# 질문 유형별 벤치마크를 실행한다.
 def run_question_types_benchmark(
-    output: Path, *, repeats: int = 5, warmups: int = 1,
-    selector: Any | None = None, clock: Clock = time.perf_counter,
+    output: Path,
+    *,
+    repeats: int = 5,
+    warmups: int = 1,
+    selector: Any | None = None,
+    clock: Clock = time.perf_counter,
     progress: bool = True,
 ) -> dict[str, Any]:
     if repeats < 1 or warmups < 0:
@@ -220,10 +239,7 @@ def run_question_types_benchmark(
         "settings": settings,
         "device": selector_device_metadata(selector),
     }
-    (output / MANIFEST_FILENAME).write_text(
-        json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
+    (output / MANIFEST_FILENAME).write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
     last_result = None
     for case in CASES:
@@ -239,9 +255,12 @@ def run_question_types_benchmark(
                 last_result = result
                 wall_seconds = clock() - started
                 row = {
-                    "case_id": case["id"], "language": case["language"],
-                    "question_type": case["question_type"], "repeat": repeat,
-                    "timestamp": _utc_now(), "selector_name": selector_name,
+                    "case_id": case["id"],
+                    "language": case["language"],
+                    "question_type": case["question_type"],
+                    "repeat": repeat,
+                    "timestamp": _utc_now(),
+                    "selector_name": selector_name,
                     "value": value,
                     "correct": result["correct"],
                     "confidence": result.get("confidence"),
@@ -253,27 +272,39 @@ def run_question_types_benchmark(
                     "model_total_seconds": result.get("total_duration_seconds"),
                     "load_seconds": result.get("load_duration_seconds"),
                     "eval_seconds": result.get("eval_duration_seconds"),
-                    "error": None, "raw": result.get("raw"),
+                    "error": None,
+                    "raw": result.get("raw"),
                 }
             except Exception as error:
                 wall_seconds = clock() - started
                 row = {
-                    "case_id": case["id"], "language": case["language"],
-                    "question_type": case["question_type"], "repeat": repeat,
-                    "timestamp": _utc_now(), "selector_name": selector_name,
-                    "value": None, "correct": False,
-                    "confidence": None, "probabilities": None, "legend": None,
+                    "case_id": case["id"],
+                    "language": case["language"],
+                    "question_type": case["question_type"],
+                    "repeat": repeat,
+                    "timestamp": _utc_now(),
+                    "selector_name": selector_name,
+                    "value": None,
+                    "correct": False,
+                    "confidence": None,
+                    "probabilities": None,
+                    "legend": None,
                     "requested_model": getattr(selector, "model", None),
-                    "response_model": None, "wall_seconds": wall_seconds,
-                    "model_total_seconds": None, "load_seconds": None,
+                    "response_model": None,
+                    "wall_seconds": wall_seconds,
+                    "model_total_seconds": None,
+                    "load_seconds": None,
                     "eval_seconds": None,
-                    "error": f"{type(error).__name__}: {error}", "raw": None,
+                    "error": f"{type(error).__name__}: {error}",
+                    "raw": None,
                 }
             rows.append(row)
             with trials_path.open("a", encoding="utf-8") as stream:
                 stream.write(json.dumps(row, ensure_ascii=False) + "\n")
             if progress:
-                print(f"{case['id']} {repeat}/{repeats} value={row['value']} correct={row['correct']} wall={wall_seconds:.6f}s")
+                print(
+                    f"{case['id']} {repeat}/{repeats} value={row['value']} correct={row['correct']} wall={wall_seconds:.6f}s"
+                )
 
     groups = []
     for language in ("ko", "en"):
@@ -287,11 +318,31 @@ def run_question_types_benchmark(
         "requested_model": getattr(selector, "model", None),
         "device": selector_device_metadata(selector, last_result),
         "settings": settings,
-        "overall": _summarize(rows), "groups": groups,
+        "overall": _summarize(rows),
+        "groups": groups,
     }
     (output / SUMMARY_FILENAME).write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
-    fields = ["case_id", "language", "question_type", "repeat", "timestamp", "selector_name", "value", "correct", "confidence", "requested_model", "response_model", "wall_seconds", "model_total_seconds", "load_seconds", "eval_seconds", "probabilities", "legend", "error"]
+    fields = [
+        "case_id",
+        "language",
+        "question_type",
+        "repeat",
+        "timestamp",
+        "selector_name",
+        "value",
+        "correct",
+        "confidence",
+        "requested_model",
+        "response_model",
+        "wall_seconds",
+        "model_total_seconds",
+        "load_seconds",
+        "eval_seconds",
+        "probabilities",
+        "legend",
+        "error",
+    ]
     with (output / CSV_FILENAME).open("w", encoding="utf-8-sig", newline="") as stream:
         writer = csv.DictWriter(stream, fieldnames=fields)
         writer.writeheader()
@@ -301,19 +352,17 @@ def run_question_types_benchmark(
                 exported[field] = json.dumps(row.get(field), ensure_ascii=False, separators=(",", ":"))
             writer.writerow(exported)
     manifest.update(
-        status="complete", completed_at=_utc_now(),
-        completed_trial_count=len(rows), device=summary["device"],
-        output_files=[
-            MANIFEST_FILENAME, TRIALS_FILENAME, SUMMARY_FILENAME, CSV_FILENAME
-        ],
+        status="complete",
+        completed_at=_utc_now(),
+        completed_trial_count=len(rows),
+        device=summary["device"],
+        output_files=[MANIFEST_FILENAME, TRIALS_FILENAME, SUMMARY_FILENAME, CSV_FILENAME],
     )
-    (output / MANIFEST_FILENAME).write_text(
-        json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
+    (output / MANIFEST_FILENAME).write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return summary
 
 
+# 명령행 프로그램의 실행 절차를 시작한다.
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
@@ -321,8 +370,7 @@ def main() -> int:
     parser.add_argument("--warmups", type=int, default=1)
     args = parser.parse_args()
     summary = run_question_types_benchmark(
-        args.output, repeats=args.repeats, warmups=args.warmups,
-        selector=get_selector(),
+        args.output, repeats=args.repeats, warmups=args.warmups, selector=get_selector()
     )
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     return 0

@@ -17,9 +17,7 @@ from typing import Any, Callable
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from simulation.evaluation.device_metadata import (
-    git_metadata, selector_device_metadata,
-)
+from simulation.evaluation.device_metadata import git_metadata, selector_device_metadata
 from simulation.evaluation.graph_path import resolve_graph_path
 from simulation.route_selector import get_selector
 from simulation.services.route_service import (
@@ -49,9 +47,7 @@ def _configured_route_cases() -> tuple[tuple[int, int], ...]:
 ROUTE_CASES = _configured_route_cases()
 
 
-def _five_shortest_simple_paths(
-    graph: dict[str, Any], start: int, target: int
-) -> list[tuple[list[int], float]]:
+def _five_shortest_simple_paths(graph: dict[str, Any], start: int, target: int) -> list[tuple[list[int], float]]:
     """Enumerate valid simple paths and return the five lightest candidates."""
     points, edges = build_route_inputs(graph, require_stored_weight=True)
     adjacency: dict[int, list[tuple[int, float]]] = {node: [] for node in points}
@@ -62,6 +58,7 @@ def _five_shortest_simple_paths(
 
     paths: list[tuple[list[int], float]] = []
 
+    # 그래프에서 방문할 항목을 처리한다.
     def visit(node: int, path: list[int], distance: float) -> None:
         if node == target:
             paths.append((path.copy(), distance))
@@ -74,47 +71,30 @@ def _five_shortest_simple_paths(
     paths.sort(key=lambda item: (item[1], item[0]))
     if len(paths) < len(OPTION_IDS):
         raise ValueError(
-            f"{start}→{target} 경로 후보가 {len(paths)}개뿐입니다. "
-            f"최소 {len(OPTION_IDS)}개가 필요합니다."
+            f"{start}→{target} 경로 후보가 {len(paths)}개뿐입니다. " f"최소 {len(OPTION_IDS)}개가 필요합니다."
         )
     return paths[: len(OPTION_IDS)]
 
 
-def _route_question_data(
-    language: str, start: int, target: int
-) -> dict[str, Any]:
+def _route_question_data(language: str, start: int, target: int) -> dict[str, Any]:
     """Build one selector case from the actual frontend GeoJSON graph."""
     graph = json.loads(ROUTE_GRAPH_PATH.read_text(encoding="utf-8"))
     points, edges = build_route_inputs(graph, require_stored_weight=True)
-    baseline = plan_route(
-        str(start), str(target), graph, require_stored_weight=True
-    )
+    baseline = plan_route(str(start), str(target), graph, require_stored_weight=True)
     correct_path = [int(node) for node in baseline["node_ids"]]
-    _, correct_distance = validate_and_calculate_path_distance(
-        points, edges, correct_path, start, target
-    )
+    _, correct_distance = validate_and_calculate_path_distance(points, edges, correct_path, start, target)
     path_candidates = _five_shortest_simple_paths(graph, start, target)
-    candidates = [
-        f"path={path}, distance={distance:.12f}"
-        for path, distance in path_candidates
-    ]
+    candidates = [f"path={path}, distance={distance:.12f}" for path, distance in path_candidates]
     correct_answer = f"path={correct_path}, distance={correct_distance:.12f}"
     if candidates[0] != correct_answer:
         raise ValueError(f"{start}→{target} 후보와 V1 Ground Truth가 일치하지 않습니다.")
     state = {
         "start_node": start,
         "target_node": target,
-        "route_graph": build_compact_route_graph(
-            graph,
-            ROUTE_GRAPH_PATH.name,
-            require_stored_weight=True,
-        ),
+        "route_graph": build_compact_route_graph(graph, ROUTE_GRAPH_PATH.name, require_stored_weight=True),
     }
     if language == "ko":
-        instructions = (
-            "방향성 간선으로 모두 연결된 후보 중 간선 weight 합이 가장 작은 "
-            "경로를 선택하세요."
-        )
+        instructions = "방향성 간선으로 모두 연결된 후보 중 간선 weight 합이 가장 작은 " "경로를 선택하세요."
     else:
         instructions = (
             "Select the candidate whose nodes are connected by directed edges and "
@@ -131,6 +111,7 @@ def _route_question_data(
     }
 
 
+# 지연 시간 측정용 기본 질문을 만든다.
 def _base_questions() -> list[dict[str, Any]]:
     questions = [
         {
@@ -200,9 +181,7 @@ def _base_questions() -> list[dict[str, Any]]:
     return questions
 
 
-def _positioned_candidates(
-    answers: list[str], correct_answer: str, answer_position: int
-) -> tuple[dict[str, str], str]:
+def _positioned_candidates(answers: list[str], correct_answer: str, answer_position: int) -> tuple[dict[str, str], str]:
     """Place the same correct answer once at each of the five option positions."""
     distractors = [answer for answer in answers if answer != correct_answer]
     ordered_answers = distractors.copy()
@@ -212,6 +191,7 @@ def _positioned_candidates(
     return candidates, expected_choice
 
 
+# 평가에 사용할 테스트 사례를 생성한다.
 def build_test_cases() -> tuple[dict[str, Any], ...]:
     cases = []
     for question in _base_questions():
@@ -245,22 +225,23 @@ def build_test_cases() -> tuple[dict[str, Any], ...]:
 TEST_CASES = build_test_cases()
 
 
+# 현재 UTC 시각을 문자열로 반환한다.
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+# 평가 결과를 JSONL 파일에 덧붙인다.
 def _append_jsonl(path: Path, value: dict[str, Any]) -> None:
     with path.open("a", encoding="utf-8") as stream:
         stream.write(json.dumps(value, ensure_ascii=False) + "\n")
 
 
+# 평가 결과를 JSON 문자열로 변환한다.
 def _json_dump(path: Path, value: dict[str, Any]) -> None:
-    path.write_text(
-        json.dumps(value, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
+    path.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
+# 측정값의 백분위수를 계산한다.
 def _percentile(values: list[float], percentile: float) -> float | None:
     if not values:
         return None
@@ -274,6 +255,7 @@ def _percentile(values: list[float], percentile: float) -> float | None:
     return ordered[lower] + (ordered[upper] - ordered[lower]) * fraction
 
 
+# 지연 시간 측정값을 요약한다.
 def _latency_stats(values: list[float]) -> dict[str, float | int | None]:
     return {
         "count": len(values),
@@ -285,63 +267,60 @@ def _latency_stats(values: list[float]) -> dict[str, float | int | None]:
     }
 
 
+# trials를 요약한다.
 def _summarize_trials(trials: list[dict[str, Any]]) -> dict[str, Any]:
     successful = [trial for trial in trials if trial["error"] is None]
-    truncation_reported = [
-        trial for trial in successful
-        if isinstance(trial.get("state_truncated"), bool)
-    ]
+    truncation_reported = [trial for trial in successful if isinstance(trial.get("state_truncated"), bool)]
     wall_times = [trial["wall_seconds"] for trial in successful]
-    server_times = [
-        trial["model_total_seconds"]
-        for trial in successful
-        if trial["model_total_seconds"] is not None
-    ]
-    eval_times = [
-        trial["eval_seconds"]
-        for trial in successful
-        if trial["eval_seconds"] is not None
-    ]
+    server_times = [trial["model_total_seconds"] for trial in successful if trial["model_total_seconds"] is not None]
+    eval_times = [trial["eval_seconds"] for trial in successful if trial["eval_seconds"] is not None]
     return {
         "trial_count": len(trials),
         "successful_request_count": len(successful),
         "error_count": len(trials) - len(successful),
         "correct_count": sum(bool(trial["correct"]) for trial in trials),
-        "state_truncated_count": sum(
-            trial.get("state_truncated") is True for trial in successful
-        ),
-        "state_truncation_unreported_count": (
-            len(successful) - len(truncation_reported)
-        ),
-        "full_input_preserved_count": sum(
-            trial.get("state_truncated") is False for trial in successful
-        ),
-        "accuracy": (
-            sum(bool(trial["correct"]) for trial in trials) / len(trials)
-            if trials
-            else None
-        ),
+        "state_truncated_count": sum(trial.get("state_truncated") is True for trial in successful),
+        "state_truncation_unreported_count": (len(successful) - len(truncation_reported)),
+        "full_input_preserved_count": sum(trial.get("state_truncated") is False for trial in successful),
+        "accuracy": (sum(bool(trial["correct"]) for trial in trials) / len(trials) if trials else None),
         "realtime_met_count": sum(bool(trial["realtime_met"]) for trial in trials),
-        "realtime_met_rate": (
-            sum(bool(trial["realtime_met"]) for trial in trials) / len(trials)
-            if trials
-            else None
-        ),
+        "realtime_met_rate": (sum(bool(trial["realtime_met"]) for trial in trials) / len(trials) if trials else None),
         "wall_latency": _latency_stats(wall_times),
         "model_total_latency": _latency_stats(server_times),
         "model_eval_latency": _latency_stats(eval_times),
     }
 
 
+# 평가 결과를 CSV 파일에 기록한다.
 def _write_csv(path: Path, trials: list[dict[str, Any]]) -> None:
     fieldnames = [
-        "case_id", "question_type", "language", "answer_position", "repeat",
-        "start_node", "target_node",
-        "timestamp", "selector_name", "requested_model", "response_model", "choice",
-        "expected_choice", "correct_answer", "correct", "confidence",
-        "wall_seconds", "model_total_seconds", "load_seconds", "eval_seconds",
-        "realtime_deadline_seconds", "realtime_met", "probabilities", "routing",
-        "usage", "state_truncated", "error",
+        "case_id",
+        "question_type",
+        "language",
+        "answer_position",
+        "repeat",
+        "start_node",
+        "target_node",
+        "timestamp",
+        "selector_name",
+        "requested_model",
+        "response_model",
+        "choice",
+        "expected_choice",
+        "correct_answer",
+        "correct",
+        "confidence",
+        "wall_seconds",
+        "model_total_seconds",
+        "load_seconds",
+        "eval_seconds",
+        "realtime_deadline_seconds",
+        "realtime_met",
+        "probabilities",
+        "routing",
+        "usage",
+        "state_truncated",
+        "error",
     ]
     with path.open("w", encoding="utf-8-sig", newline="") as stream:
         writer = csv.DictWriter(stream, fieldnames=fieldnames)
@@ -349,9 +328,7 @@ def _write_csv(path: Path, trials: list[dict[str, Any]]) -> None:
         for trial in trials:
             row = {field: trial.get(field) for field in fieldnames}
             for field in ("probabilities", "routing", "usage"):
-                row[field] = json.dumps(
-                    trial.get(field), ensure_ascii=False, separators=(",", ":")
-                )
+                row[field] = json.dumps(trial.get(field), ensure_ascii=False, separators=(",", ":"))
             writer.writerow(row)
 
 
@@ -389,9 +366,7 @@ def run_latency_benchmark(
         "option_count": 5,
         "route_graph": str(ROUTE_GRAPH_PATH.relative_to(ROOT)),
         "route_graph_sha256": hashlib.sha256(ROUTE_GRAPH_PATH.read_bytes()).hexdigest(),
-        "route_pairs": [
-            {"start": start, "target": target} for start, target in ROUTE_CASES
-        ],
+        "route_pairs": [{"start": start, "target": target} for start, target in ROUTE_CASES],
         "case_count": len(TEST_CASES),
         "warmups_per_language_and_type": warmups,
         "repeats_per_case": repeats,
@@ -415,19 +390,16 @@ def run_latency_benchmark(
 
     # Warm each language/type once. Position variants use the already-warmed model.
     for question in _base_questions():
-        candidates, _ = _positioned_candidates(
-            question["answers"], question["correct_answer"], 0
-        )
+        candidates, _ = _positioned_candidates(question["answers"], question["correct_answer"], 0)
         for warmup in range(1, warmups + 1):
             last_result = selector.select_choice(
-                question["state"], candidates, question["instructions"],
+                question["state"],
+                candidates,
+                question["instructions"],
                 question_id=f"warmup_{question['language']}_{question['type']}",
             )
             if progress:
-                print(
-                    f"{question['language']} {question['type']} "
-                    f"warmup {warmup}/{warmups} complete"
-                )
+                print(f"{question['language']} {question['type']} " f"warmup {warmup}/{warmups} complete")
 
     trials: list[dict[str, Any]] = []
     for case in TEST_CASES:
@@ -435,8 +407,7 @@ def run_latency_benchmark(
             started = clock()
             try:
                 result = selector.select_choice(
-                    case["state"], case["candidates"], case["instructions"],
-                    question_id=case["id"],
+                    case["state"], case["candidates"], case["instructions"], question_id=case["id"]
                 )
                 last_result = result
                 wall_seconds = clock() - started
@@ -516,32 +487,17 @@ def run_latency_benchmark(
     for language in ("ko", "en"):
         for question_type in ("intuitive", "reasoning", "shortest_path"):
             grouped = [
-                trial for trial in trials
-                if trial["language"] == language
-                and trial["question_type"] == question_type
+                trial for trial in trials if trial["language"] == language and trial["question_type"] == question_type
             ]
-            groups.append(
-                {
-                    "language": language,
-                    "question_type": question_type,
-                    **_summarize_trials(grouped),
-                }
-            )
+            groups.append({"language": language, "question_type": question_type, **_summarize_trials(grouped)})
     positions = []
     for position in range(1, len(OPTION_IDS) + 1):
         positioned = [trial for trial in trials if trial["answer_position"] == position]
-        positions.append(
-            {"answer_position": position, **_summarize_trials(positioned)}
-        )
+        positions.append({"answer_position": position, **_summarize_trials(positioned)})
     routes = []
     for start, target in ROUTE_CASES:
-        grouped = [
-            trial for trial in trials
-            if trial["start_node"] == start and trial["target_node"] == target
-        ]
-        routes.append(
-            {"start_node": start, "target_node": target, **_summarize_trials(grouped)}
-        )
+        grouped = [trial for trial in trials if trial["start_node"] == start and trial["target_node"] == target]
+        routes.append({"start_node": start, "target_node": target, **_summarize_trials(grouped)})
 
     summary = {
         "benchmark": "route-selector-language-position-latency-v3",
@@ -559,21 +515,23 @@ def run_latency_benchmark(
     _json_dump(output / SUMMARY_FILENAME, summary)
     _write_csv(output / CSV_FILENAME, trials)
     manifest.update(
-        status="complete", completed_at=_utc_now(),
-        completed_trial_count=len(trials), device=summary["device"],
-        output_files=[
-            MANIFEST_FILENAME, TRIALS_FILENAME, SUMMARY_FILENAME, CSV_FILENAME
-        ],
+        status="complete",
+        completed_at=_utc_now(),
+        completed_trial_count=len(trials),
+        device=summary["device"],
+        output_files=[MANIFEST_FILENAME, TRIALS_FILENAME, SUMMARY_FILENAME, CSV_FILENAME],
     )
     _json_dump(output / MANIFEST_FILENAME, manifest)
     return summary
 
 
+# 기본 결과 파일 경로를 만든다.
 def _default_output() -> Path:
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     return DEFAULT_RESULTS_DIR / f"route-selector-v3-{timestamp}"
 
 
+# 명령행 프로그램의 실행 절차를 시작한다.
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, default=None)
@@ -585,8 +543,7 @@ def main() -> int:
     selector = get_selector()
     output = args.output or _default_output()
     summary = run_latency_benchmark(
-        output, repeats=args.repeats, warmups=args.warmups,
-        realtime_deadline_seconds=args.deadline, selector=selector,
+        output, repeats=args.repeats, warmups=args.warmups, realtime_deadline_seconds=args.deadline, selector=selector
     )
     print(f"results: {output.resolve()}")
     print(json.dumps(summary, ensure_ascii=False, indent=2))

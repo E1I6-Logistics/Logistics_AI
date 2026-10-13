@@ -19,6 +19,7 @@ from .route_graph import load_route_graph, locate_current_node
 SCENARIO_PATH = BASE_DIR / "tests/traffic_scenarios.json"
 
 
+# 설정을 불러온다.
 def load_config():
     try:
         config = json.loads(SCENARIO_PATH.read_text(encoding="utf-8"))
@@ -51,6 +52,7 @@ def load_config():
         raise ValueError(f"시나리오 설정 오류: {exc}") from exc
 
 
+# 시나리오에 사용할 로봇 상태를 반환한다.
 def robot_states(mode):
     if mode == "simulation":
         from .mock_data import mock_fms
@@ -91,27 +93,31 @@ def robot_states(mode):
 
 
 class ScenarioManager:
+    # ScenarioManager의 초기 상태를 설정한다.
     def __init__(self):
         self.lock = RLock()
         self._task = None
         self._status = {"state": "idle", "name": None, "run_id": None, "robots": [], "message": ""}
 
+    # 작업이 진행 중인지 확인한다.
     @property
     def active(self):
         return self._status["state"] in ("running", "stopping")
 
+    # 현재 상태를 반환한다.
     def status(self):
         with self.lock:
             return deepcopy(self._status)
 
+    # 가용을 확인하고 준비한다.
     def ensure_available(self, robot_id=None):
         with self.lock:
-            if self.active and (
-                robot_id is None or normalize_robot_id(robot_id) in self._status["robot_ids"]
-            ):
+            if self.active and (robot_id is None or normalize_robot_id(robot_id) in self._status["robot_ids"]):
                 raise ValueError("시나리오 실행 중입니다. 완료 또는 정지 후 다시 시도하세요.")
 
+    # 명령을 보호한다.
     def protect_command(self, method):
+        # 보호된 작업을 실행한다.
         @wraps(method)
         def guarded(owner, robot_id, *args, **kwargs):
             with self.lock:
@@ -120,12 +126,17 @@ class ScenarioManager:
 
         return guarded
 
+    # 관련을 시작한다.
     def start(self, name):
         with self.lock:
             self.ensure_available()
             from .order_manager import order_manager
-            if any(row["status"] in ("PENDING", "IN_PROGRESS")
-                   for row in order_manager.list_orders()) or order_manager.returning or order_manager.recovering:
+
+            if (
+                any(row["status"] in ("PENDING", "IN_PROGRESS") for row in order_manager.list_orders())
+                or order_manager.returning
+                or order_manager.recovering
+            ):
                 raise ValueError("주문 또는 스테이션 복귀 중에는 시나리오를 시작할 수 없습니다.")
             config = load_config()
             scenario = next((s for s in config["scenarios"] if s["name"] == name), None)
@@ -159,17 +170,13 @@ class ScenarioManager:
                 if row is None or not row["connected"]:
                     errors.append(f"{rid}: 연결되지 않음 (필요 시작점 N{start})")
                     continue
-                if not row["fresh"] or any(
-                    v is None or not math.isfinite(v) for v in (row["x"], row["y"])
-                ):
+                if not row["fresh"] or any(v is None or not math.isfinite(v) for v in (row["x"], row["y"])):
                     errors.append(f"{rid}: 최신 위치 없음 (필요 시작점 N{start})")
                     continue
                 if row["status"] != "IDLE" or row["active"] or row.get("order_id"):
                     errors.append(f"{rid}: 작업 가능 상태가 아님 ({row['status']})")
                 if mode == "real":
-                    node = locate_current_node(
-                        planner.nodes, row["x"], row["y"], REAL_OCCUPANCY_TOLERANCE_M
-                    )
+                    node = locate_current_node(planner.nodes, row["x"], row["y"], REAL_OCCUPANCY_TOLERANCE_M)
                     if node != start:
                         distance = math.dist((row["x"], row["y"]), planner.nodes[start])
                         errors.append(
@@ -194,6 +201,7 @@ class ScenarioManager:
             )
             return self.status()
 
+    # 관련을 실행한다.
     async def _run(self, scenario, graph, nodes, timeout):
         mode = self._status["mode"]
         specs = scenario["robots"]
@@ -229,12 +237,7 @@ class ScenarioManager:
                     if row["status"] in ("PAUSED", "EMERGENCY_STOP", "OFFLINE"):
                         raise ValueError(f"{rid}: {row['status']}")
                     rows.append(
-                        dict(
-                            robot_id=rid,
-                            status=row["status"],
-                            current_node=row["current_node"],
-                            goal=spec["goal"],
-                        )
+                        dict(robot_id=rid, status=row["status"], current_node=row["current_node"], goal=spec["goal"])
                     )
                 self._status.update(robots=rows, elapsed=round(monotonic() - started, 2))
                 done = all(
@@ -245,14 +248,9 @@ class ScenarioManager:
                     for rid, goal in goals.items()
                 )
                 # 양보 중인 비이동 대상도 종료되어야 다음 테스트와 충돌하지 않는다.
-                done &= all(
-                    row["status"] == "IDLE" and not states[row["robot_id"]]["active"]
-                    for row in rows
-                )
+                done &= all(row["status"] == "IDLE" and not states[row["robot_id"]]["active"] for row in rows)
                 if done:
-                    self._status.update(
-                        state="completed", message="모든 로봇의 주행 및 후속 동작 완료"
-                    )
+                    self._status.update(state="completed", message="모든 로봇의 주행 및 후속 동작 완료")
                     return
                 if monotonic() - started >= timeout:
                     raise ValueError(f"{timeout:g}초 내 미완료 (교착 확정 아님)")
@@ -269,13 +267,13 @@ class ScenarioManager:
                         errors.append(f"{spec['id']} 정지 요청 실패: {stop_error}")
             self._status.update(state="failed", message="\n".join([reason, *errors]))
 
+    # 실행 중인 시나리오를 중단한다.
     def interrupt(self, robot_id=None):
         with self.lock:
-            if self.active and (
-                robot_id is None or normalize_robot_id(robot_id) in self._status["robot_ids"]
-            ):
+            if self.active and (robot_id is None or normalize_robot_id(robot_id) in self._status["robot_ids"]):
                 self._status.update(state="stopping", message="정지 요청으로 시나리오 중단")
 
+    # 관련을 종료한다.
     async def shutdown(self):
         if self._task and not self._task.done():
             self._task.cancel()

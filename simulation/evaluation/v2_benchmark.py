@@ -30,18 +30,16 @@ COMPARABLE_SETTING_KEYS = (
 )
 
 
+# JSON 데이터의 SHA-256 해시를 계산한다.
 def _sha256_json(value: Any) -> str:
-    encoded = json.dumps(
-        value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
-    ).encode("utf-8")
+    encoded = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
 
 
+# 평가 결과를 JSON 파일에 기록한다.
 def _write_json(path: Path, value: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
-    )
+    path.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
 def resolve_experiment_configs(
@@ -73,9 +71,7 @@ def resolve_experiment_configs(
         "graph_sha256": matrix["graph"]["sha256"],
         "models": matrix["models"],
         "cases": matrix["cases"],
-        "settings": {
-            key: common_settings[key] for key in COMPARABLE_SETTING_KEYS
-        },
+        "settings": {key: common_settings[key] for key in COMPARABLE_SETTING_KEYS},
     }
     condition_hash = _sha256_json(conditions)
     paths = []
@@ -103,9 +99,7 @@ def resolve_experiment_configs(
             "execution_strategy": experiment["execution_strategy"],
         }
         if experiment["execution_strategy"] == "iterative_chain":
-            settings["max_chain_steps"] = int(
-                experiment.get("max_chain_steps", matrix["graph"]["node_count"] * 2)
-            )
+            settings["max_chain_steps"] = int(experiment.get("max_chain_steps", matrix["graph"]["node_count"] * 2))
             settings["iterative_policy"] = experiment["iterative_policy"]
         config = {
             "benchmark_id": f"{matrix['matrix_id']}--{experiment['name']}",
@@ -116,9 +110,7 @@ def resolve_experiment_configs(
             "case_selection": matrix.get("case_selection"),
             "settings": settings,
             "retrieval": experiment["retrieval"],
-            "neighbor_context": experiment.get(
-                "neighbor_context", {"enabled": False, "policy": "none"}
-            ),
+            "neighbor_context": experiment.get("neighbor_context", {"enabled": False, "policy": "none"}),
             "prompt": prompt,
             "prompt_sha256": hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
             "experiment_mode": experiment["experiment_mode"],
@@ -131,26 +123,21 @@ def resolve_experiment_configs(
     return paths
 
 
+# 명령행 프로그램의 실행 절차를 시작한다.
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--matrix", type=Path, default=DEFAULT_MATRIX)
     parser.add_argument("--output", type=Path)
     parser.add_argument("--only", action="append", default=[])
-    parser.add_argument(
-        "--model", action="append", default=[],
-        help="run only this configured model; may be repeated",
-    )
-    parser.add_argument(
-        "--check", action="store_true", help="Ollama 호출 없이 6조건을 검증"
-    )
+    parser.add_argument("--model", action="append", default=[], help="run only this configured model; may be repeated")
+    parser.add_argument("--check", action="store_true", help="Ollama 호출 없이 6조건을 검증")
     parser.add_argument("--num-predict", type=int, help="override output token budget")
     parser.add_argument("--timeout-seconds", type=int, help="override request timeout")
     args = parser.parse_args()
     settings_overrides = {
-        key: value for key, value in {
-            "num_predict": args.num_predict,
-            "timeout_seconds": args.timeout_seconds,
-        }.items() if value is not None
+        key: value
+        for key, value in {"num_predict": args.num_predict, "timeout_seconds": args.timeout_seconds}.items()
+        if value is not None
     }
     matrix_path = args.matrix.resolve()
 
@@ -167,9 +154,7 @@ def main() -> int:
                         "name": config_path.stem,
                         "mode": prepared["config"]["experiment_mode"],
                         "retrieval": prepared["config"]["retrieval"]["enabled"],
-                        "condition_sha256": prepared[
-                            "comparison_condition_sha256"
-                        ],
+                        "condition_sha256": prepared["comparison_condition_sha256"],
                         "graph_sha256": prepared["graph_sha256"],
                         "cases": len(prepared["cases"]),
                         "num_predict": prepared["config"]["settings"]["num_predict"],
@@ -182,16 +167,12 @@ def main() -> int:
             print("V2 6조건 검증 완료: Ollama에는 요청하지 않았습니다.")
         return 0
 
-    output = args.output or (
-        RESULTS_ROOT / f"v2-matrix-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
-    )
+    output = args.output or (RESULTS_ROOT / f"v2-matrix-{datetime.now().strftime('%Y%m%d-%H%M%S')}")
     output = output.resolve()
     if output.exists() and any(output.iterdir()):
         raise FileExistsError(f"V2 output directory is not empty: {output}")
     output.mkdir(parents=True, exist_ok=True)
-    config_paths = resolve_experiment_configs(
-        matrix_path, output / "configs", settings_overrides=settings_overrides
-    )
+    config_paths = resolve_experiment_configs(matrix_path, output / "configs", settings_overrides=settings_overrides)
     selected = set(args.only)
     if selected:
         known = {path.stem for path in config_paths}
@@ -212,15 +193,8 @@ def main() -> int:
     _write_json(output / "matrix_manifest.json", manifest)
     for config_path in config_paths:
         print(f"V2 condition 시작: {config_path.stem}", flush=True)
-        run_benchmark(
-            config_path,
-            output / config_path.stem,
-            model_names=set(args.model) or None,
-        )
-    manifest.update(
-        status="complete",
-        finished_at=datetime.now(timezone.utc).isoformat(),
-    )
+        run_benchmark(config_path, output / config_path.stem, model_names=set(args.model) or None)
+    manifest.update(status="complete", finished_at=datetime.now(timezone.utc).isoformat())
     _write_json(output / "matrix_manifest.json", manifest)
     print(f"V2 matrix 결과 폴더: {output}")
     return 0

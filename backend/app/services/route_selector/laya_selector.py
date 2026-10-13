@@ -14,6 +14,7 @@ from .registry import RouteSelector
 AgentLoader = Callable[..., Any]
 
 
+# 환경 변수의 참거짓 설정을 읽는다.
 def _environment_flag(name: str, default: bool) -> bool:
     value = os.getenv(name)
     if value is None:
@@ -40,6 +41,7 @@ class LayaSelector(RouteSelector):
         "Return the candidate ID only through the choice answer."
     )
 
+    # LayaSelector의 초기 상태를 설정한다.
     def __init__(
         self,
         model: str | None = None,
@@ -50,15 +52,9 @@ class LayaSelector(RouteSelector):
         hf_token: str | None = None,
         loader: AgentLoader | None = None,
     ) -> None:
-        self.model = model or os.getenv(
-            "LAYA_HF_MODEL", "convaiinnovations/laya-multilingual"
-        )
+        self.model = model or os.getenv("LAYA_HF_MODEL", "convaiinnovations/laya-multilingual")
         self.device = device or os.getenv("LAYA_DEVICE", "cuda:0")
-        self.max_length = int(
-            max_length
-            if max_length is not None
-            else os.getenv("LAYA_MAX_LENGTH", "1024")
-        )
+        self.max_length = int(max_length if max_length is not None else os.getenv("LAYA_MAX_LENGTH", "1024"))
         if not 1 <= self.max_length <= 8192:
             raise ValueError("LAYA_MAX_LENGTH는 1 이상 8192 이하여야 합니다.")
         configured_head_max = os.getenv("LAYA_HEAD_MAX_LENGTH")
@@ -67,17 +63,9 @@ class LayaSelector(RouteSelector):
             if head_max_length is not None
             else int(configured_head_max) if configured_head_max else None
         )
-        if self.head_max_length is not None and not (
-            1 <= self.head_max_length < self.max_length
-        ):
-            raise ValueError(
-                "LAYA_HEAD_MAX_LENGTH는 1 이상 LAYA_MAX_LENGTH 미만이어야 합니다."
-            )
-        self.require_cuda = (
-            require_cuda
-            if require_cuda is not None
-            else _environment_flag("LAYA_REQUIRE_CUDA", True)
-        )
+        if self.head_max_length is not None and not (1 <= self.head_max_length < self.max_length):
+            raise ValueError("LAYA_HEAD_MAX_LENGTH는 1 이상 LAYA_MAX_LENGTH 미만이어야 합니다.")
+        self.require_cuda = require_cuda if require_cuda is not None else _environment_flag("LAYA_REQUIRE_CUDA", True)
         self.hf_token = hf_token if hf_token is not None else os.getenv("HF_TOKEN")
         self._loader = loader or self._load_laya_agent
         self._agent: Any | None = None
@@ -85,6 +73,7 @@ class LayaSelector(RouteSelector):
         self.last_inference: dict[str, Any] | None = None
         self.last_load_duration_seconds: float | None = None
 
+    # laya 에이전트를 불러온다.
     @staticmethod
     def _load_laya_agent(**kwargs: Any) -> Any:
         # TensorFlow 탐색은 Jetson에서 불필요한 메모리 사용이나 import 교착을
@@ -101,15 +90,12 @@ class LayaSelector(RouteSelector):
             ) from error
         return laya.load(**kwargs)
 
+    # 에이전트를 확인하고 준비한다.
     def _ensure_agent(self) -> tuple[Any, float]:
         if self._agent is not None:
             return self._agent, 0.0
         started = time.perf_counter()
-        agent = self._loader(
-            model_id_or_path=self.model,
-            device=self.device,
-            token=self.hf_token,
-        )
+        agent = self._loader(model_id_or_path=self.model, device=self.device, token=self.hf_token)
         load_seconds = time.perf_counter() - started
         actual_device = str(getattr(agent, "device", "unknown"))
         if self.require_cuda and not actual_device.startswith("cuda"):
@@ -125,9 +111,7 @@ class LayaSelector(RouteSelector):
         return agent, load_seconds
 
     def decide(
-        self,
-        state: str | dict[str, Any] | list[Any],
-        questions: Mapping[str, dict[str, Any]],
+        self, state: str | dict[str, Any] | list[Any], questions: Mapping[str, dict[str, Any]]
     ) -> dict[str, Any]:
         """질문 묶음을 Hugging Face Laya의 단일 forward로 처리한다."""
         if not questions:
@@ -146,9 +130,7 @@ class LayaSelector(RouteSelector):
             total_seconds = time.perf_counter() - total_started
             fallback_after = int(getattr(agent, "cpu_fallback_count", 0))
             actual_device = str(getattr(agent, "device", "unknown"))
-            precision = str(getattr(agent, "dtype", "unknown")).removeprefix(
-                "torch."
-            )
+            precision = str(getattr(agent, "dtype", "unknown")).removeprefix("torch.")
             if self.require_cuda and fallback_after > fallback_before:
                 raise RuntimeError(
                     "CUDA 메모리 부족으로 Laya가 이번 요청을 CPU에서 처리했습니다. "
@@ -203,6 +185,7 @@ class LayaSelector(RouteSelector):
             "raw": response,
         }
 
+    # 현재 선택지에서 다음 경로 노드를 고른다.
     def select_choice(
         self,
         state: str | dict[str, Any],
@@ -216,14 +199,7 @@ class LayaSelector(RouteSelector):
         if any(not key or not description for key, description in candidates.items()):
             raise ValueError("모든 후보에는 비어 있지 않은 ID와 설명이 필요합니다.")
         common = self.decide(
-            state,
-            {
-                question_id: {
-                    "type": "choice",
-                    "instructions": instructions,
-                    "criteria": dict(candidates),
-                }
-            },
+            state, {question_id: {"type": "choice", "instructions": instructions, "criteria": dict(candidates)}}
         )
         answer = self._answer(common, question_id, "choice")
         choice = str(answer["choice"])
@@ -234,34 +210,18 @@ class LayaSelector(RouteSelector):
             "choice": choice,
             "confidence": float(answer.get("confidence", 0.0)),
             "answer_confidence": float(
-                answer.get(
-                    "answer_confidence",
-                    max(answer.get("probabilities", {}).values(), default=0.0),
-                )
+                answer.get("answer_confidence", max(answer.get("probabilities", {}).values(), default=0.0))
             ),
             "probabilities": dict(answer.get("probabilities", {})),
         }
 
+    # 선택 결과의 점수를 평가한다.
     def evaluate_score(
-        self,
-        state: str | dict[str, Any],
-        levels: list[str],
-        instructions: str,
-        *,
-        question_id: str = "score",
+        self, state: str | dict[str, Any], levels: list[str], instructions: str, *, question_id: str = "score"
     ) -> dict[str, Any]:
         if not 2 <= len(levels) <= 10:
             raise ValueError("score 단계는 2개 이상 10개 이하여야 합니다.")
-        common = self.decide(
-            state,
-            {
-                question_id: {
-                    "type": "score",
-                    "instructions": instructions,
-                    "criteria": levels,
-                }
-            },
-        )
+        common = self.decide(state, {question_id: {"type": "score", "instructions": instructions, "criteria": levels}})
         answer = self._answer(common, question_id, "score")
         return {
             **self._metadata(common),
@@ -271,6 +231,7 @@ class LayaSelector(RouteSelector):
             "probabilities": dict(answer.get("probabilities", {})),
         }
 
+    # 선택 결과의 NOUL 지표를 평가한다.
     def evaluate_noul(
         self,
         state: str | dict[str, Any],
@@ -279,24 +240,16 @@ class LayaSelector(RouteSelector):
         criteria: Mapping[str, str] | None = None,
         question_id: str = "noul",
     ) -> dict[str, Any]:
-        question: dict[str, Any] = {
-            "type": "noul",
-            "instructions": instructions,
-        }
+        question: dict[str, Any] = {"type": "noul", "instructions": instructions}
         if criteria is not None:
             question["criteria"] = dict(criteria)
         common = self.decide(state, {question_id: question})
         answer = self._answer(common, question_id, "noul")
         return {**self._metadata(common), "noul": float(answer["noul"])}
 
-    def select_route(
-        self,
-        state: str | dict[str, Any],
-        candidates: Mapping[str, str],
-    ) -> dict[str, Any]:
-        return self.select_choice(
-            state, candidates, self.ROUTE_INSTRUCTIONS, question_id="route"
-        )
+    # 선택기를 사용해 전체 경로를 구성한다.
+    def select_route(self, state: str | dict[str, Any], candidates: Mapping[str, str]) -> dict[str, Any]:
+        return self.select_choice(state, candidates, self.ROUTE_INSTRUCTIONS, question_id="route")
 
     def release(self) -> None:
         """모델과 CUDA cache를 해제해 다른 Jetson 프로세스에 메모리를 돌려준다."""
@@ -314,28 +267,25 @@ class LayaSelector(RouteSelector):
             except ImportError:
                 pass
 
+    # Laya 에이전트의 연결을 정리한다.
     @staticmethod
     def _close_agent(agent: Any) -> None:
         exit_method = getattr(agent, "__exit__", None)
         if callable(exit_method):
             exit_method(None, None, None)
 
+    # 선택 결과에서 답변 값을 추출한다.
     @staticmethod
-    def _answer(
-        common: dict[str, Any], question_id: str, expected_type: str
-    ) -> dict[str, Any]:
+    def _answer(common: dict[str, Any], question_id: str, expected_type: str) -> dict[str, Any]:
         try:
             answer = common["answers"][question_id]
         except (KeyError, TypeError) as error:
-            raise RuntimeError(
-                f"Laya 응답에 answers.{question_id}가 없습니다."
-            ) from error
+            raise RuntimeError(f"Laya 응답에 answers.{question_id}가 없습니다.") from error
         if answer.get("type") not in (None, expected_type):
-            raise RuntimeError(
-                f"Laya 응답 타입 불일치: {answer.get('type')} != {expected_type}"
-            )
+            raise RuntimeError(f"Laya 응답 타입 불일치: {answer.get('type')} != {expected_type}")
         return answer
 
+    # 선택 결과의 메타데이터를 구성한다.
     @staticmethod
     def _metadata(common: dict[str, Any]) -> dict[str, Any]:
         return {key: value for key, value in common.items() if key != "answers"}

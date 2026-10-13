@@ -26,6 +26,7 @@ class NavigationType(str, Enum):
     RETURN = "return"
     CHARGING = "charging"
 
+
 PAUSE_REASON_MESSAGES = {
     "reconnected_with_active_work": "연결이 복구됐지만 이전 작업이 남아 있어 자동 재개하지 않았습니다.",
     "after_stop_failed": "정지 확인 후 다음 작업을 시작하지 못했습니다.",
@@ -68,7 +69,9 @@ PAUSE_REASON_MESSAGES = {
     "occupancy_or_route_mismatch": "로봇의 측정 위치와 점유 또는 계획 경로가 일치하지 않습니다.",
 }
 
+
 class Robot:
+    # Robot의 초기 상태를 설정한다.
     def __init__(self, robot_id: str):
 
         # ROS 콜백과 API 사이의 상태 읽기/쓰기 보호
@@ -136,6 +139,7 @@ class Robot:
         # 현재 진행 중인 Pickup 순서
         self.order_pickup_index: int = 0
 
+    # 연결을 설정한다.
     def set_connected(self, connected: bool) -> None:
         was_connected = self.connected
         previous_state = self.state
@@ -144,8 +148,7 @@ class Robot:
         if connected:
             if self.state == RobotState.OFFLINE:
                 # 진행 중이던 이동/주문은 연결 복구만으로 IDLE 또는 자동 재출발시키지 않는다.
-                active = (self.route is not None or self.navigation_type is not None
-                          or self.order_id is not None)
+                active = self.route is not None or self.navigation_type is not None or self.order_id is not None
                 if active:
                     self.pause("reconnected_with_active_work")
                 elif self.pose_received_at is None:
@@ -161,16 +164,18 @@ class Robot:
                 self.pause_reason_code = None
                 self.pause_reason = None
             level = "INFO" if connected else "WARN"
-            print(f"[{strftime('%Y-%m-%d %H:%M:%S')}] [{level}] [ROBOT CONNECTION] robot={self.robot_id} "
-                  f"connected={was_connected}->{self.connected} "
-                  f"state={previous_state.value}->{self.state.value} "
-                  f"order_id={self.order_id}", flush=True)
+            print(
+                f"[{strftime('%Y-%m-%d %H:%M:%S')}] [{level}] [ROBOT CONNECTION] robot={self.robot_id} "
+                f"connected={was_connected}->{self.connected} "
+                f"state={previous_state.value}->{self.state.value} "
+                f"order_id={self.order_id}",
+                flush=True,
+            )
 
+    # 상태를 설정한다.
     def set_state(self, state: RobotState) -> None:
         if state == RobotState.PAUSED:
-            raise ValueError(
-                "PAUSED 상태는 set_state() 대신 pause(reason_code, detail)를 사용해야 합니다."
-            )
+            raise ValueError("PAUSED 상태는 set_state() 대신 pause(reason_code, detail)를 사용해야 합니다.")
 
         with self._lock:
             previous_state = self.state
@@ -180,11 +185,7 @@ class Robot:
             self.pause_reason = None
 
             if previous_state != state:
-                level = (
-                    "WARN"
-                    if state in (RobotState.EMERGENCY_STOP, RobotState.OFFLINE)
-                    else "INFO"
-                )
+                level = "WARN" if state in (RobotState.EMERGENCY_STOP, RobotState.OFFLINE) else "INFO"
                 print(
                     f"[{strftime('%Y-%m-%d %H:%M:%S')}] [{level}] [ROBOT STATE] "
                     f"robot={self.robot_id} "
@@ -193,6 +194,7 @@ class Robot:
                     flush=True,
                 )
 
+    # 로봇의 동작을 일시 정지한다.
     def pause(self, reason_code: str, detail: str | None = None) -> None:
         if not reason_code:
             raise ValueError("PAUSED 상태에는 reason_code가 필요합니다.")
@@ -200,17 +202,12 @@ class Robot:
         with self._lock:
             previous_state = self.state
             message = PAUSE_REASON_MESSAGES.get(
-                reason_code,
-                f"알 수 없는 원인으로 일시정지했습니다. 원인 코드: {reason_code}",
+                reason_code, f"알 수 없는 원인으로 일시정지했습니다. 원인 코드: {reason_code}"
             )
 
             self.state = RobotState.PAUSED
             self.pause_reason_code = reason_code
-            self.pause_reason = (
-                message
-                if not detail
-                else f"{message} 상세: {detail}"
-            )
+            self.pause_reason = message if not detail else f"{message} 상세: {detail}"
 
             print(
                 f"[{strftime('%Y-%m-%d %H:%M:%S')}] [WARN] [ROBOT STATE] "
@@ -221,6 +218,7 @@ class Robot:
                 flush=True,
             )
 
+    # 위치를 갱신한다.
     def update_pose(self, x: float, y: float, yaw: float) -> None:
         with self._lock:
             self.x = float(x)
@@ -230,6 +228,7 @@ class Robot:
                 monotonic()
             )  # FMS가 위치를 저장한 시각. AMCL 메시지의 측정 시간이나 웹 전송 시각과는 별개
 
+    # 로봇에 주문을 배정한다.
     def assign_order(
         self,
         order_id: str,
@@ -247,6 +246,7 @@ class Robot:
         self.order_pickup_index = 0  # 첫 번째 Pickup부터 시작
         self.set_state(RobotState.TASK_ASSIGNED)
 
+    # 주문을 초기화한다.
     def clear_order(self) -> None:
         self.order_id = None
         self.order_items = {}
@@ -255,5 +255,6 @@ class Robot:
         self.order_workstation_node = None
         self.order_pickup_index = 0
 
+    # 배터리를 갱신한다.
     def update_battery(self, percentage: float) -> None:
         self.battery = float(percentage)

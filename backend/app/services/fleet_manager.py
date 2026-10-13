@@ -4,6 +4,7 @@ from ..models.robot import Robot
 
 
 class FleetManager:
+    # FleetManager의 초기 상태를 설정한다.
     def __init__(self):
 
         # FMS가 한 번이라도 발견한 로봇 객체 관리

@@ -9,20 +9,15 @@ from .base import LLMPathProvider
 class OpenAIPathProvider(LLMPathProvider):
     name = "openai"
 
+    # OpenAIPathProvider의 초기 상태를 설정한다.
     def __init__(self, model: str | None = None):
         self.model = model or self._require_env("OPENAI_MODEL")
         self._require_env("OPENAI_API_KEY")
         # OPENAI_API_KEY 환경변수를 자동으로 읽는다.
-        self.client = OpenAI(
-            timeout=float(os.getenv("LLM_TIMEOUT_SECONDS", "60"))
-        )
+        self.client = OpenAI(timeout=float(os.getenv("LLM_TIMEOUT_SECONDS", "60")))
 
-    def compute_shortest_path(
-        self,
-        raw_graph: dict,
-        start_id: int,
-        target_id: int,
-    ) -> dict:
+    # shortest 경로를 계산한다.
+    def compute_shortest_path(self, raw_graph: dict, start_id: int, target_id: int) -> dict:
         llm_input = self.build_llm_input(raw_graph, start_id, target_id)
 
         response = self.client.responses.create(

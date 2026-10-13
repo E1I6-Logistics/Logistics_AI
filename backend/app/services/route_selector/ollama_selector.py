@@ -14,16 +14,16 @@ class OllamaSelector(RouteSelector):
     """Ask an Ollama generation model to choose one provided option."""
 
     name = "ollama"
-    ROUTE_INSTRUCTIONS = (
-        "Select the valid route option with the smallest directed total weight."
-    )
+    ROUTE_INSTRUCTIONS = "Select the valid route option with the smallest directed total weight."
 
+    # OllamaSelector의 초기 상태를 설정한다.
     def __init__(self, provider: OllamaPathProvider | None = None) -> None:
         self.provider = provider or OllamaPathProvider()
         self.model = self.provider.model
         self.last_inference: dict[str, Any] | None = None
         self._runtime: dict[str, Any] | None = None
 
+    # 현재 선택지에서 다음 경로 노드를 고른다.
     def select_choice(
         self,
         state: str | dict[str, Any],
@@ -38,9 +38,7 @@ class OllamaSelector(RouteSelector):
         output_schema = {
             "type": "object",
             "additionalProperties": False,
-            "properties": {
-                "choice": {"type": "string", "enum": candidate_ids},
-            },
+            "properties": {"choice": {"type": "string", "enum": candidate_ids}},
             "required": ["choice"],
         }
         system_instructions = (
@@ -56,9 +54,7 @@ class OllamaSelector(RouteSelector):
         }
         started = time.perf_counter()
         response = self.provider.request_structured(
-            instructions=system_instructions,
-            payload=payload,
-            output_schema=output_schema,
+            instructions=system_instructions, payload=payload, output_schema=output_schema
         )
         wall_seconds = time.perf_counter() - started
         choice = str(response.get("choice", ""))
@@ -75,34 +71,17 @@ class OllamaSelector(RouteSelector):
             "probabilities": {},
             "model": self.model,
             "routing": None,
-            "usage": {
-                "prompt_tokens": raw.get("prompt_eval_count"),
-                "output_tokens": raw.get("eval_count"),
-            },
-            "total_duration_seconds": _nanoseconds_to_seconds(
-                raw.get("total_duration")
-            ) or wall_seconds,
-            "load_duration_seconds": _nanoseconds_to_seconds(
-                raw.get("load_duration")
-            ),
-            "eval_duration_seconds": _nanoseconds_to_seconds(
-                raw.get("eval_duration")
-            ),
+            "usage": {"prompt_tokens": raw.get("prompt_eval_count"), "output_tokens": raw.get("eval_count")},
+            "total_duration_seconds": _nanoseconds_to_seconds(raw.get("total_duration")) or wall_seconds,
+            "load_duration_seconds": _nanoseconds_to_seconds(raw.get("load_duration")),
+            "eval_duration_seconds": _nanoseconds_to_seconds(raw.get("eval_duration")),
             "runtime": runtime,
             "raw": raw,
         }
 
-    def select_route(
-        self,
-        state: str | dict[str, Any],
-        candidates: Mapping[str, str],
-    ) -> dict[str, Any]:
-        return self.select_choice(
-            state,
-            candidates,
-            self.ROUTE_INSTRUCTIONS,
-            question_id="route",
-        )
+    # 선택기를 사용해 전체 경로를 구성한다.
+    def select_route(self, state: str | dict[str, Any], candidates: Mapping[str, str]) -> dict[str, Any]:
+        return self.select_choice(state, candidates, self.ROUTE_INSTRUCTIONS, question_id="route")
 
     def release(self) -> None:
         """Ollama owns model lifetime, so only local diagnostics are cleared."""
@@ -118,16 +97,12 @@ class OllamaSelector(RouteSelector):
             return self._runtime
         try:
             response = client.ps()
-            payload = (
-                response.model_dump(mode="json")
-                if hasattr(response, "model_dump")
-                else dict(response)
-            )
+            payload = response.model_dump(mode="json") if hasattr(response, "model_dump") else dict(response)
             loaded = next(
                 (
-                    item for item in payload.get("models", [])
-                    if item.get("name") == self.model
-                    or item.get("model") == self.model
+                    item
+                    for item in payload.get("models", [])
+                    if item.get("name") == self.model or item.get("model") == self.model
                 ),
                 None,
             )
@@ -155,6 +130,7 @@ class OllamaSelector(RouteSelector):
         return self._runtime
 
 
+# 나노초를 초 단위로 변환한다.
 def _nanoseconds_to_seconds(value: Any) -> float | None:
     if value is None:
         return None

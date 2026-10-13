@@ -25,6 +25,7 @@ _llm_requests: dict[str, str] = {}
 async def route_models():
     """Return models explicitly enabled in the benchmark configuration."""
     from ..services.route_model_catalog import enabled_route_models
+
     try:
         return enabled_route_models()
     except (OSError, ValueError) as exc:
@@ -35,6 +36,7 @@ def _preview_start_node(robot_id: str, mode: str) -> str:
     """Read a stationary robot's occupied node without modifying navigation state."""
     if mode == "simulation":
         from ..services.mock_data import mock_fms
+
         robot = mock_fms.robot_snapshot(robot_id, mode)
         if robot.get("goal_node") is not None or robot.get("route") is not None:
             raise ValueError("로봇이 주행 중이거나 대기 중입니다. 정지 후 다시 시도하세요.")
@@ -59,12 +61,12 @@ async def llm_route_preview(payload: LlmRoutePreviewRequest):
     try:
         scenario_manager.ensure_available(payload.robot_id)
         from ..services.llm_route_preview import preview_llm_route
+
         mode = mode_manager.mode
         start = _preview_start_node(payload.robot_id, mode)
         graph = load_route_graph()
         result = await run_in_threadpool(
-            preview_llm_route, graph, start, payload.node_id,
-            selector=payload.selector, model=payload.model,
+            preview_llm_route, graph, start, payload.node_id, selector=payload.selector, model=payload.model
         )
         if mode_manager.mode != mode:
             raise HTTPException(status_code=409, detail="모드가 변경되어 미리보기가 리셋되었습니다.")
@@ -84,6 +86,7 @@ async def llm_route_preview(payload: LlmRoutePreviewRequest):
         raise HTTPException(status_code=503, detail=f"LLM 경로 미리보기에 실패했습니다: {exc}") from exc
 
 
+# 좌표 목적지를 전송한다.
 @router.post("/goal")
 async def send_coordinate_goal(payload: GoalCoordinateRequest):
     try:
@@ -91,6 +94,7 @@ async def send_coordinate_goal(payload: GoalCoordinateRequest):
         if mode_manager.mode != "simulation":
             raise ValueError("좌표 직접 설정은 Simulation 모드 전용입니다. 실제 이동은 goal-node를 사용하세요.")
         from ..services.mock_data import mock_fms
+
         result = mock_fms.navigate_to_pose(payload.robot_id, payload.target_x, payload.target_y)
         result["mode"] = mode_manager.mode
         return result
@@ -98,6 +102,7 @@ async def send_coordinate_goal(payload: GoalCoordinateRequest):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+# 노드 목적지를 전송한다.
 @router.post("/goal-node")
 async def send_node_goal(payload: GoalNodeRequest):
     try:
@@ -106,31 +111,33 @@ async def send_node_goal(payload: GoalNodeRequest):
         _llm_requests.pop(robot_id, None)
         if payload.driving_mode == "standard":
             from ..services.order_manager import order_manager
+
             order_manager.cancel_robot(robot_id, mode_manager.mode)
             return navigate_to_node(payload.robot_id, payload.node_id, mode_manager.mode)
         token = uuid4().hex
         _llm_requests[robot_id] = token
         try:
             from ..services.llm_route_preview import preview_llm_route
+
             mode = mode_manager.mode
             start = _preview_start_node(payload.robot_id, mode)
             graph = load_route_graph()
             # 모델 호출은 잠금·이벤트 루프 밖에서 수행하고 완성 경로만 예약한다.
             preview = await run_in_threadpool(
-                preview_llm_route, graph, start, payload.node_id,
-                selector=payload.selector, model=payload.model,
+                preview_llm_route, graph, start, payload.node_id, selector=payload.selector, model=payload.model
             )
-            if (_llm_requests.get(robot_id) != token or mode_manager.mode != mode
-                    or load_route_graph() != graph):
-                raise HTTPException(status_code=409, detail="정지·새 요청·모드 또는 맵 변경으로 LLM 결과를 취소했습니다.")
+            if _llm_requests.get(robot_id) != token or mode_manager.mode != mode or load_route_graph() != graph:
+                raise HTTPException(
+                    status_code=409, detail="정지·새 요청·모드 또는 맵 변경으로 LLM 결과를 취소했습니다."
+                )
             scenario_manager.ensure_available(payload.robot_id)
             if _preview_start_node(payload.robot_id, mode) != start:
                 raise ValueError("경로 생성 중 로봇의 출발 노드가 변경되었습니다.")
             from ..services.order_manager import order_manager
+
             order_manager.cancel_robot(robot_id, mode)
             result = navigate_to_node(payload.robot_id, payload.node_id, mode, required_path=preview["path"])
-            return dict(result, driving_mode="llm", selector=payload.selector,
-                        model=payload.model, llm_preview=preview)
+            return dict(result, driving_mode="llm", selector=payload.selector, model=payload.model, llm_preview=preview)
         finally:
             if _llm_requests.get(robot_id) == token:
                 _llm_requests.pop(robot_id, None)
@@ -143,6 +150,7 @@ async def send_node_goal(payload: GoalNodeRequest):
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
+# 로봇의 충전소 이동 명령을 처리한다.
 @router.post("/charging")
 async def charging_station(payload: StopRequest):
     try:
@@ -161,6 +169,7 @@ async def charging_station(payload: StopRequest):
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
+# 로봇을 정지한다.
 @router.post("/stop")
 async def stop_robot(payload: StopRequest):
     try:
@@ -168,10 +177,12 @@ async def stop_robot(payload: StopRequest):
         scenario_manager.interrupt(payload.robot_id)
         if mode_manager.mode == "simulation":
             from ..services.mock_data import mock_fms
+
             result = mock_fms.stop_robot(payload.robot_id)
         else:
             result = ros_gateway.emergency_stop(payload.robot_id)
         from ..services.order_manager import order_manager
+
         order_manager.cancel_robot(payload.robot_id, mode_manager.mode)
 
         result["mode"] = mode_manager.mode
@@ -184,6 +195,7 @@ async def stop_robot(payload: StopRequest):
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
+# 전체 로봇을 정지한다.
 @router.post("/stop-all")
 async def stop_all_robots():
     try:
@@ -191,12 +203,14 @@ async def stop_all_robots():
         scenario_manager.interrupt()
         if mode_manager.mode == "simulation":
             from ..services.mock_data import mock_fms
+
             for robot in mock_fms.robot_snapshots("simulation"):
                 mock_fms.stop_robot(robot["robot_id"])
             result = {"success": True, "command": "stop-all"}
         else:
             result = ros_gateway.emergency_stop_all()
         from ..services.order_manager import order_manager
+
         for robot in order_manager.list_orders():
             if robot["mode"] == mode_manager.mode and robot["status"] == "IN_PROGRESS":
                 order_manager.cancel_order(robot["order_id"])
@@ -215,6 +229,7 @@ async def stop_all_robots():
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
+# 로봇의 비상 정지 상태를 해제한다.
 @router.post("/emergency-release")
 async def emergency_release(payload: StopRequest):
     try:
@@ -234,6 +249,7 @@ async def emergency_release(payload: StopRequest):
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
+# 모든 로봇의 비상 정지 상태를 해제한다.
 @router.post("/emergency-release-all")
 async def emergency_release_all():
     try:
@@ -253,6 +269,7 @@ async def emergency_release_all():
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
+# 가장 가까운 노드를 복귀시킨다.
 @router.post("/return-nearest-node")
 async def return_nearest_node(payload: StopRequest):
     try:

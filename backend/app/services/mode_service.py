@@ -18,16 +18,19 @@ FEATURE_ENGINES = {
 }
 
 
+# 기능별 AI 또는 알고리즘 실행 방식을 결정한다.
 def feature_engine(feature, operation_mode):
     return FEATURE_ENGINES[operation_mode][feature]
 
 
 class RobotModeManager:
+    # RobotModeManager의 초기 상태를 설정한다.
     def __init__(self, initial_mode: str) -> None:
         self._lock = RLock()
         self._mode: RobotMode = self._validate(initial_mode)
         self._operation_mode: OperationMode = "algorithm"
 
+    # 관련을 검증한다.
     @staticmethod
     def _validate(mode: str) -> RobotMode:
         normalized = str(mode).strip().lower()
@@ -35,18 +38,22 @@ class RobotModeManager:
             raise ValueError("mode must be either 'real' or 'simulation'")
         return normalized  # type: ignore[return-value]
 
+    # 현재 시뮬레이션 또는 실제 모드를 반환한다.
     @property
     def mode(self) -> RobotMode:
         with self._lock:
             return self._mode
 
+    # 현재 AI 또는 알고리즘 운영 모드를 반환한다.
     @property
     def operation_mode(self) -> OperationMode:
         with self._lock:
             return self._operation_mode
 
+    # 모드를 설정한다.
     def set_mode(self, mode: str, operation_mode: str | None = None) -> RobotMode:
         from .scenario_service import scenario_manager
+
         scenario_manager.ensure_available()
         normalized = self._validate(mode)
         if operation_mode is not None and operation_mode not in FEATURE_ENGINES:

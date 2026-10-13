@@ -22,14 +22,8 @@ sys.path.insert(0, str(ROOT))
 from simulation.evaluation.device_metadata import git_metadata, selector_device_metadata
 from simulation.evaluation.graph_path import resolve_graph_path
 from simulation.route_selector import get_selector
-from simulation.services.iterative_route_policy import (
-    MAX_VISITS_PER_NODE,
-    NEXT_NODE_INSTRUCTIONS,
-)
-from simulation.services.iterative_route_runner import (
-    run_selected_route as _run_route,
-    _random_path_baseline,
-)
+from simulation.services.iterative_route_policy import MAX_VISITS_PER_NODE, NEXT_NODE_INSTRUCTIONS
+from simulation.services.iterative_route_runner import run_selected_route as _run_route, _random_path_baseline
 from simulation.services.route_service import (
     build_compact_adjacency_graph,
     build_route_inputs,
@@ -49,22 +43,23 @@ DEFAULT_RESULTS_DIR = ROOT / "simulation" / "benchmark_results"
 DOCKING_NODE_IDS = tuple(range(7))
 
 
+# 현재 UTC 시각을 문자열로 반환한다.
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+# 평가 결과를 JSON 문자열로 변환한다.
 def _json_dump(path: Path, value: dict[str, Any]) -> None:
-    path.write_text(
-        json.dumps(value, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
+    path.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
+# 평가 결과를 JSONL 파일에 덧붙인다.
 def _append_jsonl(path: Path, value: dict[str, Any]) -> None:
     with path.open("a", encoding="utf-8") as stream:
         stream.write(json.dumps(value, ensure_ascii=False) + "\n")
 
 
+# 측정값의 백분위수를 계산한다.
 def _percentile(values: list[float], percentile: float) -> float | None:
     if not values:
         return None
@@ -76,6 +71,7 @@ def _percentile(values: list[float], percentile: float) -> float | None:
     return ordered[lower] + (ordered[upper] - ordered[lower]) * (position - lower)
 
 
+# 측정값의 통계치를 계산한다.
 def _stats(values: list[float]) -> dict[str, float | int | None]:
     return {
         "count": len(values),
@@ -88,11 +84,7 @@ def _stats(values: list[float]) -> dict[str, float | int | None]:
 
 
 def _generate_random_cases(
-    graph: dict[str, Any],
-    nodes: list[int],
-    *,
-    case_count: int,
-    seed: int,
+    graph: dict[str, Any], nodes: list[int], *, case_count: int, seed: int
 ) -> list[dict[str, Any]]:
     """Create reproducible unique Start→Docking pairs with disjoint node sets."""
     docking_nodes = [node for node in DOCKING_NODE_IDS if node in nodes]
@@ -147,6 +139,7 @@ def _generate_all_pairs(graph: dict[str, Any], nodes: list[int]) -> list[dict[st
     return cases
 
 
+# 관련을 준비한다.
 def _prepare(
     *,
     case_count: int = DEFAULT_CASE_COUNT,
@@ -155,36 +148,22 @@ def _prepare(
     case_mode: str = "random",
 ) -> dict[str, Any]:
     config = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
-    graph_path = resolve_graph_path(
-        graph_path,
-        fallback=ROOT / config["graph"]["path"],
-    )
+    graph_path = resolve_graph_path(graph_path, fallback=ROOT / config["graph"]["path"])
     if case_mode not in {"random", "all-pairs"}:
         raise ValueError("case_mode must be 'random' or 'all-pairs'")
     graph = json.loads(graph_path.read_text(encoding="utf-8"))
     points, edges = build_route_inputs(graph, require_stored_weight=True)
     edge_weights = build_edge_weight_lookup(points, edges)
-    compact_graph = build_compact_adjacency_graph(
-        graph,
-        graph_path.name,
-        require_stored_weight=True,
-    )
+    compact_graph = build_compact_adjacency_graph(graph, graph_path.name, require_stored_weight=True)
     print(f"graph {compact_graph}")
     # 시드를 지정하지 않으면 실행마다 새 경로 조합을 만든다. 실제 사용한
     # 시드는 manifest에 기록하므로 다른 모델 비교 시 그대로 재사용할 수 있다.
-    effective_seed = (
-        int(route_seed) if route_seed is not None else random.SystemRandom().randrange(1, 2**63)
-    )
+    effective_seed = int(route_seed) if route_seed is not None else random.SystemRandom().randrange(1, 2**63)
     nodes = sorted(points)
     cases = (
         _generate_all_pairs(graph, nodes)
         if case_mode == "all-pairs"
-        else _generate_random_cases(
-            graph,
-            nodes,
-            case_count=case_count,
-            seed=effective_seed,
-        )
+        else _generate_random_cases(graph, nodes, case_count=case_count, seed=effective_seed)
     )
     return {
         "graph_path": graph_path,
@@ -201,6 +180,7 @@ def _prepare(
     }
 
 
+# 평가 결과를 요약한다.
 def _summarize(rows: list[dict[str, Any]]) -> dict[str, Any]:
     completed = [row for row in rows if row["error"] is None]
     all_steps = [step for row in rows for step in row["steps"]]
@@ -214,9 +194,7 @@ def _summarize(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "error_count": len(rows) - len(completed),
         "valid_path_count": sum(bool(row["valid_path"]) for row in rows),
         "reached_target_count": sum(bool(row["reached_target"]) for row in rows),
-        "non_revisiting_valid_path_count": sum(
-            bool(row["non_revisiting_valid_path"]) for row in rows
-        ),
+        "non_revisiting_valid_path_count": sum(bool(row["non_revisiting_valid_path"]) for row in rows),
         "revisit_trial_count": sum(bool(row["has_revisit"]) for row in rows),
         "mean_step_excess": mean(row["step_excess"] for row in rows) if rows else None,
         "exact_path_match_count": sum(bool(row["exact_path_match"]) for row in rows),
@@ -232,12 +210,8 @@ def _summarize(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "state_truncation_unreported_trial_count": sum(
             row["state_truncation_reporting_complete"] is False for row in laya_rows
         ),
-        "full_graph_input_preserved_count": sum(
-            row["full_graph_input_preserved"] is True for row in laya_rows
-        ),
-        "exact_path_accuracy": (
-            sum(bool(row["exact_path_match"]) for row in rows) / len(rows) if rows else None
-        ),
+        "full_graph_input_preserved_count": sum(row["full_graph_input_preserved"] is True for row in laya_rows),
+        "exact_path_accuracy": (sum(bool(row["exact_path_match"]) for row in rows) / len(rows) if rows else None),
         "mean_api_call_count": (mean(row["api_call_count"] for row in rows) if rows else None),
         "mean_distance_ratio": (
             mean(row["distance_ratio"] for row in rows if row["distance_ratio"] is not None)
@@ -249,32 +223,26 @@ def _summarize(rows: list[dict[str, Any]]) -> dict[str, Any]:
         ),
         "step_realtime_met_count": sum(step.get("realtime_met") is True for step in model_steps),
         "step_realtime_met_rate": (
-            sum(step.get("realtime_met") is True for step in model_steps) / len(model_steps)
-            if model_steps
-            else None
+            sum(step.get("realtime_met") is True for step in model_steps) / len(model_steps) if model_steps else None
         ),
         "mean_answer_confidence": (
-            mean(
-                float(step["answer_confidence"])
-                for step in model_steps
-                if step.get("answer_confidence") is not None
-            )
+            mean(float(step["answer_confidence"]) for step in model_steps if step.get("answer_confidence") is not None)
             if any(step.get("answer_confidence") is not None for step in model_steps)
             else None
         ),
         "wall_latency": _stats([row["wall_seconds"] for row in completed]),
         "all_trial_wall_latency": _stats([row["wall_seconds"] for row in rows]),
-        "step_wall_latency": _stats(
-            [step["wall_seconds"] for step in model_steps if "wall_seconds" in step]
-        ),
+        "step_wall_latency": _stats([step["wall_seconds"] for step in model_steps if "wall_seconds" in step]),
         "model_total_latency": _stats([row["model_total_seconds"] for row in completed]),
     }
 
 
+# 파일 이름에 사용할 수 있는 문자열로 바꾼다.
 def _safe_name(value: Any) -> str:
     return re.sub(r"[^a-zA-Z0-9._-]+", "-", str(value or "unknown")).strip("-")
 
 
+# 벤치마크의 기본 출력 경로를 만든다.
 def default_output_path(selector: Any) -> Path:
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     return DEFAULT_RESULTS_DIR / (
@@ -289,9 +257,7 @@ def default_matrix_output_path() -> Path:
     return DEFAULT_RESULTS_DIR / f"ollama-iterative-matrix-{timestamp}"
 
 
-def _resolve_model_specs(
-    config: dict[str, Any], selected_models: list[str] | None = None
-) -> list[dict[str, Any]]:
+def _resolve_model_specs(config: dict[str, Any], selected_models: list[str] | None = None) -> list[dict[str, Any]]:
     """Merge common Ollama defaults with each enabled model entry."""
     defaults = config.get("ollama_defaults", {})
     if not isinstance(defaults, dict):
@@ -337,10 +303,7 @@ def _resolve_model_specs(
     return resolved
 
 
-def load_iterative_config(
-    config_path: Path,
-    selected_models: list[str] | None = None,
-) -> dict[str, Any]:
+def load_iterative_config(config_path: Path, selected_models: list[str] | None = None) -> dict[str, Any]:
     """Validate the JSON config without contacting Ollama."""
     config_path = config_path.resolve()
     config = json.loads(config_path.read_text(encoding="utf-8"))
@@ -358,9 +321,7 @@ def load_iterative_config(
     actual_sha256 = hashlib.sha256(graph_path.read_bytes()).hexdigest()
     expected_sha256 = graph.get("sha256")
     if expected_sha256 and str(expected_sha256) != actual_sha256:
-        raise ValueError(
-            f"graph SHA-256 mismatch: expected={expected_sha256}, " f"actual={actual_sha256}"
-        )
+        raise ValueError(f"graph SHA-256 mismatch: expected={expected_sha256}, " f"actual={actual_sha256}")
 
     settings = config.get("settings")
     if not isinstance(settings, dict):
@@ -441,14 +402,13 @@ def _preflight_selector(selector: Any) -> None:
     client = getattr(provider, "client", None)
     if client is not None and hasattr(client, "list"):
         response = client.list()
-        payload = (
-            response.model_dump(mode="json") if hasattr(response, "model_dump") else dict(response)
-        )
+        payload = response.model_dump(mode="json") if hasattr(response, "model_dump") else dict(response)
         names = {str(item.get("name") or item.get("model")) for item in payload.get("models", [])}
         if getattr(selector, "model", None) not in names:
             raise RuntimeError(f"설정한 Ollama 모델이 설치되어 있지 않습니다: {selector.model}")
 
 
+# 벤치마크 사례를 실행하고 결과를 저장한다.
 def run_benchmark(
     output: Path,
     *,
@@ -483,12 +443,7 @@ def run_benchmark(
     if trials_path.exists() and trials_path.stat().st_size:
         raise FileExistsError(f"existing trial file would be overwritten: {trials_path}")
 
-    prepared = _prepare(
-        case_count=case_count,
-        route_seed=route_seed,
-        graph_path=graph_path,
-        case_mode=case_mode,
-    )
+    prepared = _prepare(case_count=case_count, route_seed=route_seed, graph_path=graph_path, case_mode=case_mode)
     effective_max_steps = max_steps or len(prepared["nodes"]) * 2
     selector = selector or get_selector()
     selector_name = getattr(selector, "name", selector.__class__.__name__)
@@ -519,22 +474,16 @@ def run_benchmark(
                 else "seeded_unique_disjoint_start_to_docking"
             ),
             "instructions": NEXT_NODE_INSTRUCTIONS,
-            "instructions_sha256": hashlib.sha256(
-                NEXT_NODE_INSTRUCTIONS.encode("utf-8")
-            ).hexdigest(),
+            "instructions_sha256": hashlib.sha256(NEXT_NODE_INSTRUCTIONS.encode("utf-8")).hexdigest(),
             "prompt_version": "iterative-next-node-v2",
             "docking_target_nodes": prepared["docking_nodes"],
-            "generated_cases": [
-                {"start": case["start"], "target": case["target"]} for case in prepared["cases"]
-            ],
+            "generated_cases": [{"start": case["start"], "target": case["target"]} for case in prepared["cases"]],
             "expected_trial_count": len(prepared["cases"]) * repeats,
             "questions_per_api_request": 1,
             "candidate_scope": candidate_scope,
             "context_mode": context_mode,
             "context_policy": (
-                "exact_current_node_adjacency_each_step"
-                if context_mode == "neighbor_context"
-                else "none"
+                "exact_current_node_adjacency_each_step" if context_mode == "neighbor_context" else "none"
             ),
             "max_steps": effective_max_steps,
             "revisit_policy": "node_revisit_allowed_without_directed_edge_reuse",
@@ -567,13 +516,7 @@ def run_benchmark(
 
     for warmup in range(1, warmups + 1):
         _run_route(
-            selector,
-            prepared,
-            prepared["cases"][0],
-            candidate_scope,
-            deadline,
-            context_mode,
-            effective_max_steps,
+            selector, prepared, prepared["cases"][0], candidate_scope, deadline, context_mode, effective_max_steps
         )
         if progress:
             print(f"warmup {warmup}/{warmups} complete")
@@ -582,15 +525,7 @@ def run_benchmark(
     last_result = None
     for case in prepared["cases"]:
         for repeat in range(1, repeats + 1):
-            result = _run_route(
-                selector,
-                prepared,
-                case,
-                candidate_scope,
-                deadline,
-                context_mode,
-                effective_max_steps,
-            )
+            result = _run_route(selector, prepared, case, candidate_scope, deadline, context_mode, effective_max_steps)
             last_result = result
             row = {
                 "timestamp": _utc_now(),
@@ -614,18 +549,8 @@ def run_benchmark(
 
     groups = []
     for case in prepared["cases"]:
-        selected = [
-            row
-            for row in rows
-            if row["start_node"] == case["start"] and row["target_node"] == case["target"]
-        ]
-        groups.append(
-            {
-                "start_node": case["start"],
-                "target_node": case["target"],
-                **_summarize(selected),
-            }
-        )
+        selected = [row for row in rows if row["start_node"] == case["start"] and row["target_node"] == case["target"]]
+        groups.append({"start_node": case["start"], "target_node": case["target"], **_summarize(selected)})
     summary = {
         "benchmark": manifest["benchmark"],
         "created_at": _utc_now(),
@@ -684,9 +609,7 @@ def run_benchmark(
         for row in rows:
             exported = {field: row.get(field) for field in fields}
             for field in ("expected_path", "path", "steps", "visit_counts"):
-                exported[field] = json.dumps(
-                    row.get(field), ensure_ascii=False, separators=(",", ":")
-                )
+                exported[field] = json.dumps(row.get(field), ensure_ascii=False, separators=(",", ":"))
             writer.writerow(exported)
 
     manifest.update(
@@ -704,11 +627,7 @@ def run_benchmark(
 
 
 def run_configured_benchmarks(
-    config_path: Path,
-    output: Path,
-    *,
-    selected_models: list[str] | None = None,
-    progress: bool = True,
+    config_path: Path, output: Path, *, selected_models: list[str] | None = None, progress: bool = True
 ) -> dict[str, Any]:
     """Run the same iterative cases for selected Ollama models."""
     resolved = load_iterative_config(config_path, selected_models)
@@ -723,14 +642,8 @@ def run_configured_benchmarks(
         "status": "running",
         "started_at": _utc_now(),
         "source": git_metadata(ROOT),
-        "config": {
-            "path": str(resolved["config_path"]),
-            "sha256": resolved["config_sha256"],
-        },
-        "graph": {
-            "path": str(resolved["graph_path"].relative_to(ROOT)),
-            "sha256": resolved["graph_sha256"],
-        },
+        "config": {"path": str(resolved["config_path"]), "sha256": resolved["config_sha256"]},
+        "graph": {"path": str(resolved["graph_path"].relative_to(ROOT)), "sha256": resolved["graph_sha256"]},
         "settings": settings,
         "models": resolved["models"],
         "results": [],
@@ -748,16 +661,12 @@ def run_configured_benchmarks(
                 repeats=int(settings["repeats"]),
                 warmups=int(settings["warmups"]),
                 case_count=int(settings["case_count"]),
-                route_seed=(
-                    int(settings["route_seed"]) if settings["route_seed"] is not None else None
-                ),
+                route_seed=(int(settings["route_seed"]) if settings["route_seed"] is not None else None),
                 graph_path=resolved["graph_path"],
                 case_mode=str(settings["case_mode"]),
                 candidate_scope=str(settings["candidate_scope"]),
                 context_mode=str(settings["context_mode"]),
-                max_steps=(
-                    int(settings["max_steps"]) if settings["max_steps"] is not None else None
-                ),
+                max_steps=(int(settings["max_steps"]) if settings["max_steps"] is not None else None),
                 deadline=float(settings["deadline_seconds"]),
                 selector=selector,
                 progress=progress,
@@ -785,16 +694,14 @@ def run_configured_benchmarks(
     return manifest
 
 
+# 명령행 프로그램의 실행 절차를 시작한다.
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--config",
         type=Path,
         default=None,
-        help=(
-            "Ollama 다중 모델 JSON 설정. 이 모드에서는 graph/case/repeat 옵션을 "
-            "JSON에서 읽습니다."
-        ),
+        help=("Ollama 다중 모델 JSON 설정. 이 모드에서는 graph/case/repeat 옵션을 " "JSON에서 읽습니다."),
     )
     parser.add_argument(
         "--model",
@@ -803,15 +710,10 @@ def main() -> int:
         help="JSON models 중 실행할 모델. 여러 번 지정 가능 (미지정 시 enabled 전체)",
     )
     parser.add_argument(
-        "--check",
-        action="store_true",
-        help="JSON·Graph hash·모델 설정만 검증하고 Ollama에는 요청하지 않음",
+        "--check", action="store_true", help="JSON·Graph hash·모델 설정만 검증하고 Ollama에는 요청하지 않음"
     )
     parser.add_argument(
-        "--output",
-        type=Path,
-        default=None,
-        help="결과 폴더 (미지정 시 selector와 model 이름으로 자동 생성)",
+        "--output", type=Path, default=None, help="결과 폴더 (미지정 시 selector와 model 이름으로 자동 생성)"
     )
     parser.add_argument(
         "--graph",
@@ -824,22 +726,12 @@ def main() -> int:
     parser.add_argument("--warmups", type=int, default=1)
     parser.add_argument("--case-count", type=int, default=DEFAULT_CASE_COUNT)
     parser.add_argument(
-        "--route-seed",
-        type=int,
-        default=None,
-        help="랜덤 경로 생성 시드 (미지정 시 실행마다 새 시드 생성)",
+        "--route-seed", type=int, default=None, help="랜덤 경로 생성 시드 (미지정 시 실행마다 새 시드 생성)"
     )
     parser.add_argument("--candidate-scope", choices=("neighbors", "all"), default="neighbors")
+    parser.add_argument("--context-mode", choices=("full_graph_only", "neighbor_context"), default="neighbor_context")
     parser.add_argument(
-        "--context-mode",
-        choices=("full_graph_only", "neighbor_context"),
-        default="neighbor_context",
-    )
-    parser.add_argument(
-        "--max-steps",
-        type=int,
-        default=None,
-        help="목적지 미도착 시 중단할 최대 이동 횟수 (기본: Node 수의 2배)",
+        "--max-steps", type=int, default=None, help="목적지 미도착 시 중단할 최대 이동 횟수 (기본: Node 수의 2배)"
     )
     parser.add_argument("--deadline", type=float, default=0.15)
     args = parser.parse_args()
@@ -859,11 +751,7 @@ def main() -> int:
             print(json.dumps(printable, ensure_ascii=False, indent=2))
             return 0
         output = args.output or default_matrix_output_path()
-        summary = run_configured_benchmarks(
-            args.config,
-            output,
-            selected_models=args.model,
-        )
+        summary = run_configured_benchmarks(args.config, output, selected_models=args.model)
         print(json.dumps(summary, ensure_ascii=False, indent=2))
         return 0
 

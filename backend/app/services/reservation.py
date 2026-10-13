@@ -10,10 +10,12 @@ from threading import RLock
 ResourceKey = tuple[str, ...]
 
 
+# 노드 예약에 사용할 식별자를 만든다.
 def node_key(node_id: str | int) -> ResourceKey:
     return ("node", str(node_id))
 
 
+# 간선 예약에 사용할 식별자를 만든다.
 def edge_key(start_id: str | int, end_id: str | int) -> ResourceKey:
     # 방향별 엣지 ID가 달라도 같은 물리 통로로 비교
     return ("edge", *sorted((str(start_id), str(end_id))))
@@ -28,6 +30,7 @@ class Reservation:
     start: float
     end: float
 
+    # 생성 직후 데이터의 초기 상태를 정리한다.
     def __post_init__(self) -> None:
         key = self.resource
 
@@ -50,19 +53,18 @@ class Reservation:
             raise ValueError("시작 시각은 유한한 0 이상의 값이어야 합니다.")
 
         # 출발 계획이 없는 목적지 정차를 표현하기 위해 +inf 허용
-        if (
-            not (isfinite(self.end) or self.end == float("inf"))
-            or self.end <= self.start
-        ):
+        if not (isfinite(self.end) or self.end == float("inf")) or self.end <= self.start:
             raise ValueError("종료 시각은 시작 시각보다 커야 합니다.")
 
 
+# 두 예약 시간이 겹치는지 확인한다.
 def overlaps(a: Reservation, b: Reservation) -> bool:
     # 한 예약의 끝과 다른 예약의 시작이 같으면 비중첩
     return a.start < b.end and b.start < a.end
 
 
 class ReservationTable:
+    # ReservationTable의 초기 상태를 설정한다.
     def __init__(self) -> None:
         # 모든 로봇의 예약 검사/확정을 함께 보호
         self._lock = RLock()
@@ -71,23 +73,21 @@ class ReservationTable:
     # 전체 후보 시간표를 한 번에 확정
     # True: 예약표에 충돌 없이 확정. 실제 주행 허가는 아님.
     # False: 다른 로봇의 예약과 충돌. 기존 데이터는 유지됨.
-    def try_commit(self, robot_id: str, navigation_id: str, candidates: list[Reservation] | tuple[Reservation, ...]) -> bool:
-        batch = tuple(candidates) # 호출자가 원본 목록을 바꿔도 검사 대상이 변하지 않도록 고정
+    # commit를 시도한다.
+    def try_commit(
+        self, robot_id: str, navigation_id: str, candidates: list[Reservation] | tuple[Reservation, ...]
+    ) -> bool:
+        batch = tuple(candidates)  # 호출자가 원본 목록을 바꿔도 검사 대상이 변하지 않도록 고정
 
         if not batch:
             raise ValueError("예약 후보가 비어 있습니다.")
 
-        if any(
-            row.robot_id != robot_id
-            or row.navigation_id != navigation_id
-            for row in batch
-        ):
+        if any(row.robot_id != robot_id or row.navigation_id != navigation_id for row in batch):
             raise ValueError("예약 후보의 로봇 또는 주행 요청 ID가 다릅니다.")
 
         with self._lock:
             existing = tuple(
-                row for row in self._rows
-                if row.robot_id == robot_id and row.navigation_id == navigation_id
+                row for row in self._rows if row.robot_id == robot_id and row.navigation_id == navigation_id
             )
             if existing:
                 if existing != batch:
@@ -102,11 +102,13 @@ class ReservationTable:
             self._rows.extend(batch)
             return True
 
+    # 현재 상태의 복사본을 반환한다.
     def snapshot(self) -> tuple[Reservation, ...]:
         with self._lock:
             return tuple(self._rows)
 
     # 정지 상태에서 시간표를 교체
+    # 요청을 교체한다.
     def replace_request(self, robot_id, navigation_id, candidates) -> bool:
         with self._lock:
             previous = self._rows
@@ -121,31 +123,35 @@ class ReservationTable:
             return False
 
     # 실행 종료 및 실제 점유 보호 확인 후에만 해당 요청을 해제
+    # 요청을 해제한다.
     def release_request(self, robot_id: str, navigation_id: str) -> None:
         with self._lock:
             self._rows = [
-                row for row in self._rows
-                if not (row.robot_id == robot_id and row.navigation_id == navigation_id)
+                row for row in self._rows if not (row.robot_id == robot_id and row.navigation_id == navigation_id)
             ]
 
-    def release_cleared_segments(self, robot_id: str, navigation_id: str,
-                                 before_index: int, cleared_resources: set[ResourceKey]) -> None:
+    def release_cleared_segments(
+        self, robot_id: str, navigation_id: str, before_index: int, cleared_resources: set[ResourceKey]
+    ) -> None:
         """실제 로봇 몸체가 벗어난 지난 구간만 해제한다. 현재·미래 구간은 유지한다."""
         with self._lock:
             self._rows = [
-                row for row in self._rows
-                if not (row.robot_id == robot_id and row.navigation_id == navigation_id
-                        and row.segment_index < before_index
-                        and row.resource in cleared_resources)
+                row
+                for row in self._rows
+                if not (
+                    row.robot_id == robot_id
+                    and row.navigation_id == navigation_id
+                    and row.segment_index < before_index
+                    and row.resource in cleared_resources
+                )
             ]
 
+
 # 실로봇용 예약 테이블, 시뮬용 예약 테이블 분리
-reservation_tables = {
-    "real": ReservationTable(),
-    "simulation": ReservationTable(),
-}
+reservation_tables = {"real": ReservationTable(), "simulation": ReservationTable()}
 
 
+# 일정을 생성한다.
 def build_schedule(
     robot_id: str,
     navigation_id: str,
@@ -158,7 +164,7 @@ def build_schedule(
     departure_at: float,
     speed_mps: float,
     safety_margin: float,
-    segment_departures: list[float] | None = None, # 중간 노드 대기까지 예약
+    segment_departures: list[float] | None = None,  # 중간 노드 대기까지 예약
 ) -> tuple[Reservation, ...]:
     if not node_ids or any(node not in nodes for node in node_ids):
         raise ValueError("경로 노드가 비어 있거나 좌표가 없습니다.")
@@ -178,13 +184,16 @@ def build_schedule(
         raise ValueError("구간 중간 출발에는 통로 양 끝 노드가 필요합니다.")
 
     if segment_departures is not None:
-        if (len(segment_departures) != len(node_ids) - 1
-                or any(not isfinite(t) for t in segment_departures)
-                or (segment_departures and segment_departures[0] != departure_at)):
+        if (
+            len(segment_departures) != len(node_ids) - 1
+            or any(not isfinite(t) for t in segment_departures)
+            or (segment_departures and segment_departures[0] != departure_at)
+        ):
             raise ValueError("구간별 출발 시각이 올바르지 않습니다.")
 
     rows = []
 
+    # 예약 또는 경로 항목을 추가한다.
     def add(resource, index, start, end):
         rows.append(Reservation(resource, robot_id, navigation_id, index, max(0.0, start), end))
 
@@ -210,8 +219,7 @@ def build_schedule(
         add(edge_key(start, end), index, occupied_from - safety_margin, arrival + safety_margin)
         last = index == len(node_ids) - 2
         leave = arrival if segment_departures is None or last else segment_departures[index + 1]
-        add(node_key(end), index, arrival - safety_margin,
-            float("inf") if last else leave + safety_margin)
+        add(node_key(end), index, arrival - safety_margin, float("inf") if last else leave + safety_margin)
         origin = nodes[end]
         entry = arrival
 

@@ -9,15 +9,16 @@ class RunScenario(BaseModel):
     name: str
 
 
+# 시나리오를 목록으로 반환한다.
 @router.get("")
 async def list_scenarios():
     try:
-        return [{"name": s["name"], "description": s["description"]}
-                for s in load_config()["scenarios"]]
+        return [{"name": s["name"], "description": s["description"]} for s in load_config()["scenarios"]]
     except ValueError as exc:
         raise HTTPException(400, detail=str(exc)) from exc
 
 
+# 시나리오를 실행한다.
 @router.post("/run", status_code=202)
 async def run_scenario(payload: RunScenario):
     try:
@@ -26,6 +27,7 @@ async def run_scenario(payload: RunScenario):
         raise HTTPException(409, detail=str(exc)) from exc
 
 
+# 실행 중인 시나리오의 상태를 반환한다.
 @router.get("/status")
 async def scenario_status():
     return scenario_manager.status()

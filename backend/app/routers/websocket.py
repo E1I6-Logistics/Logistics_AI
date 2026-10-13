@@ -14,6 +14,7 @@ from ..schemas.robot import to_ui_robot_id
 router = APIRouter(tags=["websocket"])
 
 
+# 관제 화면의 웹소켓 연결을 처리한다.
 @router.websocket("/ws/dashboard")
 async def dashboard_websocket(websocket: WebSocket):
     await manager.connect(websocket)
@@ -21,15 +22,30 @@ async def dashboard_websocket(websocket: WebSocket):
     try:
         if mode_manager.mode == "simulation":
             from ..services.mock_data import mock_fms
+
             await websocket.send_json(
-                {"type": "system", "data": {"mode": mode_manager.mode, "operation_mode": mode_manager.operation_mode, "source": "mock"}}
+                {
+                    "type": "system",
+                    "data": {
+                        "mode": mode_manager.mode,
+                        "operation_mode": mode_manager.operation_mode,
+                        "source": "mock",
+                    },
+                }
             )
             for state in mock_fms.robot_snapshots(mode_manager.mode):
                 await websocket.send_json({"type": "telemetry", "data": state})
         else:
             print(f"[{strftime('%Y-%m-%d %H:%M:%S')}] [INFO] [REAL WS] Sending telemetry for all robots", flush=True)
             await websocket.send_json(
-                {"type": "system", "data": {"mode": mode_manager.mode, "operation_mode": mode_manager.operation_mode, "source": "ros2"}}
+                {
+                    "type": "system",
+                    "data": {
+                        "mode": mode_manager.mode,
+                        "operation_mode": mode_manager.operation_mode,
+                        "source": "ros2",
+                    },
+                }
             )
             for robot in fleet_manager.get_all_robots():
                 pixel_x = None
@@ -58,7 +74,13 @@ async def dashboard_websocket(websocket: WebSocket):
                     "source": "ros2",
                     "pose_source": "AMCL",
                 }
-                print(f"[{strftime('%Y-%m-%d %H:%M:%S')}] [INFO] [REAL WS]", robot.robot_id, "route=", robot.route, flush=True)
+                print(
+                    f"[{strftime('%Y-%m-%d %H:%M:%S')}] [INFO] [REAL WS]",
+                    robot.robot_id,
+                    "route=",
+                    robot.route,
+                    flush=True,
+                )
                 await websocket.send_json({"type": "telemetry", "data": state})
 
         while True:
@@ -69,6 +91,7 @@ async def dashboard_websocket(websocket: WebSocket):
         manager.disconnect(websocket)
 
 
+# 속도 제어 웹소켓 연결을 처리한다.
 @router.websocket("/ws/cmd_vel")
 async def cmd_vel_websocket(websocket: WebSocket):
     await websocket.accept()
@@ -86,16 +109,13 @@ async def cmd_vel_websocket(websocket: WebSocket):
                     scenario_manager.ensure_available(robot_id)
                 if mode_manager.mode == "simulation":
                     from ..services.mock_data import mock_fms
+
                     acknowledgement = mock_fms.cmd_vel(
-                        robot_id,
-                        float(data.get("linear_x", 0.0)),
-                        float(data.get("angular_z", 0.0)),
+                        robot_id, float(data.get("linear_x", 0.0)), float(data.get("angular_z", 0.0))
                     )
                 else:
                     acknowledgement = ros_gateway.cmd_vel(
-                        robot_id,
-                        float(data.get("linear_x", 0.0)),
-                        float(data.get("angular_z", 0.0)),
+                        robot_id, float(data.get("linear_x", 0.0)), float(data.get("angular_z", 0.0))
                     )
 
                 await websocket.send_json(acknowledgement)

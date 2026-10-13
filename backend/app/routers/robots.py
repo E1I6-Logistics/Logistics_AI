@@ -9,11 +9,13 @@ from ..services.map_service import world_to_pixel
 router = APIRouter(prefix="/api/robots", tags=["robots"])
 
 
+# 로봇을 가져온다.
 @router.get("")
 async def fetch_robots():
     # Simulation 모드
     if mode_manager.mode == "simulation":
         from ..services.mock_data import mock_fms
+
         return mock_fms.robot_snapshots(mode_manager.mode)
 
     # Real 모드

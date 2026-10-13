@@ -38,9 +38,7 @@ if ROBOT_MODE not in {"real", "simulation"}:
 # ============================================================
 
 # 웹 화면이 접속할 수 있는 주소 목록
-CORS_ORIGINS = [
-    origin.strip() for origin in os.getenv("FMS_CORS_ORIGINS", "*").split(",") if origin.strip()
-]
+CORS_ORIGINS = [origin.strip() for origin in os.getenv("FMS_CORS_ORIGINS", "*").split(",") if origin.strip()]
 
 
 # ============================================================

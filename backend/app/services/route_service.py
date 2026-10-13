@@ -14,9 +14,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-ROUTE_GRAPH_PATH = (
-    Path(__file__).resolve().parents[3] / "routes" / os.getenv("FMS_ROUTE_GRAPH", "test.geojson")
-)
+ROUTE_GRAPH_PATH = Path(__file__).resolve().parents[3] / "routes" / os.getenv("FMS_ROUTE_GRAPH", "test.geojson")
 
 
 def load_route_graph() -> dict[str, Any]:
@@ -30,9 +28,7 @@ def load_route_graph() -> dict[str, Any]:
     return graph
 
 
-def node_lookup(
-    graph: dict[str, Any] | None = None,
-) -> dict[str, dict[str, Any]]:
+def node_lookup(graph: dict[str, Any] | None = None) -> dict[str, dict[str, Any]]:
     """Return Point features indexed by their node ID."""
     source = graph if graph is not None else load_route_graph()
     result: dict[str, dict[str, Any]] = {}
@@ -73,16 +69,11 @@ def _resolve_edge_weight(
 
 
 def build_route_inputs(
-    graph: dict[str, Any],
-    *,
-    require_stored_weight: bool = False,
+    graph: dict[str, Any], *, require_stored_weight: bool = False
 ) -> tuple[dict[int, tuple[float, float]], list[tuple[int, int, float]]]:
     """Convert GeoJSON into node coordinates and resolved directed weights."""
     points = {
-        int(node_id): (
-            float(feature["geometry"]["coordinates"][0]),
-            float(feature["geometry"]["coordinates"][1]),
-        )
+        int(node_id): (float(feature["geometry"]["coordinates"][0]), float(feature["geometry"]["coordinates"][1]))
         for node_id, feature in node_lookup(graph).items()
     }
     if not points:
@@ -100,24 +91,14 @@ def build_route_inputs(
             (
                 start,
                 end,
-                _resolve_edge_weight(
-                    properties,
-                    points,
-                    start,
-                    end,
-                    require_stored_weight=require_stored_weight,
-                ),
+                _resolve_edge_weight(properties, points, start, end, require_stored_weight=require_stored_weight),
             )
         )
     return points, edges
 
 
 def plan_route(
-    start_id: str,
-    goal_id: str,
-    graph: dict[str, Any] | None = None,
-    *,
-    require_stored_weight: bool = False,
+    start_id: str, goal_id: str, graph: dict[str, Any] | None = None, *, require_stored_weight: bool = False
 ) -> dict[str, Any]:
     """Calculate a directed shortest path with A* and resolved edge weights."""
     graph = graph if graph is not None else load_route_graph()
@@ -126,9 +107,7 @@ def plan_route(
 
     if start_id not in nodes or goal_id not in nodes:
         raise ValueError(f"존재하지 않는 경로 노드: {start_id} → {goal_id}")
-    points = {
-        key: tuple(map(float, node["geometry"]["coordinates"][:2])) for key, node in nodes.items()
-    }
+    points = {key: tuple(map(float, node["geometry"]["coordinates"][:2])) for key, node in nodes.items()}
     integer_points = {int(key): value for key, value in points.items()}
     adjacency: dict[str, list[tuple[str, float, str]]] = {key: [] for key in nodes}
     for feature in graph.get("features", []):
@@ -139,11 +118,7 @@ def plan_route(
         if start not in points or end not in points:
             continue
         weight = _resolve_edge_weight(
-            properties,
-            integer_points,
-            int(start),
-            int(end),
-            require_stored_weight=require_stored_weight,
+            properties, integer_points, int(start), int(end), require_stored_weight=require_stored_weight
         )
         edge_id = str(properties.get("id", f"{start}-{end}"))
         adjacency[start].append((end, weight, edge_id))
@@ -159,6 +134,7 @@ def plan_route(
     ]
     heuristic_scale = min(ratios, default=0.0) * (1.0 - 1e-12)
 
+    # 경로 탐색에 사용할 휴리스틱 값을 계산한다.
     def heuristic(node_id: str) -> float:
         return heuristic_scale * math.dist(points[node_id], points[goal_id])
 
@@ -201,12 +177,7 @@ def _model_weight(value: int | float) -> int | float:
     return int(numeric) if numeric.is_integer() else numeric
 
 
-def build_compact_route_graph(
-    graph: dict,
-    source_graph: str,
-    *,
-    require_stored_weight: bool = False,
-) -> dict:
+def build_compact_route_graph(graph: dict, source_graph: str, *, require_stored_weight: bool = False) -> dict:
     """Convert route GeoJSON into the smaller graph format sent to an LLM."""
     points, edges = build_route_inputs(graph, require_stored_weight=require_stored_weight)
     edge_weights = build_edge_weight_lookup(points, edges)
@@ -220,9 +191,7 @@ def build_compact_route_graph(
             else "properties.weight; legacy positive cost or node distance fallback"
         ),
         "nodes": sorted(points),
-        "node_coordinates": [
-            {"id": node, "x": points[node][0], "y": points[node][1]} for node in sorted(points)
-        ],
+        "node_coordinates": [{"id": node, "x": points[node][0], "y": points[node][1]} for node in sorted(points)],
         "edges": [
             {"from": start, "to": end, "weight": _model_weight(weight)}
             for (start, end), weight in sorted(edge_weights.items())
@@ -230,12 +199,7 @@ def build_compact_route_graph(
     }
 
 
-def build_compact_adjacency_graph(
-    graph: dict,
-    source_graph: str,
-    *,
-    require_stored_weight: bool = False,
-) -> dict:
+def build_compact_adjacency_graph(graph: dict, source_graph: str, *, require_stored_weight: bool = False) -> dict:
     """Build the coordinate-free adjacency format used by V2 experiments."""
     points, edges = build_route_inputs(graph, require_stored_weight=require_stored_weight)
     edge_weights = build_edge_weight_lookup(points, edges)
@@ -271,31 +235,18 @@ def compact_graph_edges(graph: dict[str, Any]) -> list[dict[str, int | float]]:
             for neighbor in neighbors:
                 if not isinstance(neighbor, dict):
                     raise ValueError("CompactAdjacencyGraph의 인접 항목은 객체여야 합니다.")
-                records.append(
-                    {
-                        "from": start,
-                        "to": int(neighbor["to"]),
-                        "weight": float(neighbor["weight"]),
-                    }
-                )
+                records.append({"from": start, "to": int(neighbor["to"]), "weight": float(neighbor["weight"])})
         return records
     if graph_type == "CompactRouteGraph":
         return [
-            {
-                "from": int(edge["from"]),
-                "to": int(edge["to"]),
-                "weight": float(edge["weight"]),
-            }
+            {"from": int(edge["from"]), "to": int(edge["to"]), "weight": float(edge["weight"])}
             for edge in graph.get("edges", [])
         ]
     raise ValueError(f"지원하지 않는 compact graph type: {graph_type!r}")
 
 
 def get_available_edges(
-    graph: dict[str, Any],
-    current_node: int,
-    *,
-    visited_nodes: list[int] | set[int] | None = None,
+    graph: dict[str, Any], current_node: int, *, visited_nodes: list[int] | set[int] | None = None
 ) -> list[dict[str, int | float]]:
     """Return exact unvisited outgoing edges for one node.
 
@@ -318,8 +269,7 @@ def get_available_edges(
 
 
 def build_edge_weight_lookup(
-    points: dict[int, tuple[float, float]],
-    edges: list[tuple[int, int, float]],
+    points: dict[int, tuple[float, float]], edges: list[tuple[int, int, float]]
 ) -> dict[tuple[int, int], float]:
     """Index already-resolved edge weights and keep the lightest parallel edge."""
     edge_weights: dict[tuple[int, int], float] = {}
@@ -365,19 +315,11 @@ def validate_and_calculate_path_distance(
 
 
 def compare_path_metrics(
-    baseline_path: list[int],
-    baseline_distance: float,
-    llm_path: list[int],
-    llm_distance: float,
+    baseline_path: list[int], baseline_distance: float, llm_path: list[int], llm_distance: float
 ) -> dict[str, bool | float]:
     """Compare locally calculated paths and distances."""
     return {
         "same_path": baseline_path == llm_path,
-        "same_distance": math.isclose(
-            baseline_distance,
-            llm_distance,
-            rel_tol=1e-9,
-            abs_tol=1e-9,
-        ),
+        "same_distance": math.isclose(baseline_distance, llm_distance, rel_tol=1e-9, abs_tol=1e-9),
         "distance_difference": llm_distance - baseline_distance,
     }

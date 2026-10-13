@@ -8,11 +8,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def resolve_graph_path(
-    explicit: Path | None = None,
-    *,
-    fallback: Path | None = None,
-) -> Path:
+def resolve_graph_path(explicit: Path | None = None, *, fallback: Path | None = None) -> Path:
     """Resolve CLI path first, then LLM_ROUTE_GRAPH, then the caller fallback."""
     if explicit is not None:
         return explicit.expanduser().resolve()

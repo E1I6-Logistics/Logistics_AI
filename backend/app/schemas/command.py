@@ -12,6 +12,7 @@ from pydantic import BaseModel, model_validator
 # 좌표 기반 이동
 # ============================================================
 
+
 # 좌표 기반 이동 요청 데이터 구조 생성
 class GoalCoordinateRequest(BaseModel):
 
@@ -29,6 +30,7 @@ class GoalCoordinateRequest(BaseModel):
 # Node 기반 이동
 # ============================================================
 
+
 # Route Graph Node 기반 이동 요청 데이터 구조 생성
 class GoalNodeRequest(BaseModel):
 
@@ -37,11 +39,11 @@ class GoalNodeRequest(BaseModel):
     # 숫자 또는 문자열 형식 Node ID 사용
     node_id: Union[int, str]
 
-
     driving_mode: Literal["standard", "llm"] = "standard"
     selector: Literal["ollama", "laya", "kev"] | None = None
     model: str | None = None
 
+    # AI 경로 생성에 사용할 모델 설정을 검증한다.
     @model_validator(mode="after")
     def require_llm_model(self):
         # LLM 요청의 모델 누락을 기본 알고리즘 주행으로 처리하지 않는다.
@@ -61,6 +63,7 @@ class LlmRoutePreviewRequest(BaseModel):
 # ============================================================
 # 정지
 # ============================================================
+
 
 # Robot 정지 요청 데이터 구조 생성
 class StopRequest(BaseModel):

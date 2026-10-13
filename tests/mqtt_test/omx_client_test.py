@@ -10,21 +10,11 @@ import paho.mqtt.client as mqtt
 
 parser = argparse.ArgumentParser()
 
-parser.add_argument(
-    "--robot-id",
-    required=True,
-)
+parser.add_argument("--robot-id", required=True)
 
-parser.add_argument(
-    "--broker-ip",
-    required=True,
-)
+parser.add_argument("--broker-ip", required=True)
 
-parser.add_argument(
-    "--broker-port",
-    type=int,
-    default=1883,
-)
+parser.add_argument("--broker-port", type=int, default=1883)
 
 args = parser.parse_args()
 
@@ -48,6 +38,7 @@ current_job_id = None
 # =============================================================
 
 
+# 관련을 발행한다.
 def publish(topic, payload):
     message = json.dumps(payload)
     client.publish(topic, message)
@@ -60,18 +51,22 @@ def publish(topic, payload):
 # =============================================================
 
 
+# 상태를 전송한다.
 def send_status():
     publish(f"{robot_id}/status", {"state": "online"})
 
 
+# 응답을 전송한다.
 def send_ack(job_id, accepted=True):
     publish(f"{robot_id}/ack", {"job_id": job_id, "accepted": accepted})
 
 
+# 진행을 전송한다.
 def send_progress(job_id, current, total):
     publish(f"{robot_id}/progress", {"job_id": job_id, "current": current, "total": total})
 
 
+# 결과를 전송한다.
 def send_result(job_id, success, message=""):
     publish(f"{robot_id}/result", {"job_id": job_id, "success": success, "message": message})
 
@@ -81,6 +76,7 @@ def send_result(job_id, success, message=""):
 # =============================================================
 
 
+# 명령 이벤트를 처리한다.
 def on_command(data):
 
     global current_job_id
@@ -120,6 +116,7 @@ def on_command(data):
 # =============================================================
 
 
+# 연결 이벤트를 처리한다.
 def on_connect(client, userdata, flags, rc):
     print(f"[MQTT] Connected: {rc}")
     topic = f"{robot_id}/command"
@@ -128,6 +125,7 @@ def on_connect(client, userdata, flags, rc):
     send_status()
 
 
+# message 이벤트를 처리한다.
 def on_message(client, userdata, msg):
     try:
         data = json.loads(msg.payload.decode())

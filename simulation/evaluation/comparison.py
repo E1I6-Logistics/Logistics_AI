@@ -9,10 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from time import monotonic
 
-from simulation.services.route_service import (
-    compare_path_metrics,
-    validate_and_calculate_path_distance,
-)
+from simulation.services.route_service import compare_path_metrics, validate_and_calculate_path_distance
 
 from simulation.llm_providers import get_provider
 from simulation.llm_providers.base import LLMPathProvider
@@ -46,6 +43,7 @@ def request_llm_shortest_path(raw_graph, start_id, target_id):
     return provider.compute_shortest_path(raw_graph, start_id, target_id)
 
 
+# 평가 입력에서 비교에 사용할 지표를 추출한다.
 def _input_metrics(raw_graph: dict, start_id: int, target_id: int) -> dict:
     payload = {
         "route_graph": raw_graph,
@@ -60,18 +58,17 @@ def _input_metrics(raw_graph: dict, start_id: int, target_id: int) -> dict:
     )
     input_text = prompt + json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
     character_count = len(input_text)
-    return {
-        "input_character_count": character_count,
-        "estimated_input_tokens": math.ceil(character_count / 4),
-    }
+    return {"input_character_count": character_count, "estimated_input_tokens": math.ceil(character_count / 4)}
 
 
+# timeout 오류 여부를 확인한다.
 def _is_timeout_error(error: Exception) -> bool:
     error_name = type(error).__name__.lower()
     error_text = str(error).lower()
     return isinstance(error, TimeoutError) or "timeout" in error_name or "timed out" in error_text
 
 
+# 결과를 덧붙인다.
 def _append_result(result: dict) -> None:
     with LLM_RESULT_PATH.open("a", encoding="utf-8") as result_file:
         result_file.write(json.dumps(result, ensure_ascii=False) + "\n")
@@ -91,9 +88,7 @@ def compare_path_with_llm(
 ):
     """Run the LLM harness and save both successful and failed evaluations."""
     selected_graph_path = (
-        resolve_llm_route_graph_path(route_graph_path)
-        if route_graph_path is not None
-        else ROUTE_GRAPH_PATH
+        resolve_llm_route_graph_path(route_graph_path) if route_graph_path is not None else ROUTE_GRAPH_PATH
     )
     raw_graph = json.loads(selected_graph_path.read_text(encoding="utf-8"))
     baseline_path, baseline_distance = validate_and_calculate_path_distance(
@@ -115,12 +110,7 @@ def compare_path_with_llm(
 
     for attempt_number in range(1, attempt_limit + 1):
         started = monotonic()
-        attempt = {
-            "attempt": attempt_number,
-            "json_response_success": False,
-            "valid_path": False,
-            "timed_out": False,
-        }
+        attempt = {"attempt": attempt_number, "json_response_success": False, "valid_path": False, "timed_out": False}
         try:
             llm_answer = (
                 provider.compute_shortest_path(raw_graph, start_id, target_id)
@@ -129,11 +119,7 @@ def compare_path_with_llm(
             )
             attempt["json_response_success"] = isinstance(llm_answer, dict)
             llm_path, llm_distance = validate_and_calculate_path_distance(
-                points,
-                edges,
-                llm_answer["path"],
-                start_id,
-                target_id,
+                points, edges, llm_answer["path"], start_id, target_id
             )
             attempt["valid_path"] = True
         except Exception as error:
@@ -168,9 +154,7 @@ def compare_path_with_llm(
         "response_time_seconds": round(total_response_time, 6),
         "realtime_deadline_seconds": realtime_deadline,
         # 유효한 경로가 제한 시간 안에 도착해야 실시간 기준을 충족한다.
-        "meets_realtime_deadline": (
-            successful_attempt is not None and total_response_time <= realtime_deadline
-        ),
+        "meets_realtime_deadline": (successful_attempt is not None and total_response_time <= realtime_deadline),
         "timed_out": any(item["timed_out"] for item in attempts),
         "first_attempt_success": successful_attempt == 1,
         "retry_success": successful_attempt is not None and successful_attempt > 1,
@@ -183,9 +167,7 @@ def compare_path_with_llm(
         "status": "success" if successful_attempt is not None else "failed",
         "provider": provider_key,
         "model": os.getenv(model_env_name),
-        "prompt_strategy": (
-            "compact-astar" if raw_graph.get("type") == "CompactRouteGraph" else "geojson-astar"
-        ),
+        "prompt_strategy": ("compact-astar" if raw_graph.get("type") == "CompactRouteGraph" else "geojson-astar"),
         "input": {
             "start_node": start_id,
             "target_node": target_id,
@@ -210,10 +192,7 @@ def compare_path_with_llm(
         "attempts": attempts,
     }
     if last_error is not None and successful_attempt is None:
-        result["error"] = {
-            "type": type(last_error).__name__,
-            "message": str(last_error),
-        }
+        result["error"] = {"type": type(last_error).__name__, "message": str(last_error)}
 
     if context is not None:
         result["context"] = context
