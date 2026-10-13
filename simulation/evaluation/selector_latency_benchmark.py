@@ -1,0 +1,597 @@
+"""Compare route-selector latency by complexity, language, and answer position."""
+
+from __future__ import annotations
+
+import argparse
+import csv
+import hashlib
+import json
+import math
+import sys
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+from statistics import mean, median
+from typing import Any, Callable
+
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT))
+
+from simulation.evaluation.device_metadata import (
+    git_metadata, selector_device_metadata,
+)
+from simulation.evaluation.graph_path import resolve_graph_path
+from simulation.route_selector import get_selector
+from simulation.services.route_service import (
+    build_compact_route_graph,
+    build_route_inputs,
+    plan_route,
+    validate_and_calculate_path_distance,
+)
+
+TRIALS_FILENAME = "selector_latency_trials.jsonl"
+SUMMARY_FILENAME = "selector_latency_summary.json"
+CSV_FILENAME = "selector_latency_samples.csv"
+MANIFEST_FILENAME = "manifest.json"
+DEFAULT_RESULTS_DIR = ROOT / "simulation" / "benchmark_results"
+ROUTE_GRAPH_PATH = resolve_graph_path()
+ROUTE_CONFIG_PATH = ROOT / "simulation" / "evaluation" / "route_generation_benchmark.json"
+OPTION_IDS = ("option_a", "option_b", "option_c", "option_d", "option_e")
+Clock = Callable[[], float]
+
+
+def _configured_route_cases() -> tuple[tuple[int, int], ...]:
+    """Read the same five Start/Target pairs used by the V1 benchmark."""
+    config = json.loads(ROUTE_CONFIG_PATH.read_text(encoding="utf-8"))
+    return tuple((int(case["start"]), int(case["goal"])) for case in config["cases"])
+
+
+ROUTE_CASES = _configured_route_cases()
+
+
+def _five_shortest_simple_paths(
+    graph: dict[str, Any], start: int, target: int
+) -> list[tuple[list[int], float]]:
+    """Enumerate valid simple paths and return the five lightest candidates."""
+    points, edges = build_route_inputs(graph, require_stored_weight=True)
+    adjacency: dict[int, list[tuple[int, float]]] = {node: [] for node in points}
+    for edge_start, edge_end, weight in edges:
+        adjacency[edge_start].append((edge_end, weight))
+    for neighbors in adjacency.values():
+        neighbors.sort()
+
+    paths: list[tuple[list[int], float]] = []
+
+    def visit(node: int, path: list[int], distance: float) -> None:
+        if node == target:
+            paths.append((path.copy(), distance))
+            return
+        for neighbor, weight in adjacency[node]:
+            if neighbor not in path:
+                visit(neighbor, [*path, neighbor], distance + weight)
+
+    visit(start, [start], 0.0)
+    paths.sort(key=lambda item: (item[1], item[0]))
+    if len(paths) < len(OPTION_IDS):
+        raise ValueError(
+            f"{start}→{target} 경로 후보가 {len(paths)}개뿐입니다. "
+            f"최소 {len(OPTION_IDS)}개가 필요합니다."
+        )
+    return paths[: len(OPTION_IDS)]
+
+
+def _route_question_data(
+    language: str, start: int, target: int
+) -> dict[str, Any]:
+    """Build one selector case from the actual frontend GeoJSON graph."""
+    graph = json.loads(ROUTE_GRAPH_PATH.read_text(encoding="utf-8"))
+    points, edges = build_route_inputs(graph, require_stored_weight=True)
+    baseline = plan_route(
+        str(start), str(target), graph, require_stored_weight=True
+    )
+    correct_path = [int(node) for node in baseline["node_ids"]]
+    _, correct_distance = validate_and_calculate_path_distance(
+        points, edges, correct_path, start, target
+    )
+    path_candidates = _five_shortest_simple_paths(graph, start, target)
+    candidates = [
+        f"path={path}, distance={distance:.12f}"
+        for path, distance in path_candidates
+    ]
+    correct_answer = f"path={correct_path}, distance={correct_distance:.12f}"
+    if candidates[0] != correct_answer:
+        raise ValueError(f"{start}→{target} 후보와 V1 Ground Truth가 일치하지 않습니다.")
+    state = {
+        "start_node": start,
+        "target_node": target,
+        "route_graph": build_compact_route_graph(
+            graph,
+            ROUTE_GRAPH_PATH.name,
+            require_stored_weight=True,
+        ),
+    }
+    if language == "ko":
+        instructions = (
+            "방향성 간선으로 모두 연결된 후보 중 간선 weight 합이 가장 작은 "
+            "경로를 선택하세요."
+        )
+    else:
+        instructions = (
+            "Select the candidate whose nodes are connected by directed edges and "
+            "whose sum of edge weights is the smallest."
+        )
+    return {
+        "case_key": f"{start}_to_{target}",
+        "start_node": start,
+        "target_node": target,
+        "state": state,
+        "instructions": instructions,
+        "answers": candidates,
+        "correct_answer": correct_answer,
+    }
+
+
+def _base_questions() -> list[dict[str, Any]]:
+    questions = [
+        {
+            "type": "intuitive",
+            "language": "ko",
+            "case_key": "intuitive",
+            "label": "한국어 직관 질문",
+            "state": "상자에 붙은 라벨의 색상은 파란색입니다.",
+            "instructions": "상자 라벨의 색상을 선택하세요.",
+            "answers": ["파란색", "빨간색", "초록색", "노란색", "검은색"],
+            "correct_answer": "파란색",
+        },
+        {
+            "type": "intuitive",
+            "language": "en",
+            "case_key": "intuitive",
+            "label": "English intuitive question",
+            "state": "The label attached to the box is blue.",
+            "instructions": "Choose the color of the label on the box.",
+            "answers": ["Blue", "Red", "Green", "Yellow", "Black"],
+            "correct_answer": "Blue",
+        },
+        {
+            "type": "reasoning",
+            "language": "ko",
+            "case_key": "reasoning",
+            "label": "한국어 사고 질문",
+            "state": (
+                "민수는 영희보다 키가 큽니다. 영희는 철수보다 키가 큽니다. "
+                "철수는 지수보다 키가 큽니다. 지수는 준호보다 키가 큽니다."
+            ),
+            "instructions": "다섯 사람 중 키가 가장 큰 사람을 선택하세요.",
+            "answers": ["민수", "영희", "철수", "지수", "준호"],
+            "correct_answer": "민수",
+        },
+        {
+            "type": "reasoning",
+            "language": "en",
+            "case_key": "reasoning",
+            "label": "English reasoning question",
+            "state": (
+                "Alice is taller than Bob. Bob is taller than Carol. "
+                "Carol is taller than David. David is taller than Erin."
+            ),
+            "instructions": "Choose the tallest person among the five people.",
+            "answers": ["Alice", "Bob", "Carol", "David", "Erin"],
+            "correct_answer": "Alice",
+        },
+    ]
+    for start, target in ROUTE_CASES:
+        questions.extend(
+            [
+                {
+                    "type": "shortest_path",
+                    "language": "ko",
+                    "label": f"한국어 최단거리 질문 {start}→{target}",
+                    **_route_question_data("ko", start, target),
+                },
+                {
+                    "type": "shortest_path",
+                    "language": "en",
+                    "label": f"English shortest-path question {start}→{target}",
+                    **_route_question_data("en", start, target),
+                },
+            ]
+        )
+    return questions
+
+
+def _positioned_candidates(
+    answers: list[str], correct_answer: str, answer_position: int
+) -> tuple[dict[str, str], str]:
+    """Place the same correct answer once at each of the five option positions."""
+    distractors = [answer for answer in answers if answer != correct_answer]
+    ordered_answers = distractors.copy()
+    ordered_answers.insert(answer_position, correct_answer)
+    candidates = dict(zip(OPTION_IDS, ordered_answers, strict=True))
+    expected_choice = OPTION_IDS[answer_position]
+    return candidates, expected_choice
+
+
+def build_test_cases() -> tuple[dict[str, Any], ...]:
+    cases = []
+    for question in _base_questions():
+        for position in range(len(OPTION_IDS)):
+            candidates, expected_choice = _positioned_candidates(
+                question["answers"], question["correct_answer"], position
+            )
+            cases.append(
+                {
+                    "id": (
+                        f"{question['language']}_{question['type']}_"
+                        f"{question['case_key']}_"
+                        f"position_{position + 1}"
+                    ),
+                    "question_type": question["type"],
+                    "language": question["language"],
+                    "label": question["label"],
+                    "answer_position": position + 1,
+                    "start_node": question.get("start_node"),
+                    "target_node": question.get("target_node"),
+                    "state": question["state"],
+                    "instructions": question["instructions"],
+                    "candidates": candidates,
+                    "expected_choice": expected_choice,
+                    "correct_answer": question["correct_answer"],
+                }
+            )
+    return tuple(cases)
+
+
+TEST_CASES = build_test_cases()
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _append_jsonl(path: Path, value: dict[str, Any]) -> None:
+    with path.open("a", encoding="utf-8") as stream:
+        stream.write(json.dumps(value, ensure_ascii=False) + "\n")
+
+
+def _json_dump(path: Path, value: dict[str, Any]) -> None:
+    path.write_text(
+        json.dumps(value, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _percentile(values: list[float], percentile: float) -> float | None:
+    if not values:
+        return None
+    ordered = sorted(values)
+    position = (len(ordered) - 1) * percentile
+    lower = math.floor(position)
+    upper = math.ceil(position)
+    if lower == upper:
+        return ordered[lower]
+    fraction = position - lower
+    return ordered[lower] + (ordered[upper] - ordered[lower]) * fraction
+
+
+def _latency_stats(values: list[float]) -> dict[str, float | int | None]:
+    return {
+        "count": len(values),
+        "mean_seconds": mean(values) if values else None,
+        "median_seconds": median(values) if values else None,
+        "p95_seconds": _percentile(values, 0.95),
+        "min_seconds": min(values) if values else None,
+        "max_seconds": max(values) if values else None,
+    }
+
+
+def _summarize_trials(trials: list[dict[str, Any]]) -> dict[str, Any]:
+    successful = [trial for trial in trials if trial["error"] is None]
+    truncation_reported = [
+        trial for trial in successful
+        if isinstance(trial.get("state_truncated"), bool)
+    ]
+    wall_times = [trial["wall_seconds"] for trial in successful]
+    server_times = [
+        trial["model_total_seconds"]
+        for trial in successful
+        if trial["model_total_seconds"] is not None
+    ]
+    eval_times = [
+        trial["eval_seconds"]
+        for trial in successful
+        if trial["eval_seconds"] is not None
+    ]
+    return {
+        "trial_count": len(trials),
+        "successful_request_count": len(successful),
+        "error_count": len(trials) - len(successful),
+        "correct_count": sum(bool(trial["correct"]) for trial in trials),
+        "state_truncated_count": sum(
+            trial.get("state_truncated") is True for trial in successful
+        ),
+        "state_truncation_unreported_count": (
+            len(successful) - len(truncation_reported)
+        ),
+        "full_input_preserved_count": sum(
+            trial.get("state_truncated") is False for trial in successful
+        ),
+        "accuracy": (
+            sum(bool(trial["correct"]) for trial in trials) / len(trials)
+            if trials
+            else None
+        ),
+        "realtime_met_count": sum(bool(trial["realtime_met"]) for trial in trials),
+        "realtime_met_rate": (
+            sum(bool(trial["realtime_met"]) for trial in trials) / len(trials)
+            if trials
+            else None
+        ),
+        "wall_latency": _latency_stats(wall_times),
+        "model_total_latency": _latency_stats(server_times),
+        "model_eval_latency": _latency_stats(eval_times),
+    }
+
+
+def _write_csv(path: Path, trials: list[dict[str, Any]]) -> None:
+    fieldnames = [
+        "case_id", "question_type", "language", "answer_position", "repeat",
+        "start_node", "target_node",
+        "timestamp", "selector_name", "requested_model", "response_model", "choice",
+        "expected_choice", "correct_answer", "correct", "confidence",
+        "wall_seconds", "model_total_seconds", "load_seconds", "eval_seconds",
+        "realtime_deadline_seconds", "realtime_met", "probabilities", "routing",
+        "usage", "state_truncated", "error",
+    ]
+    with path.open("w", encoding="utf-8-sig", newline="") as stream:
+        writer = csv.DictWriter(stream, fieldnames=fieldnames)
+        writer.writeheader()
+        for trial in trials:
+            row = {field: trial.get(field) for field in fieldnames}
+            for field in ("probabilities", "routing", "usage"):
+                row[field] = json.dumps(
+                    trial.get(field), ensure_ascii=False, separators=(",", ":")
+                )
+            writer.writerow(row)
+
+
+def run_latency_benchmark(
+    output: Path,
+    *,
+    repeats: int = 5,
+    warmups: int = 1,
+    realtime_deadline_seconds: float = 0.15,
+    selector: Any | None = None,
+    clock: Clock = time.perf_counter,
+    progress: bool = True,
+) -> dict[str, Any]:
+    """Measure all languages, complexities, and correct-answer positions."""
+    if repeats < 1:
+        raise ValueError("repeats must be at least 1")
+    if warmups < 0:
+        raise ValueError("warmups must be 0 or greater")
+    if realtime_deadline_seconds <= 0:
+        raise ValueError("realtime_deadline_seconds must be positive")
+
+    output = output.resolve()
+    output.mkdir(parents=True, exist_ok=True)
+    trials_path = output / TRIALS_FILENAME
+    if trials_path.exists() and trials_path.stat().st_size:
+        raise FileExistsError(f"existing trial file would be overwritten: {trials_path}")
+
+    selector = selector or get_selector()
+    selector_name = getattr(selector, "name", selector.__class__.__name__)
+    started_at = _utc_now()
+    settings = {
+        "question_types": 3,
+        "languages": 2,
+        "answer_positions": 5,
+        "option_count": 5,
+        "route_graph": str(ROUTE_GRAPH_PATH.relative_to(ROOT)),
+        "route_graph_sha256": hashlib.sha256(ROUTE_GRAPH_PATH.read_bytes()).hexdigest(),
+        "route_pairs": [
+            {"start": start, "target": target} for start, target in ROUTE_CASES
+        ],
+        "case_count": len(TEST_CASES),
+        "warmups_per_language_and_type": warmups,
+        "repeats_per_case": repeats,
+        "expected_trial_count": len(TEST_CASES) * repeats,
+        "realtime_deadline_seconds": realtime_deadline_seconds,
+        "selector_max_length": getattr(selector, "max_length", None),
+    }
+    manifest = {
+        "baseline_algorithm": "astar_stored_weight",
+        "benchmark": "route-selector-language-position-latency-v3",
+        "status": "running",
+        "started_at": started_at,
+        "source": git_metadata(ROOT),
+        "selector_name": selector_name,
+        "requested_model": getattr(selector, "model", None),
+        "settings": settings,
+        "device": selector_device_metadata(selector),
+    }
+    _json_dump(output / MANIFEST_FILENAME, manifest)
+    last_result = None
+
+    # Warm each language/type once. Position variants use the already-warmed model.
+    for question in _base_questions():
+        candidates, _ = _positioned_candidates(
+            question["answers"], question["correct_answer"], 0
+        )
+        for warmup in range(1, warmups + 1):
+            last_result = selector.select_choice(
+                question["state"], candidates, question["instructions"],
+                question_id=f"warmup_{question['language']}_{question['type']}",
+            )
+            if progress:
+                print(
+                    f"{question['language']} {question['type']} "
+                    f"warmup {warmup}/{warmups} complete"
+                )
+
+    trials: list[dict[str, Any]] = []
+    for case in TEST_CASES:
+        for repeat in range(1, repeats + 1):
+            started = clock()
+            try:
+                result = selector.select_choice(
+                    case["state"], case["candidates"], case["instructions"],
+                    question_id=case["id"],
+                )
+                last_result = result
+                wall_seconds = clock() - started
+                trial = {
+                    "case_id": case["id"],
+                    "question_type": case["question_type"],
+                    "language": case["language"],
+                    "answer_position": case["answer_position"],
+                    "start_node": case["start_node"],
+                    "target_node": case["target_node"],
+                    "repeat": repeat,
+                    "timestamp": _utc_now(),
+                    "selector_name": selector_name,
+                    "requested_model": selector.model,
+                    "response_model": result.get("model"),
+                    "choice": result.get("choice"),
+                    "expected_choice": case["expected_choice"],
+                    "correct_answer": case["correct_answer"],
+                    "correct": result.get("choice") == case["expected_choice"],
+                    "confidence": result.get("confidence"),
+                    "probabilities": result.get("probabilities"),
+                    "routing": result.get("routing"),
+                    # Laya가 실제로 입력을 모두 읽었는지 결과 파일에서 검증한다.
+                    "usage": result.get("usage"),
+                    "state_truncated": result.get("state_truncated"),
+                    "wall_seconds": wall_seconds,
+                    "model_total_seconds": result.get("total_duration_seconds"),
+                    "load_seconds": result.get("load_duration_seconds"),
+                    "eval_seconds": result.get("eval_duration_seconds"),
+                    "realtime_deadline_seconds": realtime_deadline_seconds,
+                    "realtime_met": wall_seconds <= realtime_deadline_seconds,
+                    "error": None,
+                    "raw": result.get("raw"),
+                }
+            except Exception as error:
+                wall_seconds = clock() - started
+                trial = {
+                    "case_id": case["id"],
+                    "question_type": case["question_type"],
+                    "language": case["language"],
+                    "answer_position": case["answer_position"],
+                    "start_node": case["start_node"],
+                    "target_node": case["target_node"],
+                    "repeat": repeat,
+                    "timestamp": _utc_now(),
+                    "selector_name": selector_name,
+                    "requested_model": getattr(selector, "model", None),
+                    "response_model": None,
+                    "choice": None,
+                    "expected_choice": case["expected_choice"],
+                    "correct_answer": case["correct_answer"],
+                    "correct": False,
+                    "confidence": None,
+                    "probabilities": None,
+                    "routing": None,
+                    "usage": None,
+                    "state_truncated": None,
+                    "wall_seconds": wall_seconds,
+                    "model_total_seconds": None,
+                    "load_seconds": None,
+                    "eval_seconds": None,
+                    "realtime_deadline_seconds": realtime_deadline_seconds,
+                    "realtime_met": False,
+                    "error": f"{type(error).__name__}: {error}",
+                    "raw": None,
+                }
+            trials.append(trial)
+            _append_jsonl(trials_path, trial)
+            if progress:
+                print(
+                    f"{case['id']} {repeat:02d}/{repeats} "
+                    f"choice={trial['choice']} expected={trial['expected_choice']} "
+                    f"correct={trial['correct']} wall={wall_seconds:.6f}s"
+                )
+
+    groups = []
+    for language in ("ko", "en"):
+        for question_type in ("intuitive", "reasoning", "shortest_path"):
+            grouped = [
+                trial for trial in trials
+                if trial["language"] == language
+                and trial["question_type"] == question_type
+            ]
+            groups.append(
+                {
+                    "language": language,
+                    "question_type": question_type,
+                    **_summarize_trials(grouped),
+                }
+            )
+    positions = []
+    for position in range(1, len(OPTION_IDS) + 1):
+        positioned = [trial for trial in trials if trial["answer_position"] == position]
+        positions.append(
+            {"answer_position": position, **_summarize_trials(positioned)}
+        )
+    routes = []
+    for start, target in ROUTE_CASES:
+        grouped = [
+            trial for trial in trials
+            if trial["start_node"] == start and trial["target_node"] == target
+        ]
+        routes.append(
+            {"start_node": start, "target_node": target, **_summarize_trials(grouped)}
+        )
+
+    summary = {
+        "benchmark": "route-selector-language-position-latency-v3",
+        "started_at": started_at,
+        "completed_at": _utc_now(),
+        "selector_name": selector_name,
+        "requested_model": getattr(selector, "model", None),
+        "device": selector_device_metadata(selector, last_result),
+        "settings": settings,
+        "overall": _summarize_trials(trials),
+        "groups": groups,
+        "answer_positions": positions,
+        "routes": routes,
+    }
+    _json_dump(output / SUMMARY_FILENAME, summary)
+    _write_csv(output / CSV_FILENAME, trials)
+    manifest.update(
+        status="complete", completed_at=_utc_now(),
+        completed_trial_count=len(trials), device=summary["device"],
+        output_files=[
+            MANIFEST_FILENAME, TRIALS_FILENAME, SUMMARY_FILENAME, CSV_FILENAME
+        ],
+    )
+    _json_dump(output / MANIFEST_FILENAME, manifest)
+    return summary
+
+
+def _default_output() -> Path:
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    return DEFAULT_RESULTS_DIR / f"route-selector-v3-{timestamp}"
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--output", type=Path, default=None)
+    parser.add_argument("--repeats", type=int, default=5, help="repeats per case")
+    parser.add_argument("--warmups", type=int, default=1, help="warmups per language/type")
+    parser.add_argument("--deadline", type=float, default=0.15)
+    args = parser.parse_args()
+
+    selector = get_selector()
+    output = args.output or _default_output()
+    summary = run_latency_benchmark(
+        output, repeats=args.repeats, warmups=args.warmups,
+        realtime_deadline_seconds=args.deadline, selector=selector,
+    )
+    print(f"results: {output.resolve()}")
+    print(json.dumps(summary, ensure_ascii=False, indent=2))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

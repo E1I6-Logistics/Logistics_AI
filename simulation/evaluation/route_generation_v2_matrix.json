@@ -1,0 +1,298 @@
+{
+  "matrix_id": "route-generation-v2-live-map",
+  "description": "V2 direct, CoT, and iterative calls with and without graph retrieval",
+  "graph": {
+    "path": "routes/test_int.geojson",
+    "model_input_format": "CompactAdjacencyGraph",
+    "sha256": "a2a02f6d97738997206ef7866e1e70e1e2c4c1ca0377fc6cd3675544abac92db",
+    "node_count": 13,
+    "directed_edge_count": 30,
+    "weight_property": "weight"
+  },
+  "models": [
+    {
+      "name": "qwen3:0.6b",
+      "think": false
+    },
+    {
+      "name": "deepseek-coder:1.3b"
+    },
+    {
+      "name": "llama3.2:3b"
+    },
+    {
+      "name": "qwen3:4b",
+      "think": false
+    },
+    {
+      "name": "gemma3:4b"
+    },
+    {
+      "name": "llama3.1:8b"
+    },
+    {
+      "name": "mistral-nemo:12b"
+    },
+    {
+      "name": "gemma3:12b"
+    },
+    {
+      "name": "deepseek-coder:6.7b"
+    },
+    {
+      "name": "phi4:14b"
+    }
+  ],
+  "cases": [
+    {
+      "start": 6,
+      "goal": 5,
+      "expected_path": [
+        6,
+        5
+      ],
+      "expected_distance": 79.0
+    },
+    {
+      "start": 11,
+      "goal": 4,
+      "expected_path": [
+        11,
+        12,
+        4
+      ],
+      "expected_distance": 45.0
+    },
+    {
+      "start": 8,
+      "goal": 2,
+      "expected_path": [
+        8,
+        7,
+        9,
+        2
+      ],
+      "expected_distance": 143.0
+    },
+    {
+      "start": 7,
+      "goal": 0,
+      "expected_path": [
+        7,
+        8,
+        10,
+        0
+      ],
+      "expected_distance": 128.0
+    },
+    {
+      "start": 12,
+      "goal": 3,
+      "expected_path": [
+        12,
+        11,
+        3
+      ],
+      "expected_distance": 45.0
+    },
+    {
+      "start": 11,
+      "goal": 3,
+      "expected_path": [
+        11,
+        3
+      ],
+      "expected_distance": 14.0
+    },
+    {
+      "start": 5,
+      "goal": 6,
+      "expected_path": [
+        5,
+        6
+      ],
+      "expected_distance": 79.0
+    },
+    {
+      "start": 0,
+      "goal": 5,
+      "expected_path": [
+        0,
+        10,
+        8,
+        7,
+        5
+      ],
+      "expected_distance": 166.0
+    },
+    {
+      "start": 4,
+      "goal": 3,
+      "expected_path": [
+        4,
+        12,
+        11,
+        3
+      ],
+      "expected_distance": 59.0
+    },
+    {
+      "start": 2,
+      "goal": 0,
+      "expected_path": [
+        2,
+        9,
+        10,
+        0
+      ],
+      "expected_distance": 154.0
+    }
+  ],
+  "settings": {
+    "temperature": 0,
+    "seed": 20260928,
+    "num_ctx": 4096,
+    "num_predict": 512,
+    "timeout_seconds": 120,
+    "realtime_deadline_seconds": 0.15,
+    "max_attempts": 1,
+    "repeats": 5,
+    "warmups_per_model": 1,
+    "keep_alive": "5m"
+  },
+  "experiments": [
+    {
+      "name": "direct_no_rag",
+      "description": "V2 direct_no_rag on the actual frontend route graph",
+      "experiment_mode": "V2_DIRECT_NO_RAG",
+      "response_format": "direct",
+      "execution_strategy": "single_call",
+      "max_chain_steps": 13,
+      "retrieval": {
+        "enabled": false,
+        "policy": "full_graph"
+      },
+      "prompt": "You are a deterministic shortest-path solver for a directed weighted graph.\nroute_graph is a CompactAdjacencyGraph. Its adjacency object maps each node ID to\noutgoing entries with to and weight. Traverse only those directed entries and use weight\nexactly as stored. Return the minimum-weight path and total weight as schema-constrained JSON.",
+      "neighbor_context": {
+        "enabled": false,
+        "policy": "none"
+      }
+    },
+    {
+      "name": "direct_graph_retrieval",
+      "description": "V2 direct_graph_retrieval on the actual frontend route graph",
+      "experiment_mode": "V2_DIRECT_GRAPH_RETRIEVAL",
+      "response_format": "direct",
+      "execution_strategy": "single_call",
+      "max_chain_steps": 13,
+      "retrieval": {
+        "enabled": true,
+        "policy": "path_relevant_adjacency_once"
+      },
+      "prompt": "You are a deterministic shortest-path solver for a directed weighted graph.\nroute_graph is a CompactAdjacencyGraph. Its adjacency object maps each node ID to\noutgoing entries with to and weight. Traverse only those directed entries and use weight\nexactly as stored. Return the minimum-weight path and total weight as schema-constrained JSON.",
+      "neighbor_context": {
+        "enabled": false,
+        "policy": "none"
+      }
+    },
+    {
+      "name": "cot_no_rag",
+      "description": "V2 cot_no_rag on the actual frontend route graph",
+      "experiment_mode": "V2_COT_NO_RAG",
+      "response_format": "cot",
+      "execution_strategy": "single_call",
+      "max_chain_steps": 13,
+      "retrieval": {
+        "enabled": false,
+        "policy": "full_graph"
+      },
+      "prompt": "You are a routing assistant that finds the minimum-total-weight path in a directed graph.\nroute_graph is a coordinate-free CompactAdjacencyGraph. Its adjacency keys are source\nnode IDs; each entry's to is a directly reachable destination and weight is its cost.\nWithin this single API call, use the following A*-style search:\n1. Estimate the remaining cost conservatively. Find the smallest stored edge weight.\n   For each node, find the fewest directed moves needed to reach target_node, ignoring\n   weights. You can find these move counts by starting at target_node and tracing\n   incoming edges backward. Multiply the move count by the smallest edge weight.\n   This estimate must never exceed the actual minimum remaining cost. If the smallest\n   weight is zero, or you cannot establish a safe estimate, use zero. Do not expand\n   nodes that cannot reach target_node. Do not invent coordinates or use node ID proximity.\n2. Begin at start_node with an accumulated cost of zero. Record its cost and keep it\n   among the pending nodes to examine.\n3. Examine the pending node whose accumulated cost plus estimated remaining cost is\n   smallest. Compare this combined cost, not just the next edge's weight.\n4. If this selected node is target_node, finish the search. Discovering target_node\n   as a neighbor is not enough to stop.\n5. Otherwise, examine its outgoing edges. Add each stored weight to its accumulated\n   cost. If this gives a cheaper route to a destination node, update that node's cost\n   and predecessor and add or return it to the pending nodes, even if examined before.\n6. Repeat until target_node is selected as the smallest combined-cost pending node.\n   Reconstruct the final path from the recorded predecessors.\nFollow edge directions and never invent an edge. Use stored weights exactly.\nVerify every edge in the final path and check that reported_total_distance equals\nits stored-weight sum. Return reasoning_steps, path, and reported_total_distance\nas schema-constrained JSON. Keep reasoning_steps concise: summarize only the key\ncomparison and verification results, not the full exploration history.",
+      "neighbor_context": {
+        "enabled": false,
+        "policy": "none"
+      }
+    },
+    {
+      "name": "cot_graph_retrieval",
+      "description": "V2 cot_graph_retrieval on the actual frontend route graph",
+      "experiment_mode": "V2_COT_GRAPH_RETRIEVAL",
+      "response_format": "cot",
+      "execution_strategy": "single_call",
+      "max_chain_steps": 13,
+      "retrieval": {
+        "enabled": true,
+        "policy": "path_relevant_adjacency_once"
+      },
+      "prompt": "You are a routing assistant that finds the minimum-total-weight path in a directed graph.\nroute_graph is a coordinate-free CompactAdjacencyGraph. Its adjacency keys are source\nnode IDs; each entry's to is a directly reachable destination and weight is its cost.\nWithin this single API call, use the following A*-style search:\n1. Estimate the remaining cost conservatively. Find the smallest stored edge weight.\n   For each node, find the fewest directed moves needed to reach target_node, ignoring\n   weights. You can find these move counts by starting at target_node and tracing\n   incoming edges backward. Multiply the move count by the smallest edge weight.\n   This estimate must never exceed the actual minimum remaining cost. If the smallest\n   weight is zero, or you cannot establish a safe estimate, use zero. Do not expand\n   nodes that cannot reach target_node. Do not invent coordinates or use node ID proximity.\n2. Begin at start_node with an accumulated cost of zero. Record its cost and keep it\n   among the pending nodes to examine.\n3. Examine the pending node whose accumulated cost plus estimated remaining cost is\n   smallest. Compare this combined cost, not just the next edge's weight.\n4. If this selected node is target_node, finish the search. Discovering target_node\n   as a neighbor is not enough to stop.\n5. Otherwise, examine its outgoing edges. Add each stored weight to its accumulated\n   cost. If this gives a cheaper route to a destination node, update that node's cost\n   and predecessor and add or return it to the pending nodes, even if examined before.\n6. Repeat until target_node is selected as the smallest combined-cost pending node.\n   Reconstruct the final path from the recorded predecessors.\nFollow edge directions and never invent an edge. Use stored weights exactly.\nVerify every edge in the final path and check that reported_total_distance equals\nits stored-weight sum. Return reasoning_steps, path, and reported_total_distance\nas schema-constrained JSON. Keep reasoning_steps concise: summarize only the key\ncomparison and verification results, not the full exploration history.",
+      "neighbor_context": {
+        "enabled": false,
+        "policy": "none"
+      }
+    },
+    {
+      "name": "iterative_full_graph_only",
+      "description": "최종 84쌍 시험과 같은 인접 후보·순환 제한·강제 이동 규칙을 고정 10쌍에 적용한다.",
+      "experiment_mode": "V2_ITERATIVE_FULL_GRAPH_ONLY",
+      "response_format": "iterative_chain",
+      "execution_strategy": "iterative_chain",
+      "max_chain_steps": 26,
+      "retrieval": {
+        "enabled": false,
+        "policy": "full_graph"
+      },
+      "prompt": "Select exactly one next node for the minimum-total-weight directed route from current_node to target_node. Consider the estimated total remaining cost to the target, not merely the weight of the next edge. Use CompactAdjacencyGraph weights exactly as stored. The selected node must be connected by one directed edge from current_node and must be one of the supplied criteria. If available_edges is present, choose only a node listed there; it contains the exact outgoing edges and stored weights. Never reuse an edge in used_edges. Respect max_visits_per_node. Do not return to previous_node unless backtrack_allowed is true. Older nodes may be revisited within those limits. Return only the selected criteria ID.",
+      "neighbor_context": {
+        "enabled": false,
+        "policy": "none"
+      },
+      "iterative_policy": {
+        "version": "shared_neighbor_choice_v1",
+        "candidate_scope": "neighbors",
+        "max_visits_per_node": 2,
+        "edge_reuse_allowed": false,
+        "backtrack_policy": "unused_reverse_edge_only_when_no_other_candidate",
+        "single_candidate_policy": "forced_step_without_model_call"
+      }
+    },
+    {
+      "name": "iterative_neighbor_context",
+      "description": "최종 84쌍 시험과 같은 인접 후보·순환 제한·강제 이동 규칙을 고정 10쌍에 적용한다.",
+      "experiment_mode": "V2_ITERATIVE_NEIGHBOR_CONTEXT",
+      "response_format": "iterative_chain",
+      "execution_strategy": "iterative_chain",
+      "max_chain_steps": 26,
+      "retrieval": {
+        "enabled": false,
+        "policy": "full_graph"
+      },
+      "prompt": "Select exactly one next node for the minimum-total-weight directed route from current_node to target_node. Consider the estimated total remaining cost to the target, not merely the weight of the next edge. Use CompactAdjacencyGraph weights exactly as stored. The selected node must be connected by one directed edge from current_node and must be one of the supplied criteria. If available_edges is present, choose only a node listed there; it contains the exact outgoing edges and stored weights. Never reuse an edge in used_edges. Respect max_visits_per_node. Do not return to previous_node unless backtrack_allowed is true. Older nodes may be revisited within those limits. Return only the selected criteria ID.",
+      "neighbor_context": {
+        "enabled": true,
+        "policy": "exact_current_node_adjacency_each_step"
+      },
+      "iterative_policy": {
+        "version": "shared_neighbor_choice_v1",
+        "candidate_scope": "neighbors",
+        "max_visits_per_node": 2,
+        "edge_reuse_allowed": false,
+        "backtrack_policy": "unused_reverse_edge_only_when_no_other_candidate",
+        "single_candidate_policy": "forced_step_without_model_call"
+      }
+    }
+  ],
+  "case_selection": {
+    "policy": "frozen_first_five_plus_seeded_sample_of_remaining_all_pairs",
+    "route_seed": 20260928,
+    "case_count": 10,
+    "target_nodes": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6
+    ],
+    "final_all_pairs_subset": true
+  }
+}

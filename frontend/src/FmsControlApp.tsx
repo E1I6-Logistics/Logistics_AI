@@ -1,0 +1,921 @@
+import { useEffect, useMemo, useState } from 'react'
+import WarehouseMap from './WarehouseMap'
+import RobotOrderForm from './components/RobotOrderForm'
+import { getOrders, type OrderDto, type WorkstationDto } from './api/orderApi'
+import ScenarioControls from './components/ScenarioControls'
+import {
+  sendGoalNode,
+  previewLlmRoute,
+  getRouteModels,
+  type RouteModelDto,
+  type RouteModelGroupsDto,
+  type LlmRoutePreviewDto,
+  stopRobot,
+  sendCharging,
+  stopAllRobots,
+  emergencyReleaseRobot,
+  returnNearestNode,
+  getOmxDevices,
+  type OmxDeviceDto,
+} from './api/fmsApi'
+import { useCmdVel } from './hooks/useCmdVel'
+import { useRobotFleet } from './hooks/useRobotFleet'
+import { useRouteGraph } from './hooks/useRouteGraph'
+import { C, FONT, MONO } from './constants/theme'
+import { KEY_ROWS, ROBOT_DATA, type RobotId } from './constants/appData'
+
+type CommandState = { tone: 'success' | 'danger' | 'info'; message: string } | null
+
+const allLayers = { nodeEdge: true, route: true, station: true, robotId: true }
+
+// Enable each action only after the corresponding backend route is connected.
+// Without this guard an older /goal-node endpoint would silently use standard routing.
+const LLM_PREVIEW_READY = true
+const LLM_MOVE_READY = true
+const LLM_ORDER_READY = true
+
+const PHASE_TEXT: Record<string, string> = {
+  PENDING: '배차 대기',
+  WAITING_PICKUP: 'Pickup 차례 대기',
+  MOVING_TO_PICKUP: 'Pickup 이동 중',
+  WORKING_AT_PICKUP: 'Pickup 작업 중',
+  WAITING_WORKSTATION: 'Workstation 대기',
+  MOVING_TO_WORKSTATION: 'Workstation 이동 중',
+  WORKING_AT_WORKSTATION: 'Workstation 작업 중',
+  RETURNING: '스테이션 복귀 중',
+  COMPLETED: '주문 완료',
+  CANCELLED: '주문 취소',
+  FAILED: '주문 실패',
+}
+
+function displayRobotStatus(robot: LiveRobot, orders: OrderDto[]): string {
+  if (!robot.connected || robot.status !== 'IDLE') return robot.status
+  const activeOrder = orders.find(order =>
+    order.robot_id === robot.backendId && order.status === 'IN_PROGRESS')
+  if (activeOrder) return PHASE_TEXT[activeOrder.phase] ?? '주문 수행 중'
+  if (robot.occupiedEdge) return '경로 정지 · 노드 확인 필요'
+  return robot.status
+}
+
+function OrderStatus({ orders, workstations }: {
+  orders: OrderDto[]
+  workstations: Record<string, WorkstationDto>
+}) {
+  const stationText: Record<string, string> = {
+    FREE: '비어 있음', OCCUPIED: '점유 중', ASSIGNED: '다른 주문에 할당됨', UNKNOWN: '점유 상태 확인 불가',
+  }
+  return <section aria-label="주문 및 작업대 상태" style={{ marginBottom: 14 }}>
+    <SectionTitle>주문 진행 단계</SectionTitle>
+    <div aria-label="주문 목록" style={{ maxHeight: 5 * 48, overflowY: 'auto', paddingRight: 3 }}>
+    {orders.slice().reverse().map(order => <div key={order.order_id}
+      title={order.error ?? undefined}
+      style={{ boxSizing: 'border-box', height: 43, padding: '6px 8px', marginBottom: 5, border: `1px solid ${C.line}`, borderRadius: 6, fontSize: 10, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>
+      <strong>{order.order_name}</strong> · {PHASE_TEXT[order.phase] ?? order.phase}
+      {order.phase.includes('PICKUP') && ` N${order.pickup_nodes[order.pickup_index] ?? ''}`}
+      {order.workstation_node ? ` · N${order.workstation_node}` : ' · 작업대 미정'}
+      {order.robot_id ? ` · ${order.robot_id}` : ''}
+    </div>)}
+    </div>
+    {orders.length === 0 && <div style={{ color: C.muted, fontSize: 10 }}>등록된 주문이 없습니다.</div>}
+    <SectionTitle>작업대 상태</SectionTitle>
+    {(['3', '4'] as const).map(node => <InfoRow key={node} label={`N${node}`}
+      value={stationText[workstations[node]?.status] ?? '점유 상태 확인 불가'} />)}
+  </section>
+}
+
+export default function FmsControlApp() {
+  const [time, setTime] = useState(new Date())
+  const [scenarioActive, setScenarioActive] = useState(false)
+  const [selectedRobot, setSelectedRobot] = useState<RobotId | null>(null)
+  const [targetNode, setTargetNode] = useState<string | null>(null)
+  const [drivingMode, setDrivingMode] = useState<'standard' | 'llm'>('standard')
+  const [routeModels, setRouteModels] = useState<RouteModelGroupsDto>({ ollama: [], decision_model: [] })
+  const [selectedRouteModel, setSelectedRouteModel] = useState<RouteModelDto | null>(null)
+  const [routeModelError, setRouteModelError] = useState<string | null>(null)
+  const [llmPreview, setLlmPreview] = useState<LlmRoutePreviewDto | null>(null)
+  const [commandState, setCommandState] = useState<CommandState>(null)
+  const [busy, setBusy] = useState<string | null>(null)
+  const [omxDevices, setOmxDevices] = useState<OmxDeviceDto[]>([])
+  const [rightPanelOpen, setRightPanelOpen] = useState(true)
+  const [orders, setOrders] = useState<OrderDto[]>([])
+  const [workstations, setWorkstations] = useState<Record<string, WorkstationDto>>({})
+
+  useEffect(() => {
+    const refresh = () => { void getOrders().then(data => {
+      setOrders(data.orders)
+      setWorkstations(data.workstations)
+    }).catch(() => {}) }
+    refresh()
+    const timer = window.setInterval(refresh, 1000)
+    return () => window.clearInterval(timer)
+  }, [])
+
+  const {
+    managedIds,
+    mapRobotIds,
+    managedRobots,
+    mode: robotMode,
+    modeSwitching,
+    changeMode,
+    error: fleetError,
+  } = useRobotFleet()
+  const { nodes, edges, nodeItems, loading: graphLoading, error: graphError } = useRouteGraph()
+
+  const selectedLiveRobot = managedRobots.find(robot => robot.id === selectedRobot)
+  const connectedRobotCount = managedRobots.filter(robot => robot.connected).length
+  const connected = Boolean(selectedLiveRobot?.connected)
+  const emergencyStopped = selectedLiveRobot?.status === 'EMERGENCY_STOP'
+
+  const remote = useCmdVel({
+    robotId: selectedRobot,
+    enabled: Boolean(
+      selectedRobot &&
+      connected &&
+      !emergencyStopped && !scenarioActive
+    ),
+  })
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setTime(new Date()), 1000)
+    return () => window.clearInterval(timer)
+  }, [])
+
+  useEffect(() => {
+    setTargetNode(null)
+    setLlmPreview(null)
+    setCommandState(null)
+  }, [selectedRobot])
+
+  useEffect(() => {
+    if (selectedRobot && !(managedIds as RobotId[]).includes(selectedRobot)) {
+      setSelectedRobot(null)
+    }
+  }, [managedIds, selectedRobot])
+
+  useEffect(() => {
+    setLlmPreview(null)
+  }, [targetNode, robotMode, selectedRouteModel])
+
+  useEffect(() => {
+    if (!LLM_PREVIEW_READY && !LLM_MOVE_READY && !LLM_ORDER_READY) return
+    void getRouteModels().then(groups => {
+      setRouteModels(groups)
+      setRouteModelError(null)
+      setSelectedRouteModel(previous => {
+        const options = [...groups.ollama, ...groups.decision_model]
+        return options.find(item => item.selector === previous?.selector && item.model === previous.model)
+          ?? options[0] ?? null
+      })
+    }).catch(error => {
+      setRouteModelError(error instanceof Error ? error.message : '모델 목록을 불러오지 못했습니다.')
+      setRouteModels({ ollama: [], decision_model: [] })
+      setSelectedRouteModel(null)
+    })
+  }, [])
+
+  useEffect(() => {
+    const refreshOmx = async () => {
+      try {
+        const devices = await getOmxDevices()
+
+        console.log('OMX:', devices)
+
+        setOmxDevices(devices)
+      } catch (error) {
+        console.warn('OMX 상태 조회 실패:', error)
+      }
+    }
+
+    void refreshOmx()
+
+    const timer = window.setInterval(refreshOmx, 1000)
+
+    return () => window.clearInterval(timer)
+  }, [])
+  
+
+  const nearestNode = useMemo(() => {
+    if (!selectedLiveRobot?.hasPose) return null
+    const candidates = Object.entries(nodes)
+    if (candidates.length === 0) return null
+    const [id, point] = candidates.reduce((nearest, candidate) => {
+      const nearestDistance = Math.hypot(
+        nearest[1].worldX - selectedLiveRobot.x,
+        nearest[1].worldY - selectedLiveRobot.y,
+      )
+      const candidateDistance = Math.hypot(
+        candidate[1].worldX - selectedLiveRobot.x,
+        candidate[1].worldY - selectedLiveRobot.y,
+      )
+      return candidateDistance < nearestDistance ? candidate : nearest
+    })
+    return {
+      id,
+      x: point.worldX,
+      y: point.worldY,
+      distance: Math.hypot(point.worldX - selectedLiveRobot.x, point.worldY - selectedLiveRobot.y),
+    }
+  }, [nodes, selectedLiveRobot])
+
+  const clock = time.toLocaleTimeString('ko-KR', {
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+  })
+
+  const runCommand = async (id: string, action: () => Promise<unknown>) => {
+    try {
+      setBusy(id)
+      setCommandState({ tone: 'info', message: '명령을 전송하고 있습니다.' })
+      await action()
+      setCommandState({ tone: 'success', message: '명령이 정상적으로 전송되었습니다.' })
+    } catch (error) {
+      setCommandState({
+        tone: 'danger',
+        message: error instanceof Error ? error.message : '명령을 전송하지 못했습니다.',
+      })
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const previewSelectedRoute = () => {
+    if (!LLM_PREVIEW_READY) {
+      setCommandState({ tone: 'info', message: 'LLM 경로 미리보기의 서버 연결이 아직 완료되지 않았습니다.' })
+      return
+    }
+    if (!selectedRobot) {
+      setCommandState({ tone: 'info', message: '먼저 로봇을 선택하세요.' })
+      return
+    }
+    if (!targetNode) {
+      setCommandState({ tone: 'info', message: '지도에서 목적지 노드를 선택하세요.' })
+      return
+    }
+    if (!selectedRouteModel) {
+      setCommandState({ tone: 'danger', message: routeModelError ?? '경로 모델을 선택하세요.' })
+      return
+    }
+    if (scenarioActive) {
+      setCommandState({ tone: 'info', message: '시나리오가 끝난 뒤 경로를 미리보세요.' })
+      return
+    }
+    void (async () => {
+      try {
+        setBusy('routePreview')
+        setLlmPreview(null)
+        setCommandState({ tone: 'info', message: 'LLM 경로를 계산하고 검증 중입니다.' })
+        const preview = await previewLlmRoute(selectedRobot, targetNode, selectedRouteModel)
+        setLlmPreview(preview)
+        setCommandState({
+          tone: 'info',
+          message: preview.same_distance
+            ? '예상 LLM 경로가 코드 최단거리와 일치합니다.'
+            : '예상 LLM 경로가 유효한 경로지만 코드 최단거리보다 깁니다.',
+        })
+      } catch (error) {
+        setCommandState({
+          tone: 'danger',
+          message: error instanceof Error ? error.message : 'LLM 경로를 계산하지 못했습니다.',
+        })
+      } finally {
+        setBusy(null)
+      }
+    })()
+  }
+
+  const moveToSelectedNode = () => {
+    if (!selectedRobot || !targetNode || scenarioActive) return
+    if (drivingMode === 'standard') {
+      void runCommand('nodeMove', () => sendGoalNode(selectedRobot, targetNode))
+      return
+    }
+    if (!LLM_MOVE_READY) {
+      setCommandState({ tone: 'info', message: 'LLM 주행의 서버 연결이 아직 완료되지 않았습니다.' })
+      return
+    }
+    if (!selectedRouteModel) {
+      setCommandState({ tone: 'danger', message: '경로 모델을 선택하세요.' })
+      return
+    }
+    if (robotMode === 'real' &&
+        !window.confirm('LLM 경로를 검증한 뒤 실제 로봇에 주행 명령을 보내시겠습니까?')) {
+      return
+    }
+    void (async () => {
+      try {
+        setBusy('nodeMove')
+        setLlmPreview(null)
+        setCommandState({ tone: 'info', message: 'LLM 경로의 유효성을 확인하고 예약을 요청합니다.' })
+        const result = await sendGoalNode(selectedRobot, targetNode, 'llm', selectedRouteModel)
+        const preview = result.llm_preview as LlmRoutePreviewDto | undefined
+        if (preview) setLlmPreview(preview)
+        setCommandState({ tone: result.status === 'WAITING' ? 'info' : 'success',
+          message: result.status === 'WAITING'
+            ? 'LLM 경로의 점유·예약이 해제되기를 기다립니다. 양보가 필요한 경우 자동 양보는 미구현입니다.'
+            : '유효한 LLM 경로를 예약했습니다.' })
+      } catch (error) {
+        setCommandState({
+          tone: 'danger',
+          message: error instanceof Error ? error.message : 'LLM 주행을 시작하지 못했습니다.',
+        })
+      } finally {
+        setBusy(null)
+      }
+    })()
+  }
+
+  const returnToNearestNode = () => {
+    if (!selectedRobot || !nearestNode) return
+
+    if (robotMode !== 'real') {
+      setCommandState({
+        tone: 'danger',
+        message: '최근접 노드 복귀는 실제 로봇 모드에서만 사용할 수 있습니다.',
+      })
+      return
+    }
+
+    void runCommand('returnToRoute', () => returnNearestNode(selectedRobot))
+  }
+
+  const moveToCharge = () => {
+    if (!selectedRobot) return
+
+    void runCommand(
+      'charge',
+      () => sendCharging(selectedRobot)
+    )
+  }
+
+  const stopSelectedRobot = () => {
+    if (!selectedRobot) return
+    if (!window.confirm(`${selectedRobot} 로봇을 정지하시겠습니까?`)) return
+    remote.stop()
+    void runCommand('stop', () => stopRobot(selectedRobot))
+  }
+
+  const releaseSelectedRobot = () => {
+    if (!selectedRobot) return
+
+    if (!window.confirm(`${selectedRobot} 로봇의 비상정지를 해제하시겠습니까?`)) return
+    
+
+    void runCommand(
+      'release',
+      () => emergencyReleaseRobot(selectedRobot)
+    )
+  }
+
+  const emergencyStopAll = () => {
+    const robotIds = managedIds as RobotId[]
+
+    if (robotIds.length === 0) {
+      setCommandState({ tone: 'danger', message: '정지할 로봇이 없습니다.' })
+      return
+    }
+    if (!window.confirm(`연결된 로봇 ${robotIds.length}대를 모두 비상정지하시겠습니까?`)) return
+    
+    remote.stop()
+
+    void runCommand( 'emergency', () => stopAllRobots())
+  }
+
+  const handleModeChange = (mode: 'real' | 'simulation') => {
+    if (mode === robotMode || modeSwitching || scenarioActive) return
+    setSelectedRobot(null)
+    setTargetNode(null)
+    setCommandState({ tone: 'info', message: `${mode === 'real' ? '실제 로봇' : '시뮬레이션'} 모드로 전환하고 있습니다.` })
+    void changeMode(mode)
+      .then(() => setCommandState({ tone: 'success', message: `${mode === 'real' ? '실제 로봇' : '시뮬레이션'} 모드로 전환되었습니다.` }))
+      .catch(error => setCommandState({
+        tone: 'danger',
+        message: error instanceof Error ? error.message : '운용 모드를 전환하지 못했습니다.',
+      }))
+  }
+
+  return (
+    <div style={{ display: 'flex', height: '100vh', overflow: 'hidden', background: C.bg, color: C.text, fontFamily: FONT }}>
+      <aside className="fms-left-nav" style={{ width: 188, background: C.nav, flexDirection: 'column', flexShrink: 0, boxShadow: '2px 0 8px rgba(0,0,0,.18)' }}>
+        <div style={{ padding: '14px 16px 12px', borderBottom: '1px solid rgba(255,255,255,.06)', display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div style={{ width: 32, height: 32, borderRadius: 8, background: 'linear-gradient(140deg,#1A6FD8,#3FA3F5)', display: 'grid', placeItems: 'center', color: '#fff', fontWeight: 900, fontSize: 9.5 }}>FMS</div>
+          <div>
+            <div style={{ color: '#E8EDF4', fontWeight: 700, fontSize: 12 }}>E1I6 FMS</div>
+            <div style={{ color: '#4C5563', fontSize: 9, marginTop: 2 }}>물류센터 관제</div>
+          </div>
+        </div>
+        <nav style={{ flex: 1, paddingTop: 8 }} aria-label="주 메뉴">
+          <button aria-current="page" style={{ width: '100%', padding: '9px 16px', border: 0, borderLeft: '3px solid #1A6FD8', background: 'rgba(26,111,216,.16)', color: '#6DB8FF', fontSize: 12, fontWeight: 700, textAlign: 'left' }}>
+            <span style={{ display: 'inline-block', width: 5, height: 5, marginRight: 10, borderRadius: '50%', background: '#3FA3F5', boxShadow: '0 0 0 3px rgba(63,163,245,.2)' }} />
+            통합 관제
+          </button>
+        </nav>
+        <div style={{ padding: '8px 16px', borderTop: '1px solid rgba(255,255,255,.05)', color: '#343B46', font: `8.5px ${MONO}` }}>v1.0.0-alpha</div>
+      </aside>
+
+      <main style={{ display: 'flex', flex: 1, minWidth: 0, flexDirection: 'column', overflow: 'hidden' }}>
+        <header style={{ height: 46, flexShrink: 0, padding: '0 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: C.surface, borderBottom: `1px solid ${C.line}` }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <strong style={{ fontSize: 13.5, letterSpacing: '-.03em' }}>E1I6 물류센터 FMS</strong>
+            <span style={{ width: 1, height: 14, background: C.line }} />
+            <span style={{ color: C.muted, font: `11px ${MONO}` }}>{clock}</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: fleetError ? C.danger : C.success, fontSize: 10.5, fontWeight: 700 }}>
+              <span style={{ width: 7, height: 7, borderRadius: '50%', background: fleetError ? C.danger : C.success }} />
+              {fleetError ? 'FMS 서버 오류' : `FMS 연결 · 로봇 ${connectedRobotCount}대 온라인`}
+            </div>
+            <div role="group" aria-label="로봇 운용 모드" style={{ display: 'flex', padding: 2, borderRadius: 7, background: '#EEF1F5', border: `1px solid ${C.line}` }}>
+              {([
+                ['real', '실제 로봇'],
+                ['simulation', '시뮬레이션'],
+              ] as const).map(([mode, label]) => {
+                const active = robotMode === mode
+                return (
+                  <button
+                    key={mode}
+                    disabled={modeSwitching || scenarioActive}
+                    aria-pressed={active}
+                    onClick={() => handleModeChange(mode)}
+                    style={{
+                      minWidth: 66,
+                      padding: '4px 9px',
+                      border: 0,
+                      borderRadius: 5,
+                      background: active ? (mode === 'simulation' ? '#7352B8' : '#16845A') : 'transparent',
+                      color: active ? '#fff' : C.muted,
+                      fontSize: 9,
+                      fontWeight: 800,
+                      cursor: modeSwitching ? 'wait' : 'pointer',
+                      opacity: modeSwitching && !active ? .55 : 1,
+                    }}
+                  >
+                    {modeSwitching && active ? '전환 중…' : label}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+        </header>
+
+        <div style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
+          <RobotRail
+            robotIds={managedIds as RobotId[]}
+            selectedRobot={selectedRobot}
+            getStatus={id => {
+              const robot = managedRobots.find(row => row.id === id)
+              return robot ? displayRobotStatus(robot, orders) : ROBOT_DATA[id].status
+            }}
+            onSelect={setSelectedRobot}
+          />
+
+          <section style={{ position: 'relative', display: 'flex', flex: 1, minWidth: 0, background: C.surface }} aria-label="FMS 실시간 지도">
+            <ScenarioControls modeSwitching={modeSwitching} onActiveChange={setScenarioActive} />
+            {commandState && (
+              <CommandToast state={commandState} onClose={() => setCommandState(null)} />
+            )}
+              <div
+                style={{
+                  position: 'absolute',
+                  top: 14,
+                  right: 14,
+                  zIndex: 20,
+                  width: 300,
+                  maxWidth: 'calc(100% - 28px)',
+                }}
+              >
+                <RobotOrderForm
+                  disabled={scenarioActive}
+                  routeModels={routeModels}
+                  routeModelError={routeModelError}
+                  llmOrderReady={LLM_ORDER_READY}
+                />
+              </div>
+            <WarehouseMap
+              nodes={nodes}
+              edges={edges}
+              layers={allLayers}
+              selectedRobot={selectedRobot}
+              onSelect={setSelectedRobot}
+              picking={Boolean(selectedRobot)}
+              targetNode={targetNode ?? undefined}
+              onPick={setTargetNode}
+              graphLoading={graphLoading}
+              graphError={graphError}
+              visibleRobotIds={mapRobotIds as RobotId[]}
+              robotStates={managedRobots}
+              omxDevices={omxDevices}
+            />
+            <button
+              onClick={emergencyStopAll}
+              disabled={busy === 'emergency'}
+              style={{ position: 'absolute', left: 18, bottom: 18, zIndex: 20, minWidth: 154, height: 48, padding: '0 18px', borderRadius: 9, border: '1px solid #9F1329', background: '#C8233A', color: '#fff', fontSize: 13, fontWeight: 900, boxShadow: '0 5px 16px rgba(176,32,56,.32)', cursor: 'pointer' }}
+            >
+              <span aria-hidden="true" style={{ marginRight: 8 }}>■</span>
+              {busy === 'emergency' ? '정지 명령 전송 중' : '전체 비상정지'}
+            </button>
+            <button
+              type="button"
+              aria-label={rightPanelOpen ? '오른쪽 로봇 제어 패널 접기' : '오른쪽 로봇 제어 패널 펼치기'}
+              aria-expanded={rightPanelOpen}
+              title={rightPanelOpen ? '로봇 제어 패널 접기' : '로봇 제어 패널 펼치기'}
+              onClick={() => setRightPanelOpen(open => !open)}
+              style={{
+                position: 'absolute',
+                top: '50%',
+                right: rightPanelOpen ? -16 : 14,
+                zIndex: 40,
+                width: 32,
+                height: 54,
+                transform: 'translateY(-50%)',
+                border: `1px solid ${C.line}`,
+                borderRadius: 9,
+                background: C.surface,
+                color: C.muted,
+                fontSize: 24,
+                lineHeight: 1,
+                cursor: 'pointer',
+                boxShadow: '0 3px 12px rgba(0,0,0,.12)',
+              }}
+            >
+              {rightPanelOpen ? '›' : '‹'}
+            </button>
+          </section>
+
+          {rightPanelOpen && (
+          <RobotPanel
+            robotId={selectedRobot}
+            orders={orders}
+            workstations={workstations}
+            liveRobot={selectedLiveRobot}
+            targetNode={targetNode}
+            drivingMode={drivingMode}
+            routeModels={routeModels}
+            selectedRouteModel={selectedRouteModel}
+            routeModelError={routeModelError}
+            onRouteModelChange={setSelectedRouteModel}
+            onDrivingModeChange={mode => { setDrivingMode(mode); setLlmPreview(null) }}
+            llmPreview={llmPreview}
+            llmPreviewReady={LLM_PREVIEW_READY}
+            llmMoveReady={LLM_MOVE_READY}
+            nearestNode={nearestNode}
+            scenarioActive={scenarioActive}
+            realMode={robotMode === 'real'}
+            emergencyStopped={emergencyStopped}
+            remoteStatus={remote.status}
+            remoteKeys={remote.activeKeys}
+            busy={busy}
+            onRemoteDown={remote.pressKey}
+            onRemoteUp={remote.releaseKey}
+            onRemoteStop={remote.stop}
+            onMove={moveToSelectedNode}
+            onPreview={previewSelectedRoute}
+            onReturnToRoute={returnToNearestNode}
+            onCharge={moveToCharge}
+            onStop={stopSelectedRobot}
+            onRelease={releaseSelectedRobot}
+          />
+          )}
+        </div>
+      </main>
+    </div>
+  )
+}
+
+function RobotRail({ robotIds, selectedRobot, getStatus, onSelect }: {
+  robotIds: RobotId[]
+  selectedRobot: RobotId | null
+  getStatus: (id: RobotId) => string
+  onSelect: (id: RobotId) => void
+}) {
+  return (
+    <aside style={{ width: 64, flexShrink: 0, padding: '10px 0', overflowY: 'auto', background: C.surface, borderRight: `1px solid ${C.line}`, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }} aria-label="로봇 목록">
+      <span style={{ color: '#A5AFBB', fontSize: 8, lineHeight: 1.35, textAlign: 'center' }}>로봇<br />목록</span>
+      {robotIds.map(id => {
+        const selected = id === selectedRobot
+        const status = getStatus(id)
+        const color = /연결 끊김|OFFLINE/i.test(status) ? C.danger : /이동|작업|RUN|MOV/i.test(status) ? C.success : C.warning
+        return (
+          <button key={id} onClick={() => onSelect(id)} title={`${id} · ${status}`} aria-pressed={selected}
+            style={{ width: 40, height: 40, borderRadius: '50%', border: `2.5px solid ${selected ? C.primary : color}`, background: selected ? '#EDF6FF' : '#F8FAFC', color: selected ? C.primary : C.text, fontSize: 10, fontWeight: 900, cursor: 'pointer', boxShadow: selected ? '0 0 0 3px rgba(37,137,245,.15)' : 'none' }}>
+            {id.replace('R-', '')}
+          </button>
+        )
+      })}
+    </aside>
+  )
+}
+
+type LiveRobot = ReturnType<typeof useRobotFleet>['managedRobots'][number]
+
+function RobotPanel({ scenarioActive, robotId, orders, workstations, liveRobot, targetNode, drivingMode, routeModels, selectedRouteModel, routeModelError, onRouteModelChange, onDrivingModeChange, llmPreview, llmPreviewReady, llmMoveReady, nearestNode, realMode, emergencyStopped, remoteStatus, remoteKeys, busy, onRemoteDown, onRemoteUp, onRemoteStop, onMove, onPreview, onReturnToRoute, onCharge, onStop, onRelease, }: {
+  robotId: RobotId | null
+  orders: OrderDto[]
+  workstations: Record<string, WorkstationDto>
+  liveRobot?: LiveRobot
+  targetNode: string | null
+  drivingMode: 'standard' | 'llm'
+  routeModels: RouteModelGroupsDto
+  selectedRouteModel: RouteModelDto | null
+  routeModelError: string | null
+  onRouteModelChange: (model: RouteModelDto | null) => void
+  onDrivingModeChange: (mode: 'standard' | 'llm') => void
+  llmPreview: LlmRoutePreviewDto | null
+  llmPreviewReady: boolean
+  llmMoveReady: boolean
+  nearestNode: { id: string; x: number; y: number; distance: number } | null
+  realMode: boolean
+  scenarioActive: boolean
+  emergencyStopped: boolean
+  remoteStatus: 'off' | 'connecting' | 'ready'
+  remoteKeys: Set<string>
+  busy: string | null
+  onRemoteDown: (key: string) => void
+  onRemoteUp: (key: string) => void
+  onRemoteStop: () => void
+  onMove: () => void
+  onPreview: () => void
+  onReturnToRoute: () => void
+  onCharge: () => void
+  onStop: () => void
+  onRelease: () => void
+}) {
+  if (!robotId) {
+    return (
+      <aside style={{ width: 390, flexShrink: 0, borderLeft: `1px solid ${C.line}`, background: C.surface, padding: 24, boxSizing: 'border-box', overflowY: 'auto' }}>
+        <OrderStatus orders={orders} workstations={workstations} />
+        <div>
+          <div style={{ width: 54, height: 54, margin: '0 auto 14px', display: 'grid', placeItems: 'center', borderRadius: 15, background: '#EDF6FF', color: C.primary, fontSize: 24 }}>◎</div>
+          <strong style={{ display: 'block', fontSize: 14, marginBottom: 7 }}>로봇을 선택하세요</strong>
+          <span style={{ color: C.muted, fontSize: 11, lineHeight: 1.6 }}>지도 또는 좌측 로봇 목록에서<br />제어할 로봇을 선택하세요.</span>
+        </div>
+      </aside>
+    )
+  }
+
+  const fallback = ROBOT_DATA[robotId]
+  const battery = liveRobot?.battery ?? fallback.battery
+  const connected = Boolean(liveRobot?.connected)
+  const status = !connected ? '연결 끊김' : liveRobot ? displayRobotStatus(liveRobot, orders) : fallback.status
+  const statusColor = !connected ? C.danger : /MOV|RUN|이동|작업/i.test(status) ? C.success : C.warning
+  const batteryColor = battery < 30 ? C.danger : battery < 50 ? C.warning : C.success
+  const route = liveRobot?.route?.node_ids?.length ? liveRobot.route.node_ids.map(id => `N${id}`).join(' → ') : '—'
+  const controlsEnabled = connected && !emergencyStopped && !scenarioActive && remoteStatus === 'ready'
+
+  return (
+    <aside style={{ width: 390, flexShrink: 0, borderLeft: `1px solid ${C.line}`, background: C.surface, display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '-2px 0 8px rgba(0,0,0,.05)' }} aria-label={`${robotId} 정보 및 제어`}>
+      <div style={{ padding: '14px 16px', borderBottom: `1px solid ${C.line}`, display: 'flex', alignItems: 'center', gap: 10 }}>
+        <div style={{ width: 38, height: 38, borderRadius: 10, display: 'grid', placeItems: 'center', background: '#EDF6FF', border: `2px solid ${C.primary}`, color: C.primary, fontWeight: 900 }}>{robotId.replace('R-', '')}</div>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+            <strong style={{ fontSize: 16 }}>{robotId}</strong>
+            <span style={{ padding: '2px 7px', borderRadius: 5, background: `${statusColor}16`, color: statusColor, fontSize: 9, fontWeight: 800 }}>{status}</span>
+          </div>
+          <span style={{ color: C.muted, font: `9px ${MONO}` }}>{fallback.serial}</span>
+        </div>
+      </div>
+
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '14px 16px 18px' }}>
+        <OrderStatus orders={orders} workstations={workstations} />
+        <SectionTitle>핵심 상태</SectionTitle>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+          <StatusCard label="배터리" value={`${Math.round(battery)}%`} color={batteryColor}>
+            <div style={{ height: 5, borderRadius: 5, overflow: 'hidden', background: '#E3E8EF', marginTop: 8 }}><div style={{ width: `${battery}%`, height: '100%', background: batteryColor }} /></div>
+          </StatusCard>
+          <StatusCard label="통신 상태"
+            value={liveRobot?.connectionState === 'UNKNOWN' ? '● 확인 중' : connected ? '● 정상' : '● 끊김'}
+            color={liveRobot?.connectionState === 'UNKNOWN' ? C.warning : connected ? C.success : C.danger} />
+        </div>
+
+        {status === 'PAUSED' && liveRobot?.pauseReason && (
+          <div role="status" style={{ marginTop: 8, padding: '8px 10px', borderRadius: 8, background: '#FFF4E5', color: C.warning, fontSize: 11, overflowWrap: 'anywhere' }}>
+            일시정지 사유: {liveRobot.pauseReason}
+          </div>
+        )}
+
+        <div style={{ marginTop: 8, padding: '10px 12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', border: `1px solid ${C.line}`, borderRadius: 9, background: '#F3FBF7' }}>
+          <div>
+            <div style={{ fontSize: 10, color: C.muted }}>원격제어</div>
+            <strong style={{ display: 'block', marginTop: 3, color: connected ? C.success : C.danger, fontSize: 12 }}>
+              {remoteStatus === 'connecting' ? '자동 연결 중' : controlsEnabled ? '● 항상 활성화' : '● 통신 연결 대기'}
+            </strong>
+          </div>
+          <span style={{ padding: '3px 8px', borderRadius: 20, background: connected ? '#DDF4EA' : '#F1F3F6', color: connected ? '#167A55' : C.muted, fontSize: 9, fontWeight: 800 }}>AUTO</span>
+        </div>
+
+        <SectionTitle>작업 일정</SectionTitle>
+        <div style={{ border: `1px solid ${C.line}`, borderRadius: 9, padding: '2px 11px' }}>
+          <InfoRow label="작업 시작" value={fallback.startTime} />
+          <InfoRow label="최초 예상 완료" value={fallback.estOrig} />
+          <InfoRow label="현재 예상 완료" value={fallback.estCurr} />
+          <InfoRow label="예상 지연" value={fallback.delay} danger={fallback.delay !== '—' && fallback.delay !== '없음'} last />
+        </div>
+
+        <SectionTitle>계획 경로</SectionTitle>
+        <div style={{ padding: '10px 12px', border: '1px solid #CFE2F7', borderRadius: 9, background: '#F4F8FF', color: route === '—' ? C.muted : '#1155A8', font: `10px ${MONO}`, lineHeight: 1.55 }}>{route}</div>
+
+        <SectionTitle>노드 이동</SectionTitle>
+        <div style={{ display: 'flex', gap: 7, marginBottom: 9 }}>
+          {(['standard', 'llm'] as const).map(mode => (
+            <button
+              key={mode}
+              type="button"
+              aria-pressed={drivingMode === mode}
+              onClick={() => onDrivingModeChange(mode)}
+              style={{
+                flex: 1, padding: '8px 5px', borderRadius: 7,
+                border: '1px solid ' + (drivingMode === mode ? C.primary : C.line),
+                background: drivingMode === mode ? '#EDF6FF' : '#fff',
+                color: drivingMode === mode ? C.primary : C.muted,
+                fontSize: 10, fontWeight: 700, cursor: 'pointer',
+              }}
+            >
+              {mode === 'standard' ? '기본 주행' : 'LLM 경로'}
+            </button>
+          ))}
+        </div>
+        {drivingMode === 'llm' && (
+          <div style={{ marginBottom: 9 }}>
+            <label htmlFor="route-model" style={{ display: 'block', marginBottom: 5, color: C.muted, fontSize: 10 }}>
+              경로 모델
+            </label>
+            <select
+              id="route-model"
+              value={selectedRouteModel ? selectedRouteModel.selector + ':' + selectedRouteModel.model : ''}
+              onChange={event => {
+                const options = [...routeModels.ollama, ...routeModels.decision_model]
+                onRouteModelChange(options.find(item => item.selector + ':' + item.model === event.target.value) ?? null)
+              }}
+              style={{ width: '100%', padding: '8px 7px', border: '1px solid ' + C.line, borderRadius: 7, background: '#fff', color: C.text, fontSize: 11 }}
+            >
+              <option value="">모델 선택</option>
+              <optgroup label="Ollama">
+                {routeModels.ollama.map(item => (
+                  <option key={'ollama:' + item.model} value={'ollama:' + item.model}>{item.model}</option>
+                ))}
+              </optgroup>
+              <optgroup label="Decision Model">
+                {routeModels.decision_model.map(item => (
+                  <option key={item.selector + ':' + item.model} value={item.selector + ':' + item.model}>
+                    {item.selector.toUpperCase()} · {item.model}
+                  </option>
+                ))}
+              </optgroup>
+            </select>
+            {routeModelError && <div role="alert" style={{ color: C.danger, fontSize: 10, marginTop: 5 }}>{routeModelError}</div>}
+            {!llmMoveReady && (
+              <div style={{ color: C.muted, fontSize: 9, marginTop: 5 }}>
+                경로 미리보기는 사용할 수 있습니다. LLM 경로로 이동은 주행 연결 후 사용할 수 있습니다.
+              </div>
+            )}
+          </div>
+        )}
+        <div style={{ padding: 11, border: `1px solid ${targetNode ? '#A8CAEF' : C.line}`, borderRadius: 9, background: targetNode ? '#F4F8FF' : '#F8FAFC' }}>
+          <div style={{ marginBottom: 9, color: targetNode ? C.primary : C.muted, fontSize: 10, fontWeight: 700 }}>
+            {targetNode ? `선택 노드: N${targetNode}` : '맵에서 이동할 노드를 선택하세요.'}
+          </div>
+          <button 
+            onClick={onMove} 
+            disabled={!targetNode || !connected || emergencyStopped || busy !== null || scenarioActive || (drivingMode === 'llm' && (!llmMoveReady || !selectedRouteModel))}
+            style={primaryButton(
+              Boolean(targetNode && connected && !emergencyStopped && busy === null && !scenarioActive
+                && (drivingMode === 'standard' || (llmMoveReady && selectedRouteModel))),
+            )}
+          >
+            {busy === 'nodeMove'
+              ? (drivingMode === 'llm' ? 'LLM 검증·예약 중' : '이동 명령 전송 중')
+              : (drivingMode === 'llm' ? 'LLM 경로로 이동' : '선택 노드로 이동')}
+          </button>
+          {drivingMode === 'llm' && (
+            <div style={{ marginTop: 8, color: C.muted, fontSize: 9, lineHeight: 1.5 }}>
+              연결된 유향 경로는 최단거리 여부와 관계없이 선택 순서 그대로 예약합니다.
+              <button
+                type="button"
+                onClick={onPreview}
+                disabled={busy !== null}
+                style={{ display: 'block', marginTop: 7, padding: '6px 9px', borderRadius: 6,
+                  border: '1px solid ' + C.line, background: '#fff', color: C.primary, fontSize: 10,
+                  cursor: busy === null ? 'pointer' : 'wait' }}
+              >
+                {busy === 'routePreview' ? '경로 계산 중' : '경로만 미리보기'}
+              </button>
+              {llmPreview && (
+                <div style={{ marginTop: 5, color: llmPreview.same_distance ? C.primary : C.warning }}>
+                  <div>LLM ({llmPreview.model ?? 'same node'}): {llmPreview.path.map(node => 'N' + node).join(' → ')} · {llmPreview.total_weight.toFixed(3)}</div>
+                  <div>코드 기준: {llmPreview.baseline_path.map(node => 'N' + node).join(' → ')} · {llmPreview.baseline_weight.toFixed(3)}</div>
+                  <div>{llmPreview.same_distance ? '최단거리 일치' : '비최단 경로 (+' + llmPreview.distance_difference.toFixed(3) + ')'}</div>
+                </div>
+              )}
+            </div>
+          )}
+          <div style={{ margin: '10px 0 7px', borderTop: `1px solid ${C.line}` }} />
+          <div style={{ marginBottom: 7, color: nearestNode ? C.muted : C.danger, fontSize: 9, lineHeight: 1.5 }}>
+            {!realMode
+              ? '최근접 노드 복귀는 실제 로봇 모드에서만 사용할 수 있습니다.'
+              : nearestNode
+                ? `가장 가까운 경로 노드: N${nearestNode.id} · 약 ${nearestNode.distance.toFixed(2)}m`
+                : '현재 위치 또는 경로 노드 정보를 확인할 수 없습니다.'}
+          </div>
+          <button
+            onClick={onReturnToRoute}
+            disabled={ !realMode || !nearestNode || !connected || emergencyStopped || busy !== null || scenarioActive }
+            style={secondaryButton(
+              Boolean(realMode && nearestNode && connected && !emergencyStopped && busy === null && !scenarioActive),
+            )}
+          >
+            {busy === 'returnToRoute' ? '경로 복귀 명령 전송 중' : '가장 가까운 노드로 복귀'}
+          </button>
+        </div>
+
+        <SectionTitle>원격제어</SectionTitle>
+        <div style={{ opacity: controlsEnabled ? 1 : .48 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 6 }}>
+            {KEY_ROWS.flat().map(({ k, l }) => {
+              const pressed = remoteKeys.has(k.toLowerCase())
+              return (
+                <button key={k} disabled={!controlsEnabled}
+                  onPointerDown={() => controlsEnabled && onRemoteDown(k)}
+                  onPointerUp={() => controlsEnabled && onRemoteUp(k)}
+                  onPointerLeave={() => pressed && onRemoteUp(k)}
+                  style={{ height: 44, borderRadius: 8, border: `1px solid ${pressed ? C.primary : '#BEC8D6'}`, background: pressed ? '#EAF2FF' : '#fff', color: C.text, fontSize: 11, fontWeight: 900 }}>
+                  {k}<span style={{ display: 'block', marginTop: 2, color: C.muted, fontSize: 8, fontWeight: 500 }}>{l}</span>
+                </button>
+              )
+            })}
+          </div>
+          <button disabled={!controlsEnabled} onClick={onRemoteStop} style={{ width: '100%', height: 38, marginTop: 6, borderRadius: 8, border: '1px solid #BEC8D6', background: '#fff', color: C.text, fontSize: 10, fontWeight: 800 }}>SPACE · 주행 정지</button>
+        </div>
+
+        <SectionTitle>직접 제어</SectionTitle>
+        <button
+          onClick={onCharge}
+          disabled={!connected || emergencyStopped || busy !== null || scenarioActive}
+          style={secondaryButton(connected && !emergencyStopped && busy === null && !scenarioActive)}
+          title="충전 스테이션으로 이동"
+        >
+          {busy === 'charge' ? '충전 이동 명령 전송 중' : '충전 스테이션으로 이동'}
+        </button>
+
+        {emergencyStopped ? (
+          <button
+            onClick={onRelease}
+            disabled={!connected || busy !== null}
+            style={secondaryButton(connected && busy === null)}
+          >
+            {busy === 'release'
+              ? '비상정지 해제 중'
+              : '소프트웨어 비상정지 해제'}
+          </button>
+        ) : (
+          <button
+            onClick={onStop}
+            disabled={!connected || busy !== null}
+            style={dangerButton(connected && busy === null)}
+          >
+            {busy === 'stop'
+              ? '비상정지 명령 전송 중'
+              : '소프트웨어 비상정지'}
+
+            <span
+              style={{
+                display: 'block',
+                marginTop: 2,
+                fontSize: 8,
+                fontWeight: 500,
+              }}
+            >
+              현재 선택된 로봇의 모든 이동 잠금
+            </span>
+          </button>
+        )}
+      </div>
+    </aside>
+  )
+}
+
+function SectionTitle({ children }: { children: React.ReactNode }) {
+  return <div style={{ margin: '16px 0 7px', color: '#8B97A5', fontSize: 8.5, fontWeight: 800, letterSpacing: '.09em' }}>{children}</div>
+}
+
+function StatusCard({ label, value, color, children }: { label: string; value: string; color: string; children?: React.ReactNode }) {
+  return <div style={{ padding: '10px 11px', border: `1px solid ${C.line}`, borderRadius: 9, background: '#F8FAFC' }}><span style={{ color: C.muted, fontSize: 9 }}>{label}</span><strong style={{ display: 'block', marginTop: 5, color, fontSize: 13 }}>{value}</strong>{children}</div>
+}
+
+function InfoRow({ label, value, danger = false, last = false }: { label: string; value: string; danger?: boolean; last?: boolean }) {
+  return <div style={{ minHeight: 32, display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: last ? 0 : `1px solid ${C.line}` }}><span style={{ color: C.muted, fontSize: 10 }}>{label}</span><strong style={{ color: danger ? C.danger : C.text, font: `600 10px ${MONO}` }}>{value}</strong></div>
+}
+
+function CommandToast({ state, onClose }: { state: NonNullable<CommandState>; onClose: () => void }) {
+  const palette = state.tone === 'success' ? { bg: '#E9F8F3', bd: '#A8DECE', fg: '#1A7A55' } : state.tone === 'danger' ? { bg: '#FFF0F2', bd: '#F1C8CD', fg: C.danger } : { bg: '#EDF6FF', bd: '#B9DAFB', fg: C.primary }
+  return <div role="status" style={{ position: 'absolute', top: 14, left: '50%', transform: 'translateX(-50%)', zIndex: 30, display: 'flex', alignItems: 'center', gap: 10, maxWidth: 440, padding: '9px 12px', borderRadius: 8, border: `1px solid ${palette.bd}`, background: palette.bg, color: palette.fg, boxShadow: '0 4px 14px rgba(0,0,0,.1)', fontSize: 10, fontWeight: 700 }}><span>{state.message}</span><button onClick={onClose} style={{ border: 0, background: 'transparent', color: palette.fg, cursor: 'pointer' }}>×</button></div>
+}
+
+function primaryButton(active: boolean): React.CSSProperties {
+  return { width: '100%', height: 44, border: 0, borderRadius: 8, background: active ? C.primary : '#DDE3EC', color: active ? '#fff' : '#9AA4B0', fontSize: 11, fontWeight: 800, cursor: active ? 'pointer' : 'not-allowed' }
+}
+
+function secondaryButton(active: boolean): React.CSSProperties {
+  return { width: '100%', minHeight: 44, borderRadius: 8, border: `1px solid ${active ? '#9DC4F0' : C.line}`, background: active ? '#EDF6FF' : '#F3F5F8', color: active ? '#1155A8' : '#9AA4B0', fontSize: 11, fontWeight: 800, cursor: active ? 'pointer' : 'not-allowed' }
+}
+
+function dangerButton(active: boolean): React.CSSProperties {
+  return { width: '100%', minHeight: 48, marginTop: 8, borderRadius: 8, border: `1px solid ${active ? '#E09AA6' : C.line}`, background: active ? '#FFF1F3' : '#F3F5F8', color: active ? C.danger : '#9AA4B0', fontSize: 11, fontWeight: 900, cursor: active ? 'pointer' : 'not-allowed' }
+}

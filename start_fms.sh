@@ -1,0 +1,329 @@
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+# FMS development launcher
+# - Docker: Zenoh Router, MQTT Broker
+# - Host: FastAPI, Vite, ROS 2 daemon, zenoh-bridge-ros2dds, Kev
+
+PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+FRONTEND_DIR="$PROJECT_DIR/frontend"
+COMPOSE_FILE="${FMS_COMPOSE_FILE:-$PROJECT_DIR/infra/docker-compose.yml}"
+LOG_DIR="${FMS_LOG_DIR:-$PROJECT_DIR/logs}"
+
+BACKEND_PORT="${FMS_BACKEND_PORT:-8000}"
+FRONTEND_PORT="${FMS_FRONTEND_PORT:-5173}"
+KEV_PORT="${FMS_KEV_PORT:-8011}"
+export KEV_HOST="${KEV_HOST:-http://127.0.0.1:$KEV_PORT}"
+ZENOH_PORT="${FMS_ZENOH_PORT:-7447}"
+MQTT_PORT="${FMS_MQTT_PORT:-1883}"
+
+VENV_DIR="${FMS_VENV_DIR:-$HOME/venv/robot}"
+PYTHON_BIN="${FMS_PYTHON:-$VENV_DIR/bin/python}"
+KEV_DIR="${FMS_KEV_DIR:-$PROJECT_DIR/../kev}"
+KEV_PYTHON="${FMS_KEV_PYTHON:-$PYTHON_BIN}"
+KEV_RUN="${FMS_KEV_RUN:-jaredpalmer/kev-0.8b@v1.0}"
+NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
+
+ROS_DISTRO="${ROS_DISTRO:-jazzy}"
+ROS_SETUP="${FMS_ROS_SETUP:-/opt/ros/$ROS_DISTRO/setup.bash}"
+ROS_WS_SETUP="${FMS_ROS_WS_SETUP:-$PROJECT_DIR/robots_ws/Logistics_AMR/install/setup.bash}"
+# Keep the FMS ROS transport independent of the calling shell's ROS mode.
+# Use FMS_* variables when this stack needs an explicit override.
+ROS_DOMAIN_ID="${FMS_ROS_DOMAIN_ID:-15}"
+RMW_IMPLEMENTATION="${FMS_RMW_IMPLEMENTATION:-rmw_cyclonedds_cpp}"
+ROS_AUTOMATIC_DISCOVERY_RANGE="${FMS_ROS_AUTOMATIC_DISCOVERY_RANGE:-LOCALHOST}"
+
+ZENOH_CONNECT_ENDPOINT="${FMS_ZENOH_CONNECT_ENDPOINT:-tcp/127.0.0.1:$ZENOH_PORT}"
+BRIDGE_BIN="${FMS_ZENOH_BRIDGE_BIN:-zenoh-bridge-ros2dds}"
+
+CLEANUP_ON_EXIT=0
+mkdir -p "$LOG_DIR"
+
+log() {
+    printf '[FMS] %s\n' "$*"
+}
+
+fail() {
+    printf '[FMS][ERROR] %s\n' "$*" >&2
+    exit 1
+}
+
+cleanup_failed_start() {
+    local status=$?
+
+    if [ "$status" -ne 0 ] && [ "$CLEANUP_ON_EXIT" -eq 1 ]; then
+        trap - EXIT
+        printf '[FMS][ERROR] Startup failed; stopping the partially started stack.\n' >&2
+        set +e
+        FMS_COMPOSE_FILE="$COMPOSE_FILE" "$PROJECT_DIR/stop_fms.sh"
+    fi
+
+    exit "$status"
+}
+trap cleanup_failed_start EXIT
+
+select_docker_command() {
+    command -v docker >/dev/null 2>&1 || fail "docker command not found"
+
+    if docker info >/dev/null 2>&1; then
+        DOCKER=(docker)
+    else
+        command -v sudo >/dev/null 2>&1 || fail "Docker is unavailable to the current user"
+        DOCKER=(sudo docker)
+        "${DOCKER[@]}" info >/dev/null 2>&1 || fail "Docker daemon is unavailable"
+    fi
+
+    "${DOCKER[@]}" compose version >/dev/null 2>&1 || fail "docker compose plugin not found"
+}
+
+prepare_compose_file() {
+    local docker_os runtime_file expanded_file
+    docker_os="$("${DOCKER[@]}" info --format '{{.OperatingSystem}}' 2>/dev/null)"
+    [[ "$docker_os" == *"Docker Desktop"* ]] || return 0
+
+    # Docker Desktop의 host 네트워크는 WSL localhost에 포트를 공개하지 않는다.
+    # 원본 Compose 파일은 보존하고, 무시되는 logs/에 실행용 설정만 만든다.
+    expanded_file="$LOG_DIR/docker-compose-expanded.json"
+    runtime_file="$LOG_DIR/docker-compose-desktop.json"
+    "${DOCKER[@]}" compose -f "$COMPOSE_FILE" config --format json >"$expanded_file" \
+        || fail "Docker Compose 설정을 읽지 못했습니다: $COMPOSE_FILE"
+    "$PYTHON_BIN" - "$expanded_file" "$runtime_file" "$ZENOH_PORT" "$MQTT_PORT" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+source, output, zenoh_port, mqtt_port = sys.argv[1:]
+config = json.loads(Path(source).read_text(encoding="utf-8"))
+ports = {
+    "zenoh-router": [(zenoh_port, "7447"), ("8001", "8001")],
+    "mqtt-broker": [(mqtt_port, "1883")],
+}
+for name, mappings in ports.items():
+    service = config["services"].get(name)
+    if service is not None and service.get("network_mode") == "host":
+        del service["network_mode"]
+        service["ports"] = [f"{host}:{container}" for host, container in mappings]
+Path(output).write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
+PY
+    "${DOCKER[@]}" compose -f "$runtime_file" config -q \
+        || fail "Docker Desktop 실행 설정이 올바르지 않습니다: $runtime_file"
+    COMPOSE_FILE="$runtime_file"
+    log "Docker Desktop: published Zenoh/MQTT ports via $runtime_file"
+}
+
+load_node_environment() {
+    export NVM_DIR
+    if [ -s "$NVM_DIR/nvm.sh" ]; then
+        # nvm scripts are not nounset-safe.
+        set +u
+        # shellcheck disable=SC1090
+        source "$NVM_DIR/nvm.sh"
+        set -u
+    fi
+
+    command -v node >/dev/null 2>&1 || fail "node command not found"
+}
+
+load_ros_environment() {
+    [ -f "$ROS_SETUP" ] || fail "ROS setup not found: $ROS_SETUP"
+
+    # ROS-generated setup files may read variables before defining them.
+    set +u
+    # shellcheck disable=SC1090
+    source "$ROS_SETUP"
+    if [ -f "$ROS_WS_SETUP" ]; then
+        # shellcheck disable=SC1090
+        source "$ROS_WS_SETUP"
+    fi
+    set -u
+
+    export ROS_DOMAIN_ID
+    export RMW_IMPLEMENTATION
+    export ROS_AUTOMATIC_DISCOVERY_RANGE
+    unset ROS_LOCALHOST_ONLY || true
+}
+
+wait_for_tcp() {
+    local host="$1"
+    local port="$2"
+    local timeout="${3:-30}"
+    local count
+
+    for ((count = 0; count < timeout; count++)); do
+        if "$PYTHON_BIN" -c \
+            'import socket, sys; socket.create_connection((sys.argv[1], int(sys.argv[2])), timeout=1).close()' \
+            "$host" "$port" >/dev/null 2>&1; then
+            return 0
+        fi
+        sleep 1
+    done
+    return 1
+}
+
+port_is_open() {
+    "$PYTHON_BIN" -c \
+        'import socket, sys; connection = socket.socket(); connection.settimeout(1); result = connection.connect_ex(("127.0.0.1", int(sys.argv[1]))); connection.close(); sys.exit(0 if result == 0 else 1)' \
+        "$1" >/dev/null 2>&1
+}
+
+wait_for_http() {
+    local url="$1"
+    local timeout="${2:-60}"
+    local pid="${3:-}"
+    local count
+
+    command -v curl >/dev/null 2>&1 || fail "curl command not found"
+    for ((count = 0; count < timeout; count++)); do
+        if [ -n "$pid" ] && ! kill -0 "$pid" >/dev/null 2>&1; then
+            return 1
+        fi
+        if curl -fsS --max-time 2 "$url" >/dev/null 2>&1; then
+            return 0
+        fi
+        sleep 1
+    done
+    return 1
+}
+
+wait_for_stable_process() {
+    local pid="$1"
+    local seconds="${2:-2}"
+
+    sleep "$seconds"
+    kill -0 "$pid" >/dev/null 2>&1
+}
+
+[ -f "$COMPOSE_FILE" ] || fail "Compose file not found: $COMPOSE_FILE"
+[ -x "$PYTHON_BIN" ] || fail "Python executable not found: $PYTHON_BIN"
+[ -d "$FRONTEND_DIR" ] || fail "Frontend directory not found: $FRONTEND_DIR"
+if [ "${FMS_KEV_ENABLED:-1}" = "1" ]; then
+    [ -d "$KEV_DIR/kev" ] || fail "Kev package not found: $KEV_DIR"
+    [ -x "$KEV_PYTHON" ] || fail "Kev Python executable not found: $KEV_PYTHON"
+fi
+
+select_docker_command
+prepare_compose_file
+load_node_environment
+load_ros_environment
+log "ROS transport: domain=$ROS_DOMAIN_ID rmw=$RMW_IMPLEMENTATION discovery=$ROS_AUTOMATIC_DISCOVERY_RANGE"
+command -v "$BRIDGE_BIN" >/dev/null 2>&1 || fail "Bridge binary not found: $BRIDGE_BIN"
+
+# Stop services recorded by the previous run before starting a new stack.
+if [ "${FMS_CLEAN_START:-1}" = "1" ]; then
+    FMS_COMPOSE_FILE="$COMPOSE_FILE" "$PROJECT_DIR/stop_fms.sh"
+fi
+for port in "$BACKEND_PORT" "$FRONTEND_PORT"; do
+    port_is_open "$port" && fail "Port $port is already in use; stop the existing service first"
+done
+if [ "${FMS_KEV_ENABLED:-1}" = "1" ]; then
+    port_is_open "$KEV_PORT" && fail "Port $KEV_PORT is already in use; stop the existing Kev server first"
+fi
+CLEANUP_ON_EXIT=1
+
+log "Starting Zenoh Router and MQTT Broker with Docker Compose"
+
+"${DOCKER[@]}" compose -f "$COMPOSE_FILE" up -d \
+    zenoh-router \
+    mqtt-broker
+
+# Zenoh Router 연결 확인
+wait_for_tcp "127.0.0.1" "$ZENOH_PORT" 30 || {
+    "${DOCKER[@]}" compose -f "$COMPOSE_FILE" logs --tail 100 zenoh-router || true
+    fail "Zenoh Router did not open port $ZENOH_PORT"
+}
+
+# MQTT Broker 연결 확인
+wait_for_tcp "127.0.0.1" "$MQTT_PORT" 30 || {
+    "${DOCKER[@]}" compose -f "$COMPOSE_FILE" logs --tail 100 mqtt-broker || true
+    fail "MQTT Broker did not open port $MQTT_PORT"
+}
+
+if command -v ros2 >/dev/null 2>&1; then
+    ros2 daemon start >/dev/null 2>&1 || true
+fi
+
+log "Starting zenoh-bridge-ros2dds on the host"
+nohup "$BRIDGE_BIN" \
+    -d "$ROS_DOMAIN_ID" \
+    --ros-automatic-discovery-range "$ROS_AUTOMATIC_DISCOVERY_RANGE" \
+    -e "$ZENOH_CONNECT_ENDPOINT" \
+    client \
+    >"$LOG_DIR/zenoh_bridge.log" 2>&1 &
+BRIDGE_PID=$!
+printf '%s\n' "$BRIDGE_PID" >"$LOG_DIR/zenoh_bridge.pid"
+wait_for_stable_process "$BRIDGE_PID" 2 || {
+    tail -n 100 "$LOG_DIR/zenoh_bridge.log" || true
+    fail "zenoh-bridge-ros2dds exited during startup"
+}
+
+log "Starting FastAPI backend on the host"
+cd "$PROJECT_DIR"
+nohup "$PYTHON_BIN" -m uvicorn backend.app.main:app \
+    --host 0.0.0.0 \
+    --port "$BACKEND_PORT" \
+    >"$LOG_DIR/backend.log" 2>&1 &
+BACKEND_PID=$!
+printf '%s\n' "$BACKEND_PID" >"$LOG_DIR/backend.pid"
+wait_for_http "http://127.0.0.1:$BACKEND_PORT/health" 60 "$BACKEND_PID" || {
+    tail -n 100 "$LOG_DIR/backend.log" || true
+    fail "Backend health check failed"
+}
+wait_for_stable_process "$BACKEND_PID" 0 || fail "Backend exited during startup"
+
+log "Starting Vite frontend on the host"
+cd "$FRONTEND_DIR"
+[ -f "$FRONTEND_DIR/node_modules/vite/bin/vite.js" ] || fail "Vite is not installed"
+nohup node "$FRONTEND_DIR/node_modules/vite/bin/vite.js" \
+    --host 0.0.0.0 \
+    --port "$FRONTEND_PORT" \
+    >"$LOG_DIR/frontend.log" 2>&1 &
+FRONTEND_PID=$!
+printf '%s\n' "$FRONTEND_PID" >"$LOG_DIR/frontend.pid"
+wait_for_http "http://127.0.0.1:$FRONTEND_PORT/" 60 "$FRONTEND_PID" || {
+    tail -n 100 "$LOG_DIR/frontend.log" || true
+    fail "Frontend health check failed"
+}
+wait_for_stable_process "$FRONTEND_PID" 0 || fail "Frontend exited during startup"
+
+if [ "${FMS_KEV_ENABLED:-1}" = "1" ]; then
+    log "Starting Kev on port $KEV_PORT"
+    cd "$KEV_DIR"
+    KEV_BACKEND="${KEV_BACKEND:-torch}" \
+    KEV_DTYPE="${KEV_DTYPE:-bf16}" \
+    KEV_PREFIX_CACHE="${KEV_PREFIX_CACHE:-0}" \
+    KEV_CUDA_GRAPHS="${KEV_CUDA_GRAPHS:-0}" \
+    KEV_FUSED="${KEV_FUSED:-0}" \
+    nohup "$KEV_PYTHON" -m kev.serve --run "$KEV_RUN" --port "$KEV_PORT" \
+        >"$LOG_DIR/kev.log" 2>&1 &
+    KEV_PID=$!
+    printf '%s\n' "$KEV_PID" >"$LOG_DIR/kev.pid"
+    wait_for_http "http://127.0.0.1:$KEV_PORT/openapi.json" "${FMS_KEV_START_TIMEOUT:-180}" "$KEV_PID" || {
+        tail -n 100 "$LOG_DIR/kev.log" || true
+        fail "Kev health check failed"
+    }
+    wait_for_stable_process "$KEV_PID" 0 || fail "Kev exited during startup"
+fi
+
+CLEANUP_ON_EXIT=0
+cd "$PROJECT_DIR"
+cat <<EOF
+
+========================================
+ FMS start complete
+========================================
+Frontend     : http://127.0.0.1:$FRONTEND_PORT
+Backend      : http://127.0.0.1:$BACKEND_PORT
+Zenoh Router : $ZENOH_CONNECT_ENDPOINT
+MQTT Broker  : mqtt://127.0.0.1:$MQTT_PORT
+Kev         : $([ "${FMS_KEV_ENABLED:-1}" = "1" ] && printf 'http://127.0.0.1:%s' "$KEV_PORT" || printf 'disabled')
+
+Logs:
+  Backend      : $LOG_DIR/backend.log
+  Frontend     : $LOG_DIR/frontend.log
+  Zenoh Bridge : $LOG_DIR/zenoh_bridge.log
+  Kev          : $LOG_DIR/kev.log
+  Zenoh Router : ${DOCKER[*]} compose -f $COMPOSE_FILE logs -f zenoh-router
+  MQTT Broker  : ${DOCKER[*]} compose -f $COMPOSE_FILE logs -f mqtt-broker
+========================================
+EOF
