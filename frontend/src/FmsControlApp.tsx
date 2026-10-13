@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import WarehouseMap from './WarehouseMap'
 import RobotOrderForm from './components/RobotOrderForm'
-import { getOrders, retryOrder, type OrderDto, type WorkstationDto, type PickupDto } from './api/orderApi'
+import { cancelOrder, getOrders, retryOrder, type OrderDto, type WorkstationDto, type PickupDto } from './api/orderApi'
 import ScenarioControls from './components/ScenarioControls'
 import {
   sendGoalNode,
@@ -49,8 +49,8 @@ const PHASE_TEXT: Record<string, string> = {
 }
 
 const RECOVERY_TEXT: Record<string, string> = {
-  PENDING: '실패 후 복귀 대기', RETURNING: '실패 후 스테이션 복귀 중',
-  RETURNED: '실패 후 복귀 완료', BLOCKED: '자동 복귀 불가 · 상태 확인 필요', STOPPED: '복귀 중지',
+  PENDING: '스테이션 복귀 대기', RETURNING: '스테이션 복귀 중',
+  RETURNED: '스테이션 복귀 완료', BLOCKED: '자동 복귀 불가 · 상태 확인 필요', STOPPED: '복귀 중지',
 }
 
 function itemText(order: OrderDto): string {
@@ -77,6 +77,7 @@ function OrderStatus({ orders, workstations, pickups }: {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [retrying, setRetrying] = useState(false)
   const [retryMessage, setRetryMessage] = useState<string | null>(null)
+  const [cancelling, setCancelling] = useState(false)
   const selected = orders.find(order => order.order_id === selectedId)
   const retry = async (order: OrderDto) => {
     setRetrying(true)
@@ -89,6 +90,21 @@ function OrderStatus({ orders, workstations, pickups }: {
       setRetrying(false)
     }
   }
+  const cancel = async (order: OrderDto) => {
+    setSelectedId(order.order_id)
+    setRetryMessage(null)
+    setCancelling(true)
+    try {
+      const result = await cancelOrder(order.order_id)
+      const recovery = result.recovery_status && ['PENDING', 'RETURNING', 'BLOCKED'].includes(result.recovery_status)
+        ? ` ${RECOVERY_TEXT[result.recovery_status]}` : ''
+      setRetryMessage(`${order.order_name}을(를) 취소했습니다.${recovery}`)
+    } catch (error) {
+      setRetryMessage(error instanceof Error ? error.message : '주문 취소 실패')
+    } finally {
+      setCancelling(false)
+    }
+  }
   const stationText: Record<string, string> = {
     FREE: '비어 있음', OCCUPIED: '점유 중', ASSIGNED: '다른 주문에 할당됨', UNKNOWN: '점유 상태 확인 불가',
   }
@@ -96,11 +112,11 @@ function OrderStatus({ orders, workstations, pickups }: {
     <div className="fms-order-card">
     <SectionTitle>주문 진행 단계</SectionTitle>
     <div aria-label="주문 목록" style={{ maxHeight: 5 * 52, overflowY: 'auto', paddingRight: 3 }}>
-    {orders.slice().reverse().map(order => <button key={order.order_id}
+    {orders.slice().reverse().map(order => <div key={order.order_id} style={{ display: 'flex', gap: 4, marginBottom: 4 }}><button
       onClick={() => { setSelectedId(order.order_id); setRetryMessage(null) }}
       title="주문 상세 및 실패 사유 보기"
-      style={{ display: 'block', width: '100%', textAlign: 'left', background: 'white', color: C.text,
-        boxSizing: 'border-box', height: 48, padding: '3px 8px', marginBottom: 4,
+      style={{ display: 'block', flex: 1, minWidth: 0, textAlign: 'left', background: 'white', color: C.text,
+        boxSizing: 'border-box', height: 48, padding: '3px 8px',
         border: `1px solid ${C.line}`, borderRadius: 6, fontSize: 10, cursor: 'pointer', overflow: 'hidden' }}>
       <strong>{order.order_name}</strong> · {PHASE_TEXT[order.phase] ?? order.phase}
       <div>
@@ -109,7 +125,11 @@ function OrderStatus({ orders, workstations, pickups }: {
       {order.robot_id ? ` · ${order.robot_id}` : ''}
       </div>
       {order.error && <div style={{ color: C.danger, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{order.error}</div>}
-    </button>)}
+    </button>{['PENDING', 'IN_PROGRESS', 'FAILED'].includes(order.status) && <button
+      disabled={cancelling || retrying}
+      onClick={() => void cancel(order)}
+      aria-label={`${order.order_name} 주문 취소`}
+      style={{ width: 48, height: 48, border: `1px solid ${C.danger}`, borderRadius: 6, background: '#FFF1F3', color: C.danger, fontSize: 10, fontWeight: 800, cursor: 'pointer' }}>취소</button>}</div>)}
     </div>
     {selected && <div role="dialog" aria-label="주문 상세" style={{ position: 'fixed', zIndex: 80, bottom: 20, right: 20, width: 340, maxWidth: 'calc(100vw - 60px)', background: 'white', boxShadow: '0 8px 32px #0003', padding: 16, border: `1px solid ${C.line}`, borderRadius: 6, fontSize: 11, overflowWrap: 'anywhere' }}>
       <button onClick={() => setSelectedId(null)} aria-label="주문 상세 닫기" style={{ float: 'right', border: 0, background: 'transparent', cursor: 'pointer' }}>닫기 ×</button>
@@ -124,6 +144,9 @@ function OrderStatus({ orders, workstations, pickups }: {
       {selected.status === 'FAILED' && selected.mode === 'simulation' && <button
         disabled={retrying || ['PENDING', 'RETURNING'].includes(selected.recovery_status ?? '')}
         onClick={() => void retry(selected)}>주문 재시도 · 다른 가용 로봇 우선</button>}
+      {['PENDING', 'IN_PROGRESS', 'FAILED'].includes(selected.status) && <button
+        disabled={cancelling || retrying}
+        onClick={() => void cancel(selected)}>주문 취소{selected.robot_id ? ' · 스테이션 복귀' : ''}</button>}
       {retryMessage && <div role="status">{retryMessage}</div>}
     </div>}
     {orders.length === 0 && <div style={{ color: C.muted, fontSize: 10 }}>등록된 주문이 없습니다.</div>}

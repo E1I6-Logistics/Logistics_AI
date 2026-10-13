@@ -73,6 +73,13 @@ export async function retryOrder(orderId: string) {
   return data as OrderDto
 }
 
+export async function cancelOrder(orderId: string) {
+  const response = await fetch(`${API_BASE}/api/orders/${encodeURIComponent(orderId)}`, { method: 'DELETE' })
+  const data = await response.json()
+  if (!response.ok) throw new Error(data.detail ?? '주문을 취소하지 못했습니다.')
+  return data as OrderDto
+}
+
 export async function createOrder(payload: CreateOrderPayload) {
   const response = await fetch(`${API_BASE}/api/orders`, {
     method: 'POST',

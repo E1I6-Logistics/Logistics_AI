@@ -62,4 +62,4 @@ async def retry_order(order_id: str):
 async def cancel_order(order_id: str):
     if not order_manager.cancel_order(order_id):
         raise HTTPException(status_code=404, detail="취소할 주문이 없습니다.")
-    return {"order_id": order_id, "status": "CANCELLED"}
+    return order_manager.get_order(order_id)

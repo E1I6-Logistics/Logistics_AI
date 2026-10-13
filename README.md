@@ -1,414 +1,160 @@
-# Logistics_FMS
+# Logistics FMS
 
-물류센터의 TurtleBot 계열 AMR을 지도에서 관제하고 이동·정지·수동 제어하기 위한 Fleet Management System(FMS)입니다. FastAPI 백엔드, React/Vite 대시보드, ROS 2 Jazzy, Nav2, Zenoh 통신 계층, 모의 로봇 시뮬레이션과 LLM 경로 비교 도구로 구성되어 있습니다.
+물류 로봇의 위치·경로·주문을 한 화면에서 관리하는 관제 시스템입니다. FastAPI 백엔드, React/Vite 대시보드, ROS 2 Jazzy, Nav2, Zenoh, MQTT, 시뮬레이션과 AI 경로 선택 기능을 사용합니다.
 
-> **중요:** 현재 백엔드는 시작할 때 ROS 2 노드를 초기화하고 `turtlebot3_my_msg/action/PrecisionDock` 인터페이스를 import합니다. 시뮬레이션 모드만 사용할 때도 `robots_ws`에 [Logistics_AMR](https://github.com/E1I6-Logistics/Logistics_AMR.git)의 `jhleedev00` 브랜치를 clone하고 빌드해야 합니다. 자세한 절차는 [TurtleBot 인터페이스 준비](#2-turtlebot-인터페이스-준비필수)를 참고하세요.
+## 현재 기능
 
-## 주요 기능
-
-- Occupancy Grid Map(PGM/YAML)과 GeoJSON 경로 그래프 표시
-- `simulation` / `real` 운용 모드 전환
-- 로봇 연결 상태, AMCL 위치, 방향, 배터리, 경로와 작업 상태 표시
-- 방향성 경로 그래프 기반 A* 경로 계산과 노드 목적지 이동
-- WebSocket 기반 대시보드 텔레메트리와 키보드 수동 주행
-- Nav2 `FollowWaypoints`, `Spin` 및 커스텀 `PrecisionDock` 액션 연동
-- Zenoh Router와 `zenoh-bridge-ros2dds`를 통한 Main PC·로봇 간 ROS 2 연결
-- Mock Fleet를 이용한 로봇 3대 시뮬레이션
-- Ollama/OpenAI/Anthropic 기반 선택적 LLM 경로 비교 및 평가
-
-## 현재 개발 현황
-
-아래 내용은 현재 저장소의 코드를 기준으로 정리한 구현 상태입니다.
-
-| 영역 | 현재 상태 |
-| --- | --- |
-| 대시보드 | 로봇 목록·상태, 지도·경로 그래프, 목표 노드 선택, 모드 전환, 전체 정지 UI, 키보드 원격 제어 구현 |
-| 시뮬레이션 | `robot1`~`robot3` 모의 텔레메트리, 노드/좌표 이동, 정지, `cmd_vel`, 약 10 Hz 위치 갱신 구현 |
-| 실제 로봇 검색 | Zenoh Router REST API(`8001`)의 세션과 ROS 2 route를 조회해 연결된 `robotN`을 동적으로 등록 |
-| 실제 텔레메트리 | `/{robot_id}/amcl_pose`, `/{robot_id}/battery_state`를 구독해 위치·방향·배터리 갱신 |
-| 실제 수동 제어 | `/{robot_id}/cmd_vel`에 `geometry_msgs/msg/TwistStamped` 발행 |
-| 실제 경로 주행 | 현재 위치에서 가장 가까운 그래프 노드를 찾고 A* 경로를 계산한 뒤 `/{robot_id}/follow_waypoints` 액션 전송 |
-| 도착 후 동작 | 목적지별 목표 각도로 `/{robot_id}/spin` 실행. 노드 `0`, `1`, `2` 도착 시 `/{robot_id}/precision_dock` 실행 |
-| 가장 가까운 노드 복귀 | 실제 모드용 `/api/command/return-nearest-node` API 구현 |
-| LLM 경로 비교 | 코드 경로와 LLM 제안 경로의 유효성·거리·응답 시간을 비교하고 JSONL/요약 파일로 기록 |
-
-### 현재 구현상 유의점
-
-- 실제 ROS 2 명령으로 연결된 경로는 현재 **노드 이동(`/api/command/goal-node`)**과 **WebSocket 수동 제어(`/ws/cmd_vel`)**입니다.
-- 좌표 이동(`/api/command/goal`)과 REST 정지(`/api/command/stop`)는 현재 코드에서 모드와 무관하게 Mock Fleet를 처리합니다. 따라서 화면의 전체/개별 정지 버튼을 실제 장비의 비상정지 수단으로 사용하면 안 됩니다.
-- 실시간 운용 전에는 로봇별 namespace, Zenoh 연결, Nav2 Action Server, AMCL, 배터리 토픽과 정밀 도킹 서버를 현장에서 반드시 검증해야 합니다.
-- 운용 모드는 프로세스 메모리에만 유지되며 기본값은 `simulation`입니다.
-
-## 시스템 구성
-
-```text
-React/Vite Dashboard (:5173)
-       │ HTTP / WebSocket
-       ▼
-FastAPI Backend (:8000)
-       ├── Map(PGM/YAML) + Route Graph(GeoJSON)
-       ├── Mock Fleet (simulation mode)
-       └── FMS ROS 2 Node (real mode)
-                │ ROS 2 topics/actions
-                ▼
-       Local zenoh-bridge-ros2dds
-                │
-                ▼
-       Zenoh Router (:7447, REST :8001)
-                │
-                ▼
-       Robot zenoh-bridge-ros2dds ↔ TurtleBot/Nav2
-```
+- 지도에 로봇 위치, 방향, 경로, 점유·예약 상태를 표시합니다.
+- 상단에서 **시뮬 · 알고리즘 / 시뮬 · AI / 실제 · 알고리즘 / 실제 · AI**를 선택합니다. AI 모드에서는 현재 경로 선택에 AI가 적용되고 배차·작업대 선택과 교통 제어는 알고리즘을 사용합니다.
+- 관제 화면에서 A/B/C/D 품목을 합계 1~5개로 주문합니다. 주문은 대기열에서 가용 로봇에 배차되며 픽업대 N5(A/B), N6(C/D)를 거쳐 작업대와 로봇 스테이션으로 이동합니다.
+- 하단 주문 패널에서 진행 단계, 로봇별 주문 품목, 픽업대·작업대 상태와 실패 사유를 확인합니다. 목록은 5건 높이로 스크롤하며 패널 높이를 드래그하거나 접을 수 있습니다.
+- 하단 목록에서 주문을 선택해 수동으로 취소할 수 있습니다. 배정된 로봇은 적재 상태와 관계없이 기존 경로 예약을 이용해 담당 스테이션으로 복귀합니다.
+- 지도 목적지 이동, 실제 로봇 원격 제어, 긴급 정지·해제를 지원합니다. 실제 로봇을 연결할 때는 ROS 2 액션 서버와 Zenoh 네트워크가 준비되어야 합니다.
+- 실패한 시뮬레이션 주문은 실패 사유와 복귀 상태를 표시하고, 복귀한 뒤 수동으로 재시도할 수 있습니다. 실제 주문은 현장 적재물과 OMX 결과를 확인한 뒤 다시 등록해야 합니다.
+- AI 경로는 Ollama, Laya, Kev 등의 설정된 모델을 사용할 수 있습니다. 모델 서버와 GPU 준비 여부는 선택한 모델에 따라 다릅니다.
 
 ## 폴더 구조
 
-빌드 산출물과 의존성 디렉터리는 생략했습니다.
-
 ```text
-Logistics_FMS/
-├── backend/
-│   ├── app/
-│   │   ├── models/              # 실제 로봇 상태 모델
-│   │   ├── ros2/                # ROS 2 Node와 FastAPI-ROS Gateway
-│   │   ├── routers/             # Map, Robot, Mode, Command, WebSocket API
-│   │   ├── schemas/             # API 요청 및 Robot ID 스키마
-│   │   ├── services/            # Mock Fleet, A*, 지도, 그래프, Zenoh 연결 관리
-│   │   ├── config.py            # 지도·그래프·모드·CORS 환경 설정
-│   │   └── main.py              # FastAPI 앱과 ROS 2 executor 수명주기
-│   ├── simulation/              # 시나리오·모의 실행기·경로 평가 도구
-│   │   ├── evaluation/
-│   │   ├── llm_providers/
-│   │   ├── route_selector/
-│   │   ├── services/
-│   │   └── simulators/
-│   └── requirements.txt
-├── frontend/
-│   ├── public/
-│   ├── src/
-│   │   ├── api/                 # REST/WebSocket 클라이언트
-│   │   ├── constants/           # UI 데이터와 테마
-│   │   ├── hooks/               # Fleet, Route, cmd_vel 상태 관리
-│   │   ├── FmsControlApp.tsx    # 통합 관제 화면
-│   │   └── WarehouseMap.tsx     # 지도·노드·경로·로봇 렌더링
-│   ├── package.json
-│   └── vite.config.ts
-├── robots_ws/                   # 백엔드가 source하는 ROS 2 workspace
-│   ├──Logistics_AMR/       # 별도 clone: jhleedev00 브랜치
-├── maps/                        # PGM/PNG/YAML Occupancy Map
-├── routes/                      # GeoJSON 경로 그래프와 비교용 그래프
-├── tests/                       # 경로·LLM 비교 단위 테스트와 fixture
-├── scripts/
-│   ├── main/                    # Main PC Zenoh 설치·셸 설정
-│   ├── robot/                   # Robot PC Zenoh 설치·셸 설정
-│   ├── setup.sh                 # Ubuntu 개발 환경 일괄 설치
-│   └── verify_env.sh            # 환경 점검
-├── infra/docker-compose.example.yml # 공유용 Zenoh/MQTT 설정 예시
-├── infra/docker-compose.yml     # 로컬 Compose 설정 (Git 제외)
-├── tools/diagnostics/           # Zenoh 진단 도구
-├── doc/                         # ROS 2/Zenoh 및 백엔드 제어 문서
-├── logs/                        # 실행 로그와 PID 파일
-├── .env.example                 # FMS·AI 공통 설정 예시
-├── .env                         # 로컬 설정 및 API 키 (Git 제외)
-├── start_fms.sh                 # 전체 개발 스택 시작
-└── stop_fms.sh                  # 전체 개발 스택 종료
+backend/
+  app/                 FastAPI, 주문·배차·교통·ROS 2 서비스
+  simulation/          시뮬레이션 실행기와 AI 경로 평가 도구
+frontend/              React 관제 화면
+maps/                  지도 파일
+routes/                GeoJSON 경로 그래프
+robots_ws/             Logistics_AMR ROS 2 작업공간 (Git 제외)
+scripts/
+  setup.sh             메인/로봇 PC 일괄 설치 및 검증
+  verify_env.sh        역할별 환경 검증
+  main/                메인 PC Zenoh 패키지와 셸 설정
+  robot/               로봇 PC Zenoh 패키지와 셸 설정
+tests/                 단위 테스트, 시나리오, 수동 MQTT 점검 도구
+infra/                 Zenoh Router·MQTT Docker Compose 예시
+doc/                   상세 기술 문서
+.env.example           공통 환경변수 양식
+.env                   로컬 설정과 비밀키 (Git 제외)
+start_fms.sh / stop_fms.sh
 ```
+
+시뮬레이션 코드는 `backend/simulation/`에 있습니다. 백엔드 주문·배차 로직은 `backend/app/`에 있고 시뮬레이션에서도 같은 주문 흐름을 사용합니다.
 
 ## 설치
 
-### 1. 기본 환경 설치
-
-지원 기준은 Ubuntu 24.04(x86_64 또는 aarch64/Jetson), ROS 2 Jazzy입니다. 설치 스크립트는 ROS 2/Nav2, Docker Compose, Node.js 20.20.2, `~/venv/robot` Python 가상환경, 백엔드·프런트엔드 의존성과 Zenoh 패키지를 설치합니다. 인터넷 연결과 `sudo` 권한이 필요하며 시스템 패키지를 변경합니다.
+Ubuntu 24.04(x86_64 또는 aarch64/Jetson), 인터넷 연결과 `sudo` 권한이 필요합니다. 설치는 시스템 APT 패키지와 사용자 Python/Node 환경을 변경합니다. **메인 PC와 로봇 PC에서 각각 한 번씩** 아래 명령을 실행합니다.
 
 ```bash
-cd ~
-git clone <Logistics_FMS 저장소 URL> Logistics_FMS
-cd ~/Logistics_FMS
-bash scripts/setup.sh
+# 메인 PC: ROS 2, Docker, Node, Python, Zenoh, AI 의존성, Kev, ROS 작업공간, 프런트엔드
+cd /path/to/AX_Logistics
+bash scripts/setup.sh main
+
+# 각 로봇 PC: ROS 2와 로봇 측 Zenoh 패키지
+cd /path/to/AX_Logistics
+bash scripts/setup.sh robot
 ```
 
-Docker 그룹에 처음 추가된 경우 로그아웃 후 다시 로그인해야 Docker를 `sudo` 없이 사용할 수 있습니다. 설치가 끝나면 새 터미널을 열거나 다음 명령으로 셸 환경을 적용합니다.
+인수 없이 `bash scripts/setup.sh`를 실행하면 `main` 역할입니다. 스크립트는 기존 설치를 재사용하고 마지막에 `scripts/verify_env.sh`를 자동 실행합니다. 메인 PC에서는 다음 항목도 자동 준비합니다.
+
+- `~/venv/robot` 가상환경에 `backend/requirements.txt`, `backend/simulation/requirements.txt`, Kev 서버 의존성 설치
+- `robots_ws/Logistics_AMR`의 `jhleedev00` 브랜치가 없으면 clone, ROS 의존성 설치와 `colcon build --symlink-install` 실행
+- `frontend/`의 npm 의존성 설치
+- 루트 `.env`와 `infra/docker-compose.yml`이 없을 때만 예시 파일에서 생성
+- `~/.axbashrc` 또는 `~/.axrobotbashrc`를 생성해 `~/.bashrc`에서 불러오기
+
+`start_fms.sh`는 Kev 소스를 기본적으로 `../kev`에서 찾습니다. 설치 스크립트도 같은 위치에 없으면 clone합니다. 위치를 바꾸려면 `FMS_KEV_DIR`를 지정합니다. Kev를 사용하지 않을 환경에서는 설치와 실행 모두 `FMS_KEV_ENABLED=0`으로 설정합니다. Kev 모델 가중치는 설치 중 내려받지 않고 첫 서버 실행 시 선택한 모델에 맞춰 준비됩니다.
+
+설치 후 새 터미널을 열어 셸 설정을 적용합니다. Docker 그룹에 처음 추가된 경우에는 로그아웃 후 다시 로그인합니다. 필요하면 역할별 점검을 다시 실행합니다.
 
 ```bash
-source ~/.bashrc
+bash scripts/verify_env.sh main
+bash scripts/verify_env.sh robot
 ```
 
-### 2. TurtleBot 인터페이스 준비(필수)
-
-백엔드의 `FmsRosNode`는 Logistics_AMR 저장소에 있는 커스텀 TurtleBot 메시지·액션 인터페이스를 사용합니다. 프로젝트의 실제 workspace 이름은 `robots_ws`이며, 소스는 그 안의 `src`에 clone합니다.
-
-```bash
-cd ~/Logistics_FMS
-mkdir -p robots_ws/
-cd robots_ws/
-
-git clone https://github.com/E1I6-Logistics/Logistics_AMR.git
-cd Logistics_AMR
-git switch jhleedev00
-```
-
-이어서 ROS 의존성을 설치하고 workspace 전체를 빌드합니다.
-
-```bash
-cd ~/Logistics_FMS/robots_ws/Logistics_AMR/
-source /opt/ros/jazzy/setup.bash
-rosdep install --from-paths src --ignore-src -r -y
-colcon build --symlink-install
-source install/setup.bash
-```
-
-이미 `Logistics_AMR` 디렉터리가 있다면 새로 clone하지 말고 다음과 같이 브랜치를 맞춘 뒤 다시 빌드합니다.
-
-```bash
-cd ~/Logistics_FMS/robots_ws/Logistics_AMR/
-git fetch origin
-git switch jhleedev00
-git pull --ff-only origin jhleedev00
-
-cd ~/Logistics_FMS/robots_ws/Logistics_AMR/
-source /opt/ros/jazzy/setup.bash
-colcon build --symlink-install
-source install/setup.bash
-```
-
-커스텀 액션 인터페이스가 보이는지 확인할 수 있습니다.
-
-```bash
-ros2 interface show turtlebot3_my_msg/action/PrecisionDock
-```
-
-> `start_fms.sh`는 `robots_ws/install/setup.bash`를 source하므로 반드시 프로젝트 루트에서 실행해야 합니다. AMR 저장소를 clone만 하고 빌드하지 않으면 백엔드가 `turtlebot3_my_msg`를 import하지 못합니다.
-
-### 3. 환경 확인
-
-```bash
-cd ~/Logistics_FMS
-bash scripts/verify_env.sh
-```
-
-OS, ROS 2, Python, Zenoh, Node.js, Docker, 프런트엔드 의존성과 네트워크 점검 결과를 확인합니다.
+로봇의 실제 주행에는 해당 장비의 TurtleBot 펌웨어·센서·Nav2 설정도 필요합니다. 로봇별 하드웨어 설정은 [ROS 2/Zenoh 안내](doc/ros2-zenoh-guide.md)를 확인합니다.
 
 ## 환경 설정
 
-FMS와 AI의 공통 설정 예시는 루트 `.env.example`에 있습니다. 로컬 `.env`는 시작 스크립트와 Python 백엔드·평가 도구가 읽으며 Git에서 제외됩니다. 이미 셸에 설정한 환경변수는 `.env`보다 우선합니다.
+루트 `.env.example`은 공유용 양식이고 `.env`가 실제 로컬 설정 파일입니다. `.env`는 Git에서 제외됩니다. `start_fms.sh`와 Python 백엔드·평가 도구가 이 파일을 읽으며 이미 셸에 export된 환경변수가 우선합니다. API 키는 `.env`에만 입력합니다.
 
-| 환경변수 | 기본값 | 설명 |
-| --- | --- | --- |
-| `FMS_ROBOT_MODE` | `simulation` | 시작 모드: `simulation` 또는 `real` |
-| `FMS_MAP_YAML` | `logitle_map.yaml` | `maps/` 아래에서 사용할 지도 YAML |
-| `FMS_ROUTE_GRAPH` | `test.geojson` | `routes/` 아래에서 사용할 GeoJSON 그래프 |
-| `FMS_CORS_ORIGINS` | `*` | 쉼표로 구분한 허용 Origin |
-| `VITE_FMS_API_BASE` | 현재 호스트의 `:8000` | 프런트엔드 API 주소 |
-| `VITE_FMS_WS_BASE` | API 주소에서 자동 변환 | 프런트엔드 WebSocket 주소 |
-
-예시:
-
-```bash
-export FMS_ROBOT_MODE=real
-export FMS_MAP_YAML=logitle_map.yaml
-export FMS_ROUTE_GRAPH=test.geojson
-```
-
-`start_fms.sh`는 포트, 가상환경, ROS setup과 Zenoh endpoint도 `FMS_BACKEND_PORT`, `FMS_FRONTEND_PORT`, `FMS_VENV_DIR`, `FMS_ROS_WS_SETUP`, `FMS_ZENOH_CONNECT_ENDPOINT` 등의 환경변수로 덮어쓸 수 있습니다.
-
-## 실행과 종료
-
-처음 실행할 때 공유 예시를 로컬 Compose 설정으로 복사합니다. Docker Desktop 환경에서는 Zenoh와 MQTT 포트가 WSL로 전달되도록 예시에 포트 공개가 설정되어 있습니다.
-
-```bash
-cd ~/Logistics_FMS
-cp infra/docker-compose.example.yml infra/docker-compose.yml
-./start_fms.sh
-```
-
-시작 스크립트는 다음 순서로 실행합니다.
-
-1. Docker Compose Zenoh Router(`7447`, REST `8001`)
-2. 호스트 ROS 2 daemon과 `zenoh-bridge-ros2dds`
-3. FastAPI 백엔드(`8000`)
-4. Vite 프런트엔드(`5173`)
-
-| 항목 | 주소 |
+| 변수 | 용도 |
 | --- | --- |
-| 대시보드 | `http://127.0.0.1:5173` |
-| 백엔드 상태 | `http://127.0.0.1:8000/health` |
-| Swagger API 문서 | `http://127.0.0.1:8000/docs` |
-| Zenoh REST | `http://127.0.0.1:8001` |
+| `FMS_ROBOT_MODE` | 서버 시작 운용 모드: `simulation` 또는 `real` |
+| `FMS_MAP_YAML`, `FMS_ROUTE_GRAPH` | 사용할 지도와 경로 그래프 |
+| `LLM_PROVIDER`, `OLLAMA_MODEL`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` | LLM 경로 기능 |
+| `ROUTE_SELECTOR`, `LAYA_*`, `KEV_*` | AI 경로 선택기와 모델 서버 |
+| `FMS_KEV_ENABLED`, `FMS_KEV_DIR`, `FMS_KEV_RUN` | Kev 자동 실행 여부·소스 위치·모델 |
+| `FMS_BACKEND_PORT`, `FMS_FRONTEND_PORT`, `FMS_KEV_PORT` | 서비스 포트 |
+| `FMS_VENV_DIR`, `FMS_ROS_WS_SETUP` | Python 가상환경과 ROS 작업공간 setup 경로 |
 
-로그는 `logs/backend.log`, `logs/frontend.log`, `logs/zenoh_bridge.log`에 기록됩니다.
+AI 모드에서 선택할 모델은 백엔드 설정에 활성화되어 있어야 합니다. Ollama 모델을 사용한다면 Ollama 서버와 모델을 별도로 준비해야 합니다. Laya와 Kev 로컬 실행에는 해당 모델에 맞는 GPU·메모리가 필요할 수 있습니다.
+
+## 시작과 종료
 
 ```bash
-cd ~/Logistics_FMS
+cd /path/to/AX_Logistics
+./start_fms.sh
 ./stop_fms.sh
 ```
 
-`start_fms.sh`는 기본적으로 기존 FMS 프로세스를 정리한 후 시작합니다. 별도로 실행 중인 ROS 2 daemon이나 Zenoh Bridge가 있다면 충돌하지 않는지 먼저 확인하세요.
+시작 스크립트는 Docker Compose로 Zenoh Router와 MQTT Broker를 시작하고, 호스트에서 ROS 2 daemon, Zenoh Bridge, FastAPI, Vite, Kev를 시작합니다. 각 서비스의 준비 상태를 확인하며 실패하면 이번 시작에서 띄운 스택을 정리합니다.
 
-### 수동 실행
-
-개별 프로세스를 확인할 때는 터미널을 나누어 실행합니다.
-
-```bash
-# 터미널 1: Zenoh Router
-cd ~/Logistics_FMS
-docker compose -f infra/docker-compose.yml up -d zenoh-router
-
-# 터미널 2: Backend
-cd ~/Logistics_FMS
-source /opt/ros/jazzy/setup.bash
-source robots_ws/install/setup.bash
-source ~/venv/robot/bin/activate
-python -m uvicorn backend.app.main:app --host 0.0.0.0 --port 8000
-
-# 터미널 3: Frontend
-cd ~/Logistics_FMS/frontend
-npm run dev -- --host 0.0.0.0
-```
-
-실제 로봇 연결을 확인할 때는 Zenoh Router에 연결하는 호스트·로봇 측 `zenoh-bridge-ros2dds`도 실행해야 합니다.
-
-## API 및 ROS 2 인터페이스
-
-### 주요 API
-
-| 메서드 | 경로 | 역할 |
-| --- | --- | --- |
-| `GET` | `/health` | 백엔드 상태와 현재 모드 |
-| `GET`, `PUT` | `/api/mode` | 운용 모드 조회·전환 |
-| `GET` | `/api/connections` | Mock 또는 Zenoh 기반 연결 목록 |
-| `GET` | `/api/robots` | 로봇 상태 목록 |
-| `GET` | `/api/map/info`, `/api/map/image` | 지도 메타데이터·이미지 |
-| `GET` | `/api/route/graph`, `/api/route/nodes` | 경로 그래프·노드 |
-| `POST` | `/api/command/goal-node` | 노드 목적지 이동 |
-| `POST` | `/api/command/goal` | 좌표 목적지 이동(현재 Mock 처리) |
-| `POST` | `/api/command/stop` | 정지(현재 Mock 처리) |
-| `POST` | `/api/command/return-nearest-node` | 실제 로봇의 가장 가까운 노드 복귀 |
-| `WS` | `/ws/dashboard` | 모드·텔레메트리 전송 |
-| `WS` | `/ws/cmd_vel` | 수동 속도 명령과 ACK |
-
-### 로봇별 ROS 2 인터페이스
-
-| 종류 | 이름 | 타입 |
-| --- | --- | --- |
-| Publisher | `/{robot_id}/cmd_vel` | `geometry_msgs/msg/TwistStamped` |
-| Subscription | `/{robot_id}/amcl_pose` | `geometry_msgs/msg/PoseWithCovarianceStamped` |
-| Subscription | `/{robot_id}/battery_state` | `sensor_msgs/msg/BatteryState` |
-| Action Client | `/{robot_id}/follow_waypoints` | `nav2_msgs/action/FollowWaypoints` |
-| Action Client | `/{robot_id}/spin` | `nav2_msgs/action/Spin` |
-| Action Client | `/{robot_id}/precision_dock` | `turtlebot3_my_msg/action/PrecisionDock` |
-
-로봇 ID는 백엔드에서 `robot1`, `robot2`, `robot3` 형식을 사용하고 UI에서는 `R-01`, `R-02`, `R-03`으로 표시합니다.
-
-## 대시보드 조작
-
-1. 상단에서 실제 로봇 또는 시뮬레이션 모드를 선택합니다.
-2. 왼쪽 로봇 목록에서 제어할 로봇을 선택합니다.
-3. 지도 또는 제어 패널에서 목적지 노드를 선택하고 이동 명령을 보냅니다.
-4. 연결된 로봇은 원격 제어 패널이나 키보드로 조작할 수 있습니다.
-
-| 키 | 동작 |
+| 서비스 | 기본 주소 |
 | --- | --- |
-| `W` / `S` | 전진 / 후진 |
-| `Q` 또는 `A` | 좌회전 |
-| `E` 또는 `D` | 우회전 |
-| `Space` | 속도 0 전송 |
+| 관제 화면 | `http://127.0.0.1:5173/` |
+| 백엔드 상태 | `http://127.0.0.1:8000/health` |
+| API 문서 | `http://127.0.0.1:8000/docs` |
+| Zenoh Router / REST | `7447` / `8001` |
+| MQTT | `1883` |
+| Kev | `http://127.0.0.1:8011/` |
 
-키를 누르는 동안 약 10 Hz로 속도 명령을 재전송하며, 창 포커스를 잃거나 원격 제어가 끝나면 정지 명령을 보냅니다.
+실행 로그와 PID 파일은 `logs/`에 있습니다. 백엔드가 시뮬레이션 모드에서도 ROS 2 노드와 커스텀 `turtlebot3_my_msg/action/PrecisionDock`를 가져오므로 `robots_ws/Logistics_AMR` 빌드가 필요합니다.
 
-## LLM 경로 비교
+## 관제 화면과 주문
 
-LLM 기능은 코드로 계산한 최단 경로와 모델이 제안한 경로를 비교하는 평가 도구입니다. 실제 로봇의 주행 경로를 LLM 결과로 대체하지 않습니다.
+왼쪽 검은색 내비게이션은 그대로 유지되고, 상단에서 네 가지 운용 모드를 바꿀 수 있습니다. 관제 지도에서 주문을 등록하며 하단 패널에서 주문 대기·픽업·작업대·복귀 흐름을 확인합니다. 주문명 입력을 생략하면 `ORDER-001` 형식으로 자동 지정됩니다. 화면 오른쪽은 선택한 로봇의 상태와 제어 기능입니다.
 
-```bash
-cd ~/Logistics_FMS
-source ~/venv/robot/bin/activate
-python -m pip install -r backend/simulation/requirements.txt
-test -f .env || cp .env.example .env
+시뮬레이션 로봇은 `robot1`~`robot3`입니다. 실제 모드에서는 Zenoh로 발견한 로봇과 ROS 2 상태를 사용합니다. AI 모드의 경로 선택 외 배차·작업대·교통 안전 로직은 현재 알고리즘으로 동작합니다.
 
-python -m backend.simulation.evaluation.cli build-compact
-python -m backend.simulation.evaluation.cli compare --start 2 --goal 6 --dry-run
-python -m backend.simulation.evaluation.cli compare --start 2 --goal 6
-```
+## 주요 API
 
-`.env`에서 `LLM_PROVIDER`, provider별 모델·인증 정보, `LLM_ROUTE_GRAPH`를 설정합니다. Ollama를 사용할 때는 서버와 모델을 먼저 준비합니다.
+| 경로 | 기능 |
+| --- | --- |
+| `GET /health` | 백엔드 상태 |
+| `GET, PUT /api/mode` | 시뮬/실제 및 AI/알고리즘 모드 |
+| `GET /api/robots` | 로봇 상태 |
+| `GET /api/map/info`, `GET /api/map/image` | 지도 |
+| `GET /api/route/graph`, `GET /api/route/nodes` | 경로 그래프 |
+| `GET, POST /api/orders` | 주문 목록·등록 |
+| `POST /api/orders/{order_id}/retry` | 실패한 시뮬레이션 주문 재시도 |
+| `DELETE /api/orders/{order_id}` | 주문 취소 및 배정 로봇 복귀 요청 |
+| `POST /api/command/goal-node` | 선택 노드로 이동 |
+| `WS /ws/dashboard`, `WS /ws/cmd_vel` | 상태 스트림·수동 제어 |
 
-```bash
-ollama serve
-ollama pull qwen3:4b
-```
+전체 엔드포인트와 요청 형식은 실행 중인 백엔드의 `/docs`에서 확인합니다.
 
-비교 결과는 `backend/simulation/llm_route_comparisons.jsonl`, 집계 결과는 `backend/simulation/llm_route_summary.json`에 기록되며 두 파일은 Git에서 제외됩니다.
-
-## 병목·교착 시나리오 실행
-
-지도 왼쪽 위 확대 버튼 오른쪽의 콤보박스에서 설명을 선택하고 **테스트 실행**을 누릅니다.
-선택한 시나리오 하나만 실행하며 웹과 CLI는 같은 백엔드 실행 상태를 공유합니다.
+## 테스트와 점검
 
 ```bash
-python3 tests/traffic_scenarios.py cycle
-```
-
-CLI의 시나리오 이름은 필수입니다. 노드·명령 순서·설명은
-`tests/traffic_scenarios.json`에서 수정합니다. 별도 route graph 없이 현재
-`routes/test.geojson`을 사용합니다. 자세한 시작 위치 조건, 모드별 동작,
-설정과 변경 위치는 [시나리오 실행 안내](doc/traffic_scenarios.md)를 참고하세요.
-새 API 적용을 위해 백엔드를 재시작하고 웹 페이지를 새로고침해야 합니다.
-
-## 검증
-
-```bash
-# Python 단위 테스트
-cd ~/Logistics_FMS
-source ~/venv/robot/bin/activate
-python -m unittest discover -s tests -v
-
-# Frontend 타입 검사와 프로덕션 빌드
-cd ~/Logistics_FMS/frontend
+cd /path/to/AX_Logistics
+~/venv/robot/bin/python -m unittest discover -s tests -v
+cd frontend
 npm run typecheck
 npm run build
 ```
 
-실제 장비 연동은 추가로 다음 항목을 확인합니다.
+`tests/`에는 단위 테스트, `tests/traffic_scenarios.py`와 시나리오 JSON, `tests/manual_omx_client.py`·`tests/manual_omx_server.py` 수동 MQTT 점검 도구가 있습니다. 수동 도구는 자동 단위 테스트에 포함되지 않습니다.
 
 ```bash
-ros2 topic list
-ros2 action list
-curl http://127.0.0.1:8001/@/local/router
-curl http://127.0.0.1:8000/api/connections
+python -m tests.traffic_scenarios cycle
+python -m tests.manual_omx_client --robot-id omx1 --broker-ip 127.0.0.1
+python -m tests.manual_omx_server
 ```
 
-셸에서 이전에 `export OLLAMA_MODEL=...`을 실행했다면 그 값이 `.env`보다 우선합니다. `.env` 설정으로 돌아가려면 다음 명령으로 셸 값을 해제합니다.
-
-```bash
-echo "$OLLAMA_MODEL"
-unset OLLAMA_MODEL
-```
-
-모델을 비교할 때는 시작 노드, 도착 노드, 그래프, 재시도 횟수를 동일하게 유지합니다. 모델별 실행 결과는 `model` 값으로 구분되어 누적됩니다.
-
-Mock Fleet에서 LLM 비교를 사용하려면 ROS 2 환경과 Zenoh Router를 준비한 뒤 `python -m backend.simulation.simulators.mock_fleet`를 실행합니다. LLM 비교는 선택 사항이며 주행에는 코드로 계산한 경로를 사용합니다. 오프라인 검증 명령은 `python -m unittest discover -s tests -v`입니다.
-
-여러 Ollama 모델을 같은 조건에서 반복 평가하고 Jetson에서 결과를 다시
-수집하는 방법은 [`doc/llm-route-generation-benchmark.md`](doc/llm-route-generation-benchmark.md)를
-참고하세요. 실행 전 그래프와 기준 경로만 확인하려면 다음 명령을 사용합니다.
-
-```bash
-python -m backend.simulation.evaluation.benchmark --check
-```
-
+교통 시나리오의 조건과 실행법은 [시나리오 안내](doc/traffic_scenarios.md)에 있습니다. AI 경로 평가 도구는 `backend/simulation/evaluation/`에 있고 별도 절차는 [LLM 경로 평가 안내](doc/llm-route-generation-benchmark.md)에 있습니다.
 
 ## 문제 해결
 
-- **`ModuleNotFoundError: turtlebot3_my_msg`**: Logistics_AMR의 `jhleedev00` 브랜치인지 확인하고 `robots_ws`를 다시 빌드한 뒤 `source robots_ws/install/setup.bash`를 실행합니다.
-- **`robots_ws/install/setup.bash`를 찾지 못함**: AMR 소스를 clone만 하고 `colcon build --symlink-install`을 실행하지 않은 상태입니다.
-- **대시보드가 열리지 않음**: `logs/frontend.log`, Node.js 버전과 5173 포트 사용 여부를 확인합니다.
-- **API가 응답하지 않음**: `logs/backend.log`, ROS 2 인터페이스 import와 `http://127.0.0.1:8000/health`를 확인합니다.
-- **로봇이 실제 모드에서 나타나지 않음**: Zenoh REST `8001`, Main/Robot Bridge 연결, robot namespace와 `/api/connections` 응답을 확인합니다.
-- **Nav2 이동 명령 실패**: AMCL 위치 수신 여부와 `/{robot_id}/follow_waypoints` Action Server를 확인합니다.
-- **Bridge가 바로 종료됨**: `logs/zenoh_bridge.log`, 7447 포트, ROS Domain ID와 RMW 설정을 확인합니다.
-- **다른 PC에서 접속 불가**: 방화벽과 5173·8000 포트를 확인합니다. 시작 스크립트는 프런트엔드와 백엔드를 `0.0.0.0`에 바인딩합니다.
-
-## 관련 문서
-
-- `doc/ros2-zenoh-guide.md`: ROS 2/Zenoh 네트워크 구성과 운영 절차
-- `doc/backend-control-customization-guide.md`: 백엔드 제어 기능 변경 가이드
-- [Logistics_AMR](https://github.com/E1I6-Logistics/Logistics_AMR.git): TurtleBot, Nav2, Zenoh, 커스텀 메시지·액션 소스
+- `turtlebot3_my_msg` import 실패: `robots_ws/Logistics_AMR/install/setup.bash` 생성 여부를 확인하고 작업공간을 다시 빌드합니다.
+- 대시보드·API 실행 실패: `logs/frontend.log`, `logs/backend.log`와 설치 점검 결과를 확인합니다.
+- Kev 서버 실행 실패: `logs/kev.log`, 모델 이름, GPU 메모리와 `FMS_KEV_DIR`를 확인합니다.
+- 실제 로봇이 보이지 않음: `logs/zenoh_bridge.log`, Zenoh Router·로봇 Bridge, ROS domain과 namespace를 확인합니다.
+- 주문이 대기 중: 로봇 연결·점유·복귀 상태와 픽업대 예약을 하단 주문 패널에서 확인합니다.

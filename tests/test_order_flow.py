@@ -352,6 +352,104 @@ def test_cancel_during_mock_work_invalidates_timer(monkeypatch):
     asyncio.run(scenario())
 
 
+# 대기 주문을 수동 취소하면 로봇 주행 없이 목록 상태만 바뀌는지 검증한다.
+def test_cancel_pending_order_does_not_assign_robot(monkeypatch):
+    _reset(monkeypatch)
+    order = order_manager.create_order(items={"A": 1, "B": 0, "C": 0, "D": 0}, total_quantity=1)
+    assert order_manager.cancel_order(order["order_id"])
+    asyncio.run(order_manager.tick())
+    assert order_manager.get_order(order["order_id"])["status"] == "CANCELLED"
+    assert order_manager.recovering == {}
+
+
+# 픽업대에서 주문을 취소해도 적재 상태와 관계없이 스테이션으로 복귀하는지 검증한다.
+def test_cancel_active_simulation_order_returns_to_station(monkeypatch):
+    visits = _reset(monkeypatch)
+    simulation_order_runner.work_seconds = 0.1
+
+    async def scenario():
+        order = order_manager.create_order(items={"A": 2, "B": 0, "C": 0, "D": 0}, total_quantity=2)
+        await order_manager.tick()
+        await asyncio.sleep(0.02)
+        assert order_manager.get_order(order["order_id"])["phase"] == "WORKING_AT_PICKUP"
+        assert order_manager.cancel_order(order["order_id"])
+        assert order_manager.recovering["robot1"] == order["order_id"]
+        queued = order_manager.create_order(items={"A": 1, "B": 0, "C": 0, "D": 0}, total_quantity=1)
+        await order_manager.tick()
+        assert order_manager.get_order(queued["order_id"])["robot_id"] != "robot1"
+        await asyncio.gather(*list(simulation_order_runner.tasks.values()))
+        cancelled = order_manager.get_order(order["order_id"])
+        assert cancelled["status"] == cancelled["phase"] == "CANCELLED"
+        assert cancelled["recovery_status"] == "RETURNED"
+        assert ("robot1", "0", None) in visits
+        assert order_manager.recovering == {}
+
+    asyncio.run(scenario())
+
+
+# 실제 주문 취소는 기존 작업 종료 확인 후 알고리즘 경로로 복귀하는지 검증한다.
+def test_cancel_active_real_order_returns_after_stop(monkeypatch):
+    _reset(monkeypatch)
+    from backend.app.models.robot import Robot, RobotState
+    from backend.app.services import order_manager as order_module
+    from backend.app.services.fleet_manager import fleet_manager
+
+    robot = Robot("robot1")
+    robot.set_connected(True)
+    robot.update_pose(0, 0, 0)
+    robot.current_node = robot.occupied_node = "5"
+    monkeypatch.setattr(fleet_manager, "get_robot", lambda _id: robot)
+    monkeypatch.setattr(fleet_manager, "get_all_robots", lambda: [robot])
+    callbacks = []
+    routes = []
+    monkeypatch.setattr(order_module.ros_gateway, "cancel_current_work", lambda _id, callback: callbacks.append(callback))
+    monkeypatch.setattr(order_module.ros_gateway, "navigation_active", lambda _id: False)
+
+    async def route(row, target, start, valid=None):
+        assert valid()
+        routes.append((row["operation_mode"], target, start))
+        robot.current_node = robot.occupied_node = target
+        robot.set_state(RobotState.IDLE)
+
+    monkeypatch.setattr(order_module, "dispatch_order_route", route)
+    mode_manager.set_mode("real")
+    try:
+        order = order_manager.create_order(items={"A": 1, "B": 0, "C": 0, "D": 0}, total_quantity=1)
+        row = order_manager.orders[order["order_id"]]
+        row.update(status="IN_PROGRESS", phase="WORKING_AT_PICKUP", robot_id="robot1")
+        robot.assign_order(order["order_id"], row["items"], 1, ["5"], None)
+        assert order_manager.cancel_order(order["order_id"])
+        assert row["recovery_status"] == "PENDING"
+        assert order_manager.recovering["robot1"] == order["order_id"]
+        callbacks.pop()()
+
+        async def finish_return():
+            await order_manager._tick_real_returns()
+            await asyncio.gather(*list(order_manager._route_tasks.values()))
+            await order_manager._tick_real_returns()
+
+        asyncio.run(finish_return())
+        assert routes == [("algorithm", "0", "5")]
+        assert row["status"] == row["phase"] == "CANCELLED"
+        assert row["recovery_status"] == "RETURNED"
+        assert order_manager.recovering == {}
+    finally:
+        mode_manager.set_mode("simulation")
+
+
+# 복귀 중 로봇을 수동 정지해도 주문 취소 상태가 완료로 바뀌지 않는지 검증한다.
+def test_stopping_cancelled_return_keeps_order_cancelled(monkeypatch):
+    _reset(monkeypatch)
+    order = order_manager.create_order(items={"A": 1, "B": 0, "C": 0, "D": 0}, total_quantity=1)
+    row = order_manager.orders[order["order_id"]]
+    row.update(status="CANCELLED", phase="CANCELLED", robot_id="robot1", recovery_status="RETURNING")
+    order_manager.returning["robot1"] = order["order_id"]
+    order_manager.recovering["robot1"] = order["order_id"]
+    order_manager.cancel_robot("robot1", "simulation")
+    assert row["status"] == row["phase"] == "CANCELLED"
+    assert row["recovery_status"] == "STOPPED"
+
+
 # 픽업 후 실패 시 점유를 풀고 재시도에 다른 로봇을 우선하는지 검증한다.
 def test_failure_after_pickup_clears_node_and_retry_prefers_another_robot(monkeypatch):
     _reset(monkeypatch)

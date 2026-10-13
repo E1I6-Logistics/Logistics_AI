@@ -213,7 +213,7 @@ async def stop_all_robots():
 
         for robot in order_manager.list_orders():
             if robot["mode"] == mode_manager.mode and robot["status"] == "IN_PROGRESS":
-                order_manager.cancel_order(robot["order_id"])
+                order_manager.cancel_order(robot["order_id"], return_to_station=False)
         for robot_id in list(order_manager.returning):
             order_manager.cancel_robot(robot_id, mode_manager.mode)
         for robot_id in list(order_manager.recovering):

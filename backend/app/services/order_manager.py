@@ -158,20 +158,40 @@ class OrderManager:
             if row and row["status"] == "IN_PROGRESS" and (expected is None or row["phase"] == expected):
                 row["phase"] = phase
 
-    # 주문을 취소하고 점유 자원을 해제한다.
-    def cancel_order(self, order_id):
+    # 주문을 취소하고 배정 로봇을 스테이션으로 복귀시킨다.
+    def cancel_order(self, order_id, return_to_station=True):
         with self.lock:
             row = self.orders.get(order_id)
             if row is None or row["status"] in ("COMPLETED", "CANCELLED"):
                 return False
-            owns_robot = row["status"] == "IN_PROGRESS" or self.recovering.get(row["robot_id"]) == order_id
+            robot_id = row["robot_id"]
+            recovering = self.recovering.get(robot_id) == order_id
+            owns_robot = row["status"] == "IN_PROGRESS" or recovering
+            if row["status"] == "FAILED" and return_to_station and robot_id and not recovering:
+                busy_elsewhere = any(other["order_id"] != order_id and other["robot_id"] == robot_id and other["status"] == "IN_PROGRESS" for other in self.orders.values())
+                if not busy_elsewhere and row["mode"] == mode_manager.mode:
+                    if row["mode"] == "simulation":
+                        from .mock_data import mock_fms
+
+                        snapshot = mock_fms.robot_snapshot(robot_id, "simulation")
+                        owns_robot = snapshot["occupied_node"] != CHARGING_STATION_NODES.get(robot_id)
+                    else:
+                        robot = fleet_manager.get_robot(robot_id)
+                        owns_robot = robot is not None and robot.occupied_node != CHARGING_STATION_NODES.get(robot_id)
             row["status"] = row["phase"] = "CANCELLED"
             workstation_manager.release(order_id)
-            robot_id, mode = row["robot_id"] if owns_robot else None, row["mode"]
-            if robot_id in self.recovering:
-                self.recovering.pop(robot_id)
+            if not owns_robot:
+                return True
+            mode = row["mode"]
+            if return_to_station:
+                self.recovering[robot_id] = order_id
+                if not recovering:
+                    row["recovery_status"] = "PENDING"
+                row.pop("recovery_error", None)
+            else:
+                self.recovering.pop(robot_id, None)
                 row["recovery_status"] = "STOPPED"
-        if robot_id:
+        if robot_id and not recovering:
             if mode == "simulation":
                 from .mock_data import mock_fms
 
@@ -179,10 +199,32 @@ class OrderManager:
             else:
                 robot = fleet_manager.get_robot(robot_id)
                 if robot and robot.state != RobotState.EMERGENCY_STOP and robot.connected:
-                    ros_gateway.cancel_current_work(robot_id, lambda: None)
+                    try:
+                        callback = lambda: None
+                        if return_to_station:
+                            callback = lambda oid=order_id, rid=robot_id: self._cancel_return_ready(oid, rid)
+                        ros_gateway.cancel_current_work(robot_id, callback)
+                    except (ValueError, RuntimeError) as exc:
+                        if return_to_station:
+                            row["recovery_status"] = "BLOCKED"
+                            row["recovery_error"] = str(exc)
+                elif return_to_station:
+                    row["recovery_status"] = "BLOCKED"
+                    row["recovery_error"] = "로봇 연결 또는 긴급 정지 상태를 확인하세요."
                 if robot and robot.order_id == order_id:
                     robot.clear_order()
         return True
+
+    # 실제 로봇의 이전 작업 종료가 확인되면 복귀를 시작할 수 있게 한다.
+    def _cancel_return_ready(self, order_id, robot_id):
+        with self.lock:
+            if self.recovering.get(robot_id) != order_id or self.orders[order_id]["status"] != "CANCELLED":
+                return
+            self.orders[order_id]["recovery_status"] = "RETURNING"
+            self.returning[robot_id] = order_id
+            robot = fleet_manager.get_robot(robot_id)
+            if robot:
+                robot.returning = True
 
     # 로봇에 배정된 주문을 취소한다.
     def cancel_robot(self, robot_id, mode):
@@ -193,7 +235,7 @@ class OrderManager:
                 self.orders[failed_id]["recovery_status"] = "STOPPED"
             completed_id = self.returning.pop(robot_id, None)
             self._return_started.discard(robot_id)
-            if completed_id in self.orders:
+            if completed_id in self.orders and self.orders[completed_id]["status"] == "COMPLETED":
                 self.orders[completed_id]["phase"] = "COMPLETED"
             ids = [
                 row["order_id"]
@@ -201,7 +243,7 @@ class OrderManager:
                 if row["robot_id"] == robot_id and row["mode"] == mode and row["status"] == "IN_PROGRESS"
             ]
         for order_id in ids:
-            self.cancel_order(order_id)
+            self.cancel_order(order_id, return_to_station=False)
 
     # 대기 중인 작업을 한 주기 진행한다.
     async def tick(self):
@@ -223,7 +265,7 @@ class OrderManager:
                 for row in self.orders.values():
                     if (
                         row["mode"] == mode
-                        and row["status"] == "FAILED"
+                        and row["status"] in ("FAILED", "CANCELLED")
                         and row.get("recovery_status") in ("BLOCKED", "STOPPED")
                     ):
                         snapshot = mock_fms.robot_snapshot(row["robot_id"], mode)
@@ -373,19 +415,32 @@ class OrderManager:
 
     # 실제 로봇의 복귀 상태를 갱신한다.
     async def _tick_real_returns(self):
+        for robot_id, order_id in list(self.recovering.items()):
+            row = self.orders.get(order_id)
+            robot = fleet_manager.get_robot(robot_id)
+            if row and row["status"] == "CANCELLED" and row.get("recovery_status") == "BLOCKED" and robot and robot.connected:
+                if robot.occupied_node == CHARGING_STATION_NODES.get(robot_id) and robot.state == RobotState.IDLE and not ros_gateway.navigation_active(robot_id):
+                    self.recovering.pop(robot_id, None)
+                    row["recovery_status"] = "RETURNED"
+                    robot.returning = False
         for robot_id in list(self.returning):
             robot = fleet_manager.get_robot(robot_id)
             station = CHARGING_STATION_NODES.get(robot_id)
             if robot is None or not robot.connected or station is None:
                 continue
+            order_id = self.returning[robot_id]
+            row = self.orders[order_id]
             if (
                 robot.occupied_node == station
                 and robot.state == RobotState.IDLE
                 and not ros_gateway.navigation_active(robot_id)
             ):
-                completed_id = self.returning.pop(robot_id, None)
-                if completed_id in self.orders:
-                    self.orders[completed_id]["phase"] = "COMPLETED"
+                self.returning.pop(robot_id, None)
+                if row["status"] == "CANCELLED":
+                    self.recovering.pop(robot_id, None)
+                    row["recovery_status"] = "RETURNED"
+                else:
+                    row["phase"] = "COMPLETED"
                 self._return_started.discard(robot_id)
                 robot.returning = False
                 continue
@@ -405,14 +460,21 @@ class OrderManager:
             robot = fleet_manager.get_robot(robot_id)
             if robot is None or robot.occupied_node is None:
                 raise ValueError("복귀 출발 노드를 확인할 수 없습니다.")
+            route_order = row
+            if row["status"] == "CANCELLED":
+                route_order = dict(row, operation_mode="algorithm", driving_mode="standard")
             await dispatch_order_route(
-                row, station, robot.occupied_node, valid=lambda: self.returning.get(robot_id) == order_id
+                route_order, station, robot.occupied_node, valid=lambda: self.returning.get(robot_id) == order_id
             )
         except Exception as exc:
             self.returning.pop(robot_id, None)
             self._return_started.discard(robot_id)
-            self.orders[order_id]["phase"] = "COMPLETED"
-            self.orders[order_id]["return_error"] = str(exc)
+            if self.orders[order_id]["status"] == "CANCELLED":
+                self.orders[order_id]["recovery_status"] = "BLOCKED"
+                self.orders[order_id]["recovery_error"] = str(exc)
+            else:
+                self.orders[order_id]["phase"] = "COMPLETED"
+                self.orders[order_id]["return_error"] = str(exc)
         finally:
             self._route_tasks.pop(key, None)
 

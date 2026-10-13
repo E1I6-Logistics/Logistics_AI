@@ -1,344 +1,93 @@
 #!/usr/bin/env bash
+set -uo pipefail
 
-set +e
-
-
-# ============================================================
-# Path
-# ============================================================
-
+# Verify the packages installed for the selected computer role.
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-
-
-VENV_DIR="$HOME/venv/robot"
-
+ROLE="${1:-main}"
+VENV_DIR="${FMS_VENV_DIR:-$HOME/venv/robot}"
+ROS_WS_SETUP="${FMS_ROS_WS_SETUP:-$PROJECT_DIR/robots_ws/Logistics_AMR/install/setup.bash}"
 FAIL=0
 
-
-# ============================================================
-# Helpers
-# ============================================================
-
-ok() {
-    echo "[OK] $1"
-}
-
-
-fail() {
-    echo "[FAIL] $1"
-    FAIL=1
-}
-
-
-echo "========================================"
-echo " Logistics_FMS Environment Verification"
-echo "========================================"
-echo "Project : $PROJECT_DIR"
-echo "Arch    : $(uname -m)"
-echo "========================================"
-
-
-# ============================================================
-# OS
-# ============================================================
-
-echo ""
-echo "===== OS ====="
-
-grep -E '^(NAME|VERSION|VERSION_ID)=' \
-    /etc/os-release
-
-if grep -q 'VERSION_ID="24.04"' /etc/os-release; then
-    ok "Ubuntu 24.04"
-else
-    fail "Ubuntu 24.04 required"
+if [[ "$ROLE" != "main" && "$ROLE" != "robot" || $# -gt 1 ]]; then
+    echo "Usage: bash scripts/verify_env.sh [main|robot]" >&2
+    exit 2
 fi
 
+# Record each result while checking the rest of the environment.
+ok() { echo "[OK] $1"; }
+fail() { echo "[FAIL] $1"; FAIL=1; }
+check_command() {
+    if command -v "$1" >/dev/null 2>&1; then ok "$1"; else fail "$1"; fi
+}
+check_ros_package() {
+    if command -v ros2 >/dev/null 2>&1 && ros2 pkg prefix "$1" >/dev/null 2>&1; then ok "$1"; else fail "$1"; fi
+}
 
-# ============================================================
-# Jetson
-# ============================================================
-
-echo ""
-echo "===== PLATFORM ====="
-
-if [ -f /etc/nv_tegra_release ] ||
-   dpkg-query -W nvidia-l4t-core >/dev/null 2>&1; then
-
-    echo "Platform: NVIDIA Jetson"
-
-else
-
-    echo "Platform: Standard PC / Linux"
-
-fi
-
-
-# ============================================================
-# ROS 2
-# ============================================================
-
-echo ""
-echo "===== ROS 2 ====="
-
+echo "[VERIFY] Role: $ROLE | Project: $PROJECT_DIR"
+if grep -q 'VERSION_ID="24.04"' /etc/os-release; then ok "Ubuntu 24.04"; else fail "Ubuntu 24.04"; fi
 if [ -f /opt/ros/jazzy/setup.bash ]; then
-
+    set +u
     source /opt/ros/jazzy/setup.bash
-
+    if [ "$ROLE" = "main" ] && [ -f "$ROS_WS_SETUP" ]; then source "$ROS_WS_SETUP"; fi
+    set -u
     ok "ROS 2 Jazzy"
-
 else
-
     fail "ROS 2 Jazzy"
-
 fi
 
-
-echo "ROS_DISTRO=${ROS_DISTRO:-NOT SET}"
-
-
-for PKG in \
-    nav2_bringup \
-    nav2_route \
-    robot_localization \
-    rmw_cyclonedds_cpp \
-    rmw_fastrtps_cpp \
-    turtlebot3_msgs
-
-do
-
-    if ros2 pkg prefix "$PKG" >/dev/null 2>&1; then
-
-        ok "$PKG"
-
-    else
-
-        fail "$PKG"
-
-    fi
-
+for package in nav2_bringup nav2_route robot_localization rmw_cyclonedds_cpp rmw_fastrtps_cpp turtlebot3_msgs; do
+    check_ros_package "$package"
 done
-
-
-# ============================================================
-# Python
-# ============================================================
-
-echo ""
-echo "===== PYTHON ====="
-
-if [ -f "$VENV_DIR/bin/activate" ]; then
-
-    source "$VENV_DIR/bin/activate"
-
-    ok "Python venv"
-
-else
-
-    fail "Python venv: $VENV_DIR"
-
+if [ "$ROLE" = "main" ]; then
+    if [ -f "$ROS_WS_SETUP" ]; then ok "Logistics_AMR workspace"; else fail "Logistics_AMR workspace: $ROS_WS_SETUP"; fi
+    check_ros_package turtlebot3_my_msg
 fi
 
+check_command zenoh-bridge-ros2dds
+if command -v zenoh-bridge-ros2dds >/dev/null 2>&1; then zenoh-bridge-ros2dds --version || fail "Zenoh bridge version"; fi
 
-python --version 2>/dev/null || fail "Python"
-
-
-python - <<'PY'
-
+if [ "$ROLE" = "main" ]; then
+    check_command zenohd
+    check_command docker
+    if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then ok "Docker Compose"; else fail "Docker Compose"; fi
+    export NVM_DIR="$HOME/.nvm"
+    if [ -s "$NVM_DIR/nvm.sh" ]; then
+        set +u
+        source "$NVM_DIR/nvm.sh"
+        set -u
+    fi
+    check_command node
+    check_command npm
+    if [ -d "$PROJECT_DIR/frontend/node_modules" ]; then ok "Frontend dependencies"; else fail "Frontend dependencies"; fi
+    if [ -f "$PROJECT_DIR/.env" ]; then ok "Root .env"; else fail "Root .env"; fi
+    if [ -f "$PROJECT_DIR/infra/docker-compose.yml" ]; then ok "Docker Compose config"; else fail "Docker Compose config"; fi
+    if [ -x "$VENV_DIR/bin/python" ]; then
+        ok "Python virtual environment"
+        "$VENV_DIR/bin/python" - <<'PY'
+import importlib
+import os
 import sys
 
-modules = [
-    "fastapi",
-    "uvicorn",
-    "zenoh",
-    "yaml",
-    "PIL",
-    "pydantic",
-    "rclpy",
-]
-
-failed = []
-
-for module in modules:
-
+modules = ["fastapi", "uvicorn", "zenoh", "yaml", "PIL", "pydantic", "rclpy", "turtlebot3_my_msg", "laya", "anthropic", "ollama"]
+if os.getenv("FMS_KEV_ENABLED", "1") == "1":
+    modules.append("kev.serve")
+missing = []
+for name in modules:
     try:
-        __import__(module)
-
-    except Exception as exc:
-        failed.append((module, str(exc)))
-
-
-try:
-    from geometry_msgs.msg import Pose
-    from std_msgs.msg import String
-    from turtlebot3_msgs.msg import SensorState
-
-except Exception as exc:
-    failed.append(("ROS message imports", str(exc)))
-
-
-if failed:
-
-    for module, error in failed:
-        print(f"[FAIL] {module}: {error}")
-
-    sys.exit(1)
-
-print("[OK] Python / ROS imports")
-
+        importlib.import_module(name)
+    except Exception as error:
+        missing.append(f"{name}: {error}")
+for item in missing:
+    print(f"[FAIL] Python import {item}")
+if not missing:
+    print("[OK] Python, ROS, and AI imports")
+sys.exit(bool(missing))
 PY
-
-
-if [ $? -ne 0 ]; then
-    FAIL=1
+        if [ $? -ne 0 ]; then FAIL=1; fi
+    else
+        fail "Python virtual environment: $VENV_DIR"
+    fi
 fi
 
-
-# ============================================================
-# Zenoh
-# ============================================================
-
-echo ""
-echo "===== ZENOH ====="
-
-# ------------------------------------------------------------
-# Zenoh Router
-#
-# Main PC may use:
-#   1. native/snap zenohd
-#   2. Docker fms-zenoh-router
-# ------------------------------------------------------------
-
-if command -v zenohd >/dev/null 2>&1; then
-
-    echo "zenohd path: $(command -v zenohd)"
-    zenohd --version
-    ok "Zenoh Router (native/snap zenohd)"
-
-elif command -v docker >/dev/null 2>&1 &&
-     sudo docker ps -a \
-        --format '{{.Names}}' \
-        | grep -qx "fms-zenoh-router"; then
-
-    ok "Zenoh Router (Docker: fms-zenoh-router)"
-
-else
-
-    fail "Zenoh Router"
-
-fi
-
-
-# ------------------------------------------------------------
-# ROS2DDS Bridge
-# ------------------------------------------------------------
-
-if command -v zenoh-bridge-ros2dds >/dev/null 2>&1; then
-
-    zenoh-bridge-ros2dds --version
-    ok "zenoh-bridge-ros2dds"
-
-else
-
-    fail "zenoh-bridge-ros2dds"
-
-fi
-
-
-# ============================================================
-# Node.js
-# ============================================================
-
-echo ""
-echo "===== NODE ====="
-
-export NVM_DIR="$HOME/.nvm"
-
-# NVM이 있으면 로드
-if [ -s "$NVM_DIR/nvm.sh" ]; then
-    source "$NVM_DIR/nvm.sh"
-fi
-
-if command -v node >/dev/null 2>&1; then
-    echo "Node: $(node --version)"
-    ok "node"
-else
-    fail "node"
-fi
-
-if command -v npm >/dev/null 2>&1; then
-    echo "npm : $(npm --version)"
-    ok "npm"
-else
-    fail "npm"
-fi
-
-
-# ============================================================
-# Docker
-# ============================================================
-
-echo ""
-echo "===== DOCKER ====="
-
-if command -v docker >/dev/null 2>&1; then
-
-    docker --version
-
-    docker compose version
-
-else
-
-    fail "Docker"
-
-fi
-
-
-# ============================================================
-# Frontend
-# ============================================================
-
-echo ""
-echo "===== FRONTEND ====="
-
-if [ -d "$PROJECT_DIR/frontend/node_modules" ]; then
-
-    ok "node_modules"
-
-else
-
-    fail "node_modules"
-
-fi
-
-
-# ============================================================
-# Network
-# ============================================================
-
-echo ""
-echo "===== NETWORK ====="
-
-ip -br -4 addr
-
-
-# ============================================================
-# Result
-# ============================================================
-
-echo ""
-echo "========================================"
-
-if [ "$FAIL" -eq 0 ]; then
-
-    echo " Environment Verification: PASS"
-
-else
-
-    echo " Environment Verification: FAIL"
-
-fi
-
-echo "========================================"
-
+if [ "$FAIL" -eq 0 ]; then echo "[VERIFY] PASS ($ROLE)"; else echo "[VERIFY] FAIL ($ROLE)"; fi
 exit "$FAIL"
