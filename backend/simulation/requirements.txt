@@ -3,4 +3,4 @@ anthropic
 ollama
 python-dotenv==1.2.3
 laya==0.3.21
-eclipse-zenoh==1.10.1
+eclipse-zenoh==1.9.0
