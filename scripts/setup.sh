@@ -111,9 +111,18 @@ install_robot() {
     install_shell_config "$PROJECT_DIR/scripts/robot/bashrc_robot.conf" "$HOME/.axrobotbashrc"
 }
 
+# Confirm the bridge installed from the Eclipse Zenoh apt repository works.
+verify_zenoh_bridge() {
+    echo "[SETUP] Checking Zenoh Bridge version and options"
+    command -v zenoh-bridge-ros2dds >/dev/null 2>&1 || { echo "[ERROR] zenoh-bridge-ros2dds not found." >&2; return 1; }
+    zenoh-bridge-ros2dds --version
+    zenoh-bridge-ros2dds --help
+}
+
 echo "[SETUP] Installing $ROLE environment in $PROJECT_DIR"
 install_base
 if [ "$ROLE" = "main" ]; then install_main; else install_robot; fi
+verify_zenoh_bridge
 echo "[SETUP] Checking installed $ROLE environment"
 bash "$PROJECT_DIR/scripts/verify_env.sh" "$ROLE"
 echo "[SETUP] Complete. Open a new terminal to load the shell environment."
