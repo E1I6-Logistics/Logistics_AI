@@ -1,3 +1,11 @@
+"""Kev 의사결정 API(/v1/systemone)를 활용한 다중 로봇 경로 충돌 해결(MAPF) 독립 모듈.
+
+이 모듈은 각 로봇의 예정 경로(`result['path']`)에서 공유 노드 및 양방향 물리 간선 충돌을 검출하고,
+Kev의 `choice` 질의를 최대 4단계(충돌 구간 -> 우선순위 -> 행동 -> 대기 위치/우회)로 호출하여
+WAIT / REROUTE / HOLD 제안을 생성한다. 실제 주행 명령은 직접 발행하지 않으며(Advisory-Only),
+FMS의 `TrafficManager` 및 `ReservationTable`에 전달할 후보 경로와 판단 근거를 반환한다.
+"""
+
 from __future__ import annotations
 
 import argparse
@@ -29,6 +37,7 @@ from backend.app.services import route_service
 #
 # 현재 자동 호출·상태 수집·주행 연결은 미적용이며 제안만 반환한다.
 
+# [1단계 지침] 다중 로봇 경로에서 발견된 물리적 공유 노드/간선 중 가장 먼저 해결할 충돌 구간 선택
 KEV_ZONE_INSTRUCTIONS = (
     "You are the MAPF conflict-zone selection component. The given candidates "
     "are physical shared node/edge resources found on multiple robot routes. "
@@ -36,19 +45,35 @@ KEV_ZONE_INSTRUCTIONS = (
     "that blocks imminent progress. Do not invent IDs. Answer only with a "
     "supplied criteria ID. No travel time estimates are available."
 )
+# [2단계 지침] 충돌 구간에서 두 로봇 중 먼저 통과할 우선순위 로봇(priority_robot) 결정
 KEV_PRIORITY_INSTRUCTIONS = (
     "You are the MAPF priority-decision component. Choose ONE robot to have "
     "priority at the indicated shared resource, considering current position, "
     "progress, task priority and occupancy. Avoid deadlocks and repeated "
     "unnecessary concessions. Return only the criteria ID."
 )
+# [3단계 지침] 후순위(양보) 로봇이 상류에서 대기(WAIT)할지, 충돌 구간을 피해 우회(REROUTE)할지 결정
 KEV_ACTION_INSTRUCTIONS = (
-    "You are the MAPF conflict-resolution component. Decide whether the "
-    "lower-priority robot should wait before the shared resource or reroute "
-    "around it. WAIT requires a safe upstream stopping location, and REROUTE "
-    "must avoid the shared resource. Current resource occupants cannot be "
-    "evicted. Return only a supplied criteria ID."
+    "You are the MAPF conflict-resolution decision component. "
+    "Choose exactly one action for the lower-priority robot. "
+
+    "WAIT: Stop at one of the provided upstream wait nodes. "
+    "The robot resumes only after FMS confirms that "
+    "the shared resource is clear. "
+    "Prefer WAIT when a permitted upstream wait node exists "
+    "and no supplied state indicates it is unsafe. "
+
+    "REROUTE: Generate an alternative route avoiding "
+    "the shared conflict resource when rerouting is allowed. "
+
+    "HOLD: Use only when no feasible WAIT or REROUTE "
+    "can be established, or when input state is inconsistent. "
+    "HOLD requires operator intervention or replanning. "
+
+    "Never invent occupancy, timing, or safety clearance. "
+    "Return only a supplied criteria ID."
 )
+# [4단계 지침] WAIT 선택 시 충돌 구간 진입 전 안전하게 정차할 상류 대기 노드(wait_node) 선택
 KEV_WAIT_INSTRUCTIONS = (
     "You are the MAPF waiting-position selection component. Choose one "
     "upstream node before the shared resource where the yielding robot should "
@@ -59,12 +84,14 @@ KEV_WAIT_INSTRUCTIONS = (
 
 
 def _node(v: Any) -> int:
+    """노드 ID를 정수(int)로 정규화하며, bool이나 실수(float) 같은 손실 변환 입력은 거부한다."""
     if isinstance(v, bool) or not isinstance(v, (int, str)):
         raise ValueError("node ID must be an integer or integer string (not bool/float)")
     return int(v)
 
 
 def _node_sort(s: str) -> tuple[int, int | str]:
+    """노드 ID 문자열을 숫자 우선, 문자열 차순으로 정렬하기 위한 키를 생성한다."""
     try:
         return 0, int(s)
     except ValueError:
@@ -72,8 +99,10 @@ def _node_sort(s: str) -> tuple[int, int | str]:
 
 
 class Graph:
-    """기존 경로 서비스를 재사용하는 읽기 전용 유향 GeoJSON 그래프 정보."""
+    """기존 경로 서비스(`route_service`)를 재사용하는 읽기 전용 유향 GeoJSON 그래프 래퍼."""
+
     def __init__(self, data: dict[str, Any]):
+        """GeoJSON FeatureCollection을 파싱하여 노드·간선 가중치 및 AI용 compact 그래프를 구축한다."""
         if data.get("type") != "FeatureCollection":
             raise ValueError("--graph must be GeoJSON FeatureCollection")
         self.data = data
@@ -92,9 +121,11 @@ class Graph:
 
     @classmethod
     def load(cls, path: Path) -> Graph:
+        """지정된 파일 경로에서 GeoJSON을 읽어 `Graph` 인스턴스를 생성한다."""
         return cls(json.loads(path.read_text(encoding="utf-8")))
 
     def check_path(self, path: list[int], *, start: int | None = None, goal: int | None = None) -> None:
+        """경로의 시작·끝점 일치, 유향 간선 존재 여부, 유향 간선 재사용 금지 및 노드 방문 상한(최대 2회)을 검증한다."""
         normalized = [_node(n) for n in path]
         if not normalized:
             raise ValueError("path must be nonempty")
@@ -109,7 +140,7 @@ class Graph:
             raise ValueError("path violates directed-edge reuse or node visit limit")
 
     def virtual_graph(self, forbidden_nodes: set[int], forbidden_edges: set[tuple[int, int]]) -> dict[str, Any]:
-        """제외 구간을 제거한 임시 GeoJSON을 메모리에 만들고 원본은 보존한다."""
+        """제외할 충돌 노드·간선을 제거한 임시 GeoJSON을 메모리에 생성하고 원본 데이터는 보존한다."""
         features = []
         for f in self.data.get("features", []):
             p = f.get("properties") or {}
@@ -124,6 +155,7 @@ class Graph:
         return {"type": "FeatureCollection", "features": features}
 
     def declared_wait_nodes(self) -> set[int]:
+        """GeoJSON 노드 속성에서 `wait_allowed=True` 또는 `safe_wait=True`로 선언된 대기 가능 노드 집합을 반환한다."""
         return {
             n for n, p in self.node_props.items()
             if p.get("wait_allowed") is True or p.get("safe_wait") is True
@@ -131,9 +163,10 @@ class Graph:
 
 
 class LiveKEV:
-    """기존 Logistics_AI의 경로 preview와 KevSelector를 재사용한다."""
+    """기존 Logistics_AI의 경로 preview(`preview_llm_route`)와 `KevSelector`를 재사용하는 실시간 판단 클라이언트."""
 
     def __init__(self, repo: Path, *, model: str, deadline: float, max_steps: int | None):
+        """저장소 경로를 확인하고 `KevSelector` 및 호출 통계 카운터(`calls`, `forced`, `model_seconds`)를 초기화한다."""
         repo = repo.expanduser().resolve()
         target = repo / "backend/app/services/llm_route_preview.py"
         if not target.is_file():
@@ -154,6 +187,7 @@ class LiveKEV:
         self.warnings: list[str] = []
 
     def pick(self, state: dict[str, Any], candidates: dict[str, str], instructions: str, question_id: str) -> str:
+        """후보가 1개면 API 호출 없이 강제 선택(`forced`)하고, 2개 이상이면 `KevSelector.select_choice()`로 판단한다."""
         if not candidates:
             raise ValueError(f"no selectable choices for {question_id}")
         if len(candidates) == 1:
@@ -168,7 +202,7 @@ class LiveKEV:
         return choice
 
     def route(self, graph_data: dict, start: int, goal: int, *, selector: str = "kev", model: str | None = None) -> list[int]:
-        """기존 FMS preview의 카탈로그·검증을 사용하며 오류는 호출자에게 전달한다."""
+        """기존 FMS preview(`preview_llm_route`)의 카탈로그·검증을 사용해 새로운 경로/우회 경로를 생성한다."""
         started = time.perf_counter()
         try:
             # 새 경로/우회만 추론한다. 카탈로그 오류를 별도 runner로 우회하지 않는다.
@@ -187,12 +221,14 @@ class LiveKEV:
 
 
 class MockKEV:
-    """오프라인 데모 전용이며 결과를 실제 모델 추론으로 취급하지 않는다."""
+    """오프라인 데모 및 단위 테스트 전용 대역(Stub)이며, 결과를 실제 모델 추론으로 취급하지 않는다."""
+
     calls = 0
     model_seconds = 0.0
     forced = 0
 
     def pick(self, state, candidates, instructions, question_id):
+        """실제 추론 없이 `action_wait`가 후보에 있으면 우선 선택하고, 없으면 첫 번째 후보를 반환한다."""
         if len(candidates) == 1:
             self.forced += 1
         else:
@@ -203,6 +239,7 @@ class MockKEV:
         return next(iter(candidates))
 
     def route(self, graph_data, start, goal, *, selector="kev", model=None):
+        """오프라인 데모·테스트를 위해 단순 너비 우선 탐색(BFS)으로 연결 경로를 찾는다."""
         # 데모·테스트 전용 BFS이다. 실제 모드에서는 기존 AI 경로 생성기를 사용한다.
         graph = Graph(graph_data)
         todo = [[start]]
@@ -219,30 +256,46 @@ class MockKEV:
 
 
 def zone_candidates(paths: dict[str, list[int]]) -> dict[str, dict[str, Any]]:
-    """여러 로봇이 공유할 가능성이 있는 노드와 양방향 물리 간선을 찾는다.
+    """여러 로봇이 공유할 가능성이 있는 노드(`node:N`)와 양방향 물리 간선(`edge:A:B`)을 찾는다.
 
     동시 도착 시간은 예측하지 않는다. 공유 노드·간선으로 표현되지 않은
     기하학적 교차를 운영에 반영하려면 보정된 물리 구간 지도가 필요하다.
     """
     nodes_by: dict[int, set[str]] = defaultdict(set)
     edges_by: dict[tuple[int, int], set[str]] = defaultdict(set)
+    # ① 모든 AMR이 지나가는 노드와 간선 수집
     for rid, path in paths.items():
+        # 각 노드를 사용하는 AMR ID 저장
         for n in path:
             nodes_by[n].add(rid)
+
+        # 각 간선을 사용하는 AMR ID 저장
         for a, b in zip(path, path[1:]):
             edges_by[tuple(sorted((a, b)))].add(rid)
+
     c: dict[str, dict[str, Any]] = {}
+    # ② 겹치는 노드 찾기
     for node, robots in nodes_by.items():
         if len(robots) >= 2:
-            c[f"node:{node}"] = {"kind": "node", "node": node, "robots": sorted(robots)}
+            c[f"node:{node}"] = {
+                "kind": "node",
+                "node": node,
+                "robots": sorted(robots)
+            }
+    # ③ 겹치는 간선 찾기
     for edge, robots in edges_by.items():
         if len(robots) >= 2:
             a, b = edge
-            c[f"edge:{a}:{b}"] = {"kind": "edge", "edge": [a, b], "robots": sorted(robots)}
+            c[f"edge:{a}:{b}"] = {
+                "kind": "edge",
+                "edge": [a, b],
+                "robots": sorted(robots)
+            }
     return dict(sorted(c.items(), key=lambda x: x[0]))
 
 
 def first_zone_index(path: list[int], zone: dict[str, Any]) -> int | None:
+    """로봇 경로(`path`)에서 공유 구간(`zone`)에 처음 진입하는 인덱스 위치를 반환한다."""
     if zone["kind"] == "node":
         return next((i for i, n in enumerate(path) if n == zone["node"]), None)
     a, b = zone["edge"]
@@ -253,6 +306,7 @@ def first_zone_index(path: list[int], zone: dict[str, Any]) -> int | None:
 
 
 def would_cycle(priorities: set[tuple[str, str]], high: str, low: str) -> bool:
+    """기존 우선순위 관계 집합(`priorities`)에 `(high, low)`를 추가했을 때 순환(Deadlock)이 생기는지 DFS로 검사한다."""
     if high == low:
         return True
     outgoing: dict[str, set[str]] = defaultdict(set)
@@ -280,7 +334,7 @@ def mapf_robot_from_route_result(
     status: str = "IDLE",
     task_priority: int = 0,
 ) -> dict[str, Any]:
-    """dispatcher의 실제 result['path']를 한 로봇의 MAPF 입력으로 변환한다.
+    """dispatcher의 실제 `result['path']`를 한 로봇의 MAPF 입력 딕셔너리로 변환한다.
 
     사용 예: mapf_robot_from_route_result(order['robot_id'], current_node,
                                           node, result)
@@ -299,6 +353,7 @@ def mapf_robot_from_route_result(
 
 
 def parse_robot_state(data: dict, graph: Graph, live: Any) -> dict[str, dict]:
+    """입력 JSON의 `robots` 배열을 검증하고 로봇 ID별 정규화된 상태·경로 딕셔너리를 생성한다."""
     robots = {}
     for raw in data.get("robots", []):
         rid = str(raw["id"])
@@ -343,7 +398,10 @@ def parse_robot_state(data: dict, graph: Graph, live: Any) -> dict[str, dict]:
 
 
 class KevMAPF:
+    """Kev 의사결정 클라이언트를 사용해 다중 로봇 간 공유 구간 충돌을 반복적으로 조정하는 엔진."""
+
     def __init__(self, graph: Graph, robots: dict[str, dict], live: Any, config: dict, *, rounds: int = 16, reroutes: int = 3):
+        """그래프, 로봇 상태, 판단 클라이언트(`live`), 점유·대기 정책(`config`) 및 최대 라운드/우회 한도를 초기화한다."""
         self.graph, self.robots, self.live = graph, robots, live
         self.rounds, self.reroutes = rounds, reroutes
         self.occupied: dict[str, str] = {
@@ -364,6 +422,7 @@ class KevMAPF:
         self.processed: set[tuple[str, str, str]] = set()
 
     def _graph_state(self) -> dict:
+        """Kev 질의의 `state`에 공통으로 포함할 compact 그래프와 각 로봇의 인접 간선 정보를 구성한다."""
         return {
             "route_graph": self.graph.compact,
             "robots": [
@@ -376,6 +435,7 @@ class KevMAPF:
         }
 
     def _state(self, zone: str, info: dict, participants: list[str]) -> dict:
+        """특정 충돌 구간(`zone`)과 참여 로봇(`participants`)에 대한 상세 의사결정 컨텍스트를 생성한다."""
         return {
             **self._graph_state(),
             "shared_resource": zone,
@@ -388,11 +448,13 @@ class KevMAPF:
         }
 
     def _pair_for(self, zone: str, info: dict) -> tuple[str, str] | None:
+        """해당 공유 구간(`zone`)을 지나는 로봇들 중 아직 처리하지 않은 첫 번째 로봇 쌍 `(a, b)`를 반환한다."""
         rs = info["robots"]
         pairs = [(a, b) for i, a in enumerate(rs) for b in rs[i+1:]]
         return next(((a, b) for a, b in pairs if (zone, a, b) not in self.processed), None)
 
     def _wait_candidates(self, robot: dict, info: dict) -> list[int]:
+        """양보 로봇의 경로에서 충돌 구간(`info`) 진입 이전에 위치한 안전한 상류 대기 후보 노드 목록을 반환한다."""
         path = robot["path"]
         before = first_zone_index(path, info)
         if before is None:
@@ -409,6 +471,7 @@ class KevMAPF:
         return result
 
     def _reroute(self, robot: dict, zid: str, info: dict) -> tuple[list[int] | None, str | None]:
+        """충돌 구간(`info`)과 차단 노드를 제외한 임시 가상 그래프에서 양보 로봇의 우회 경로를 탐색·검증한다."""
         forbid_nodes = set(self.blocked_nodes)
         forbid_edges: set[tuple[int, int]] = set()
         if info["kind"] == "node":
@@ -438,17 +501,19 @@ class KevMAPF:
             return None, f"{type(exc).__name__}: {exc}"
 
     def resolve(self) -> dict:
+        """최대 `self.rounds` 동안 공유 구간 충돌을 탐색하고 Kev 4단계 질의로 조정 계획(PROPOSED/REVIEW_REQUIRED/BLOCKED)을 수립한다."""
         start = time.perf_counter()
         status = "PROPOSED"
         for it in range(self.rounds):
             routes = {r: x["path"] for r, x in self.robots.items()}
-            allzones = zone_candidates(routes)
+            potential_conflict_zones = zone_candidates(routes) # 충돌 가능성이 있는 후보 구역
             available_zones = {
-                zid: info for zid, info in allzones.items()
+                zid: info for zid, info in potential_conflict_zones.items()
                 if self._pair_for(zid, info) is not None
             }
             if not available_zones:
                 break
+            # [1단계] 해결할 공유 충돌 구간(zone) 선택
             zchoices = {
                 f"z{i}": f"zone={zid}, sharing={','.join(info['robots'])}, "
                          f"occupant={self.occupied.get(zid, 'FREE')}"
@@ -469,6 +534,7 @@ class KevMAPF:
                 self.decisions.append({"zone": zid, "robots": [a, b], "action": "HOLD", "reason": f"occupied by {occupant}"})
                 status = "BLOCKED"
                 continue
+            # [2단계] 우선순위 사이클을 만들지 않는 후보 중 먼저 통과할 로봇(high) 선택
             # 후보 ID는 짧고 안전한 문자열을 사용하며 로봇 이름의 문자 구성에 의존하지 않는다.
             possible = []
             if not would_cycle(self.priorities, a, b):
@@ -488,8 +554,21 @@ class KevMAPF:
             low = b if high == a else a
             if not occupant:
                 self.priorities.add((high, low))
+            # [3단계] 양보 로봇(low)의 충돌 회피 행동(WAIT / REROUTE / HOLD) 선택
             waiter = self.robots[low]
             wait_nodes = self._wait_candidates(waiter, info)
+            
+            """
+                wait_nodes 디버깅용
+            """
+            print(
+                f"[MAPF DEBUG] zone={zid}, "
+                f"priority={high}, "
+                f"yield={low}, "
+                f"wait_nodes={wait_nodes}",
+                file=sys.stderr
+            )
+            
             action_choices = {}
             if wait_nodes:
                 action_choices["action_wait"] = "WAIT at an upstream node, release only on real zone-clear event"
@@ -508,6 +587,7 @@ class KevMAPF:
                 "needs_fms_approval": True,
                 "priority_robot_action": "REQUEST_PROCEED_AFTER_FMS_PERMISSION",
             }
+            # [4단계] WAIT인 경우 상류 대기 노드 선택, REROUTE인 경우 가상 그래프 우회 경로 생성
             if action == "action_wait":
                 wait_map = {f"w{i}": n for i, n in enumerate(wait_nodes)}
                 wc = {key: f"Wait at node {n} (on remaining route before {zid})" for key, n in wait_map.items()}
@@ -649,6 +729,7 @@ def plan_mapf_from_route_results(
 
 
 def demo_data() -> tuple[Graph, dict]:
+    """`--demo` 실행 모드에서 사용할 내장 9-노드 GeoJSON 그래프와 3대의 AMR 예제 작업을 반환한다."""
     points = {1:(0,1),2:(1,1),3:(2,1),4:(3,1),5:(0,0),6:(1,0),7:(3,0),8:(4,1),9:(5,1)}
     edges = [(1,2),(2,3),(3,4),(5,6),(6,3),(3,7),(4,8),(8,9),(3,2),(2,1)]
     features = [
@@ -671,6 +752,7 @@ def demo_data() -> tuple[Graph, dict]:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """CLI 진입점: `--demo`, `--mock`, 또는 실시간 `LiveKEV` 모드로 MAPF 충돌 해결을 실행하고 결과를 JSON으로 저장한다."""
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--repo", type=Path, help="Local UNMODIFIED Logistics_AI checkout (live mode)")
     ap.add_argument("--graph", type=Path, help="Route GeoJSON from that checkout")
@@ -715,7 +797,8 @@ def main(argv: list[str] | None = None) -> int:
     a.output.parent.mkdir(parents=True, exist_ok=True)
     a.output.write_text(text + "\n", encoding="utf-8")
     print(text)
-    print(f"\nSaved advisory output to {a.output.resolve()}", file=sys.stderr)
+    print(f"\
+Saved advisory output to {a.output.resolve()}", file=sys.stderr)
     return 0 if result["status"] == "PROPOSED" else 2
 
 
