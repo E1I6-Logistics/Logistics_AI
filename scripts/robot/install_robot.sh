@@ -36,10 +36,7 @@ sudo apt install -y zenoh-bridge-ros2dds=1.9.0 --allow-downgrades
 echo "[4/5] Hold Zenoh bridge"
 sudo apt-mark hold zenoh-bridge-ros2dds
 
-echo "[5/5] Verify"
-source /opt/ros/jazzy/setup.bash
-ros2 pkg prefix rmw_cyclonedds_cpp
-ros2 pkg prefix rmw_fastrtps_cpp
+echo "[5/5] Verify Zenoh Bridge"
 zenoh-bridge-ros2dds --version
 
 echo

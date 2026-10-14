@@ -8,6 +8,7 @@ ROS_DISTRO="jazzy"
 NODE_VERSION="20.20.2"
 VENV_DIR="${FMS_VENV_DIR:-$HOME/venv/robot}"
 ROS_WS_DIR="${FMS_ROS_WS_DIR:-$PROJECT_DIR/robots_ws/Logistics_AMR}"
+ROS_WS_BRANCH="dev"
 KEV_DIR="${FMS_KEV_DIR:-$PROJECT_DIR/../kev}"
 
 if [[ "$ROLE" != "main" && "$ROLE" != "robot" || $# -gt 1 ]]; then
@@ -62,9 +63,14 @@ install_shell_config() {
 install_ros_workspace() {
     if [ ! -d "$ROS_WS_DIR" ]; then
         mkdir -p "$(dirname "$ROS_WS_DIR")"
-        git clone --branch jhleedev00 https://github.com/E1I6-Logistics/Logistics_AMR.git "$ROS_WS_DIR"
+        git clone --branch "$ROS_WS_BRANCH" https://github.com/E1I6-Logistics/Logistics_AMR.git "$ROS_WS_DIR"
     fi
     [ -d "$ROS_WS_DIR/src" ] || { echo "[ERROR] ROS workspace source missing: $ROS_WS_DIR/src" >&2; return 1; }
+    if [ -e "$ROS_WS_DIR/.git" ]; then
+        local current_branch
+        current_branch="$(git -C "$ROS_WS_DIR" branch --show-current)"
+        [ "$current_branch" = "$ROS_WS_BRANCH" ] || { echo "[ERROR] Logistics_AMR must use branch $ROS_WS_BRANCH (current: ${current_branch:-detached HEAD})." >&2; return 1; }
+    fi
     (cd "$ROS_WS_DIR" && rosdep install --from-paths src --ignore-src -r -y && colcon build --symlink-install)
 }
 
@@ -94,6 +100,8 @@ install_main() {
         if [ ! -d "$KEV_DIR/kev" ]; then git clone https://github.com/jaredpalmer/kev.git "$KEV_DIR"; fi
         [ -f "$KEV_DIR/pyproject.toml" ] || { echo "[ERROR] Kev source missing: $KEV_DIR" >&2; return 1; }
         "$VENV_DIR/bin/python" -m pip install "$KEV_DIR[serve]"
+        # ROS system packages are visible in this venv, so replace NumPy 1.x binary extensions for Kev's NumPy 2.x.
+        "$VENV_DIR/bin/python" -m pip install --upgrade "numexpr>=2.10.0" "Bottleneck>=1.4.0"
     fi
 
     bash "$PROJECT_DIR/scripts/main/install_main.sh"
@@ -116,7 +124,8 @@ verify_zenoh_bridge() {
     echo "[SETUP] Checking Zenoh Bridge version and options"
     command -v zenoh-bridge-ros2dds >/dev/null 2>&1 || { echo "[ERROR] zenoh-bridge-ros2dds not found." >&2; return 1; }
     zenoh-bridge-ros2dds --version
-    zenoh-bridge-ros2dds --help
+    zenoh-bridge-ros2dds --help >/dev/null
+    echo "[SETUP] Zenoh Bridge options check passed"
 }
 
 echo "[SETUP] Installing $ROLE environment in $PROJECT_DIR"

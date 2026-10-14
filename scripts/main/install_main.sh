@@ -82,7 +82,7 @@ add_zenoh_repo() {
 # 1. Main Dependencies
 # ============================================================
 
-echo "[1/6] Install Main dependencies"
+echo "[1/5] Install Main dependencies"
 
 sudo apt update
 
@@ -98,7 +98,7 @@ sudo apt install -y "${PKGS[@]}"
 # 2. Zenoh Repository
 # ============================================================
 
-echo "[2/6] Configure Eclipse Zenoh repository"
+echo "[2/5] Configure Eclipse Zenoh repository"
 
 add_zenoh_repo
 
@@ -107,7 +107,7 @@ add_zenoh_repo
 # 3. Zenoh
 # ============================================================
 
-echo "[3/6] Install Zenoh $ZENOH_VERSION"
+echo "[3/5] Install Zenoh $ZENOH_VERSION"
 
 sudo apt install -y \
     "zenoh=$ZENOH_VERSION" \
@@ -122,7 +122,7 @@ sudo apt install -y \
 # 4. Hold Zenoh
 # ============================================================
 
-echo "[4/6] Hold Zenoh packages"
+echo "[4/5] Hold Zenoh packages"
 
 sudo apt-mark hold \
     zenoh \
@@ -133,31 +133,15 @@ sudo apt-mark hold \
 
 
 # ============================================================
-# 5. ROS RMW Verification
+# 5. Zenoh Verification
 # ============================================================
 
-echo "[5/6] Verify ROS RMW"
-
-source "/opt/ros/$ROS_DISTRO/setup.bash"
-
-ros2 pkg prefix rmw_cyclonedds_cpp
-ros2 pkg prefix rmw_fastrtps_cpp
-ros2 pkg prefix turtlebot3_msgs
-
-
-# ============================================================
-# 6. Zenoh Verification
-# ============================================================
-
-echo "[6/6] Verify Zenoh"
+echo "[5/5] Verify Zenoh"
 
 for package in zenoh zenohd zenoh-plugin-rest zenoh-plugin-storage-manager zenoh-bridge-ros2dds; do
     installed_version="$(dpkg-query -W -f='${Version}' "$package")"
     [ "$installed_version" = "$ZENOH_VERSION" ] || { echo "[ERROR] $package version is $installed_version, expected $ZENOH_VERSION" >&2; exit 1; }
 done
-zenohd --version
-zenoh-bridge-ros2dds --version
-
 
 echo ""
 echo "========================================"

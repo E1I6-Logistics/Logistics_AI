@@ -55,7 +55,7 @@ bash scripts/setup.sh robot
 인수 없이 `bash scripts/setup.sh`를 실행하면 `main` 역할입니다. 스크립트는 기존 설치를 재사용하고 마지막에 `scripts/verify_env.sh`를 자동 실행합니다. 메인 PC에서는 다음 항목도 자동 준비합니다.
 
 - `~/venv/robot` 가상환경에 `backend/requirements.txt`, `backend/simulation/requirements.txt`, Kev 서버 의존성 설치
-- `robots_ws/Logistics_AMR`의 `jhleedev00` 브랜치가 없으면 clone, ROS 의존성 설치와 `colcon build --symlink-install` 실행
+- `robots_ws/Logistics_AMR`가 없으면 `dev` 브랜치를 clone하고, 기존 작업공간도 `dev` 브랜치인지 확인한 뒤 ROS 의존성 설치와 `colcon build --symlink-install` 실행
 - `frontend/`의 npm 의존성 설치
 - 루트 `.env`와 `infra/docker-compose.yml`이 없을 때만 예시 파일에서 생성
 - `~/.axbashrc` 또는 `~/.axrobotbashrc`를 생성해 `~/.bashrc`에서 불러오기

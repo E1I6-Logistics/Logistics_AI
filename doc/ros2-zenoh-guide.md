@@ -964,7 +964,6 @@ flowchart TB
 -   [ ] LOCALHOST
 -   [ ] TurtleBot3 Bringup 실행
 -   [ ] Robot별 namespace 확인
--   [ ] Main Router `10.10.141.15:7447` 연결
 
 ### 통신
 

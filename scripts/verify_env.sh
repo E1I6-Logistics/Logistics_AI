@@ -70,7 +70,7 @@ import sys
 
 modules = ["fastapi", "uvicorn", "zenoh", "yaml", "PIL", "pydantic", "rclpy", "turtlebot3_my_msg", "laya", "anthropic", "ollama"]
 if os.getenv("FMS_KEV_ENABLED", "1") == "1":
-    modules.append("kev.serve")
+    modules.extend(["numexpr", "bottleneck", "kev.serve"])
 missing = []
 for name in modules:
     try:
