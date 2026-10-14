@@ -14,9 +14,13 @@ from .occupancy import locate_occupancy, occupied_resource
 from .traffic_manager import TrafficManager
 
 import math
+from ..config import (
+    REAL_NAVIGATION_SPEED_MPS,
+    REAL_RESERVATION_MARGIN_S,
+)
 
-SIMULATION_SPEED_MPS = 0.2
-RESERVATION_MARGIN_S = 0.2
+SIMULATION_SPEED_MPS = REAL_NAVIGATION_SPEED_MPS
+RESERVATION_MARGIN_S = REAL_RESERVATION_MARGIN_S
 
 _MOCK_ROBOT_DEFINITIONS = {
     "robot1": {"node_id": "0", "status": "IDLE", "battery": 92.0},
@@ -24,7 +28,11 @@ _MOCK_ROBOT_DEFINITIONS = {
     "robot3": {"node_id": "2", "status": "IDLE", "battery": 64.0},
 }
 
-_MOCK_CONNECTIONS = {"10.10.141.225": "robot1", "10.10.141.221": "robot2", "10.10.141.222": "robot3"}
+_MOCK_CONNECTIONS = {
+    "10.10.141.225": "robot1",
+    "10.10.141.221": "robot2",
+    "10.10.141.222": "robot3",
+}
 
 
 class MockFmsStore:
@@ -35,7 +43,10 @@ class MockFmsStore:
     def __init__(self, reservations=None) -> None:
         self._robots: dict[str, dict[str, Any]] = {}
         self._traffic = TrafficManager(
-            self._robots, reservations, speed_mps=SIMULATION_SPEED_MPS, safety_margin=RESERVATION_MARGIN_S
+            self._robots,
+            reservations,
+            speed_mps=SIMULATION_SPEED_MPS,
+            safety_margin=RESERVATION_MARGIN_S,
         )
         self._lock = self._traffic.lock
         self._last_tick = monotonic()
@@ -98,7 +109,9 @@ class MockFmsStore:
             planner = DistanceAStar(graph)
             self._traffic.retry_waiting(now, graph, planner)
             for robot_id in self._robots:
-                self.advance_mock_robot(robot_id, elapsed, now=now, graph=graph, nodes=planner.nodes)
+                self.advance_mock_robot(
+                    robot_id, elapsed, now=now, graph=graph, nodes=planner.nodes
+                )
             self._traffic.retry_waiting(now, graph, planner)
 
     # 프론트에 보낼 Robot 상태 Snapshot 생성 기능
@@ -150,7 +163,9 @@ class MockFmsStore:
     # 공통 리스폰 생성 기능
     # 모의 명령의 응답 데이터를 만든다.
     @staticmethod
-    def _command_response(robot_id: str, command: str, target: dict[str, Any] | None) -> dict[str, Any]:
+    def _command_response(
+        robot_id: str, command: str, target: dict[str, Any] | None
+    ) -> dict[str, Any]:
         backend_id = normalize_robot_id(robot_id)
         return {
             "success": True,
@@ -163,7 +178,9 @@ class MockFmsStore:
             "mock": True,
         }
 
-    def navigate_to_node(self, robot_id: str, node_id: str | int, *, required_path=None) -> dict[str, Any]:
+    def navigate_to_node(
+        self, robot_id: str, node_id: str | int, *, required_path=None
+    ) -> dict[str, Any]:
         """가상 로봇의 이동 요청을 공통 교통 제어 서비스에 전달한다."""
         with self._lock:
             robot = self._get_robot(robot_id)
@@ -172,7 +189,11 @@ class MockFmsStore:
             graph = load_route_graph()
             # 시뮬레이션은 이 잠금 안에서 즉시 정지할 수 있다.
             self._traffic.request_navigation_after_stop(
-                robot["robot_id"], target["id"], now=monotonic(), graph=graph, required_path=required_path
+                robot["robot_id"],
+                target["id"],
+                now=monotonic(),
+                graph=graph,
+                required_path=required_path,
             )
             already_arrived = robot["goal_node"] is None
             response_route = deepcopy(robot["route"])  # 응답 경로는 잠금 안에서 복사하는 편이 좋음
@@ -222,7 +243,9 @@ class MockFmsStore:
                 }
             )
 
-        return self._command_response(robot_id, "goal", {"target_x": float(x), "target_y": float(y)})
+        return self._command_response(
+            robot_id, "goal", {"target_x": float(x), "target_y": float(y)}
+        )
 
     def stop_robot(self, robot_id: str) -> dict[str, Any]:
         """가상 로봇을 즉시 정지하고 요청을 취소한다."""
@@ -235,7 +258,9 @@ class MockFmsStore:
         """공통 수동 조작 정책을 검사하고 mock 표시 상태를 갱신한다."""
         with self._lock:
             robot = self._get_robot(robot_id)
-            can_update = self._traffic.validate_manual_velocity(robot["robot_id"], linear_x, angular_z)
+            can_update = self._traffic.validate_manual_velocity(
+                robot["robot_id"], linear_x, angular_z
+            )
             if can_update and robot["status"] != "NAVIGATING":
                 robot["status"] = "MOVING" if linear_x or angular_z else "IDLE"
         return {

@@ -38,7 +38,9 @@ if ROBOT_MODE not in {"real", "simulation"}:
 # ============================================================
 
 # 웹 화면이 접속할 수 있는 주소 목록
-CORS_ORIGINS = [origin.strip() for origin in os.getenv("FMS_CORS_ORIGINS", "*").split(",") if origin.strip()]
+CORS_ORIGINS = [
+    origin.strip() for origin in os.getenv("FMS_CORS_ORIGINS", "*").split(",") if origin.strip()
+]
 
 
 # ============================================================
@@ -105,7 +107,7 @@ REAL_POSE_TIMEOUT_S = float(os.getenv("FMS_REAL_POSE_TIMEOUT_S", "2.0"))
 
 # 예약과 주행 상태를 다시 확인하는 간격(초). 기본값 0.2초.
 # 늘리면 확인 횟수가 줄지만 짧은 통로에서의 정지 판단이 늦어질 수 있다.
-REAL_NAVIGATION_INTERVAL_S = float(os.getenv("FMS_REAL_NAVIGATION_INTERVAL_S", "0.2"))
+REAL_NAVIGATION_INTERVAL_S = float(os.getenv("FMS_REAL_NAVIGATION_INTERVAL_S", "0.1"))
 
 # Nav2가 성공을 알린 뒤 실제 위치 정보가 도착하기를 기다리는 시간(초).
 # 도착 허용 거리(기존 0.15m)를 넓히는 값은 아니다.
