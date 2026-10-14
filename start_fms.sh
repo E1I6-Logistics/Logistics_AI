@@ -213,6 +213,8 @@ wait_for_stable_process() {
 if [ "${FMS_KEV_ENABLED:-1}" = "1" ]; then
     [ -d "$KEV_DIR/kev" ] || fail "Kev package not found: $KEV_DIR"
     [ -x "$KEV_PYTHON" ] || fail "Kev Python executable not found: $KEV_PYTHON"
+    "$KEV_PYTHON" -c 'import brotli; brotli.Decompressor().process(brotli.compress(b"fms"), output_buffer_limit=1024)' >/dev/null 2>&1 \
+        || fail "Kev Brotli decoder is incompatible. Run: $KEV_PYTHON -m pip install --upgrade 'Brotli>=1.2.0'"
 fi
 
 select_docker_command

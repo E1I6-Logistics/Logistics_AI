@@ -61,6 +61,7 @@ bash scripts/setup.sh robot
 - `~/.axbashrc` 또는 `~/.axrobotbashrc`를 생성해 `~/.bashrc`에서 불러오기
 
 `start_fms.sh`는 Kev 소스를 기본적으로 `../kev`에서 찾습니다. 설치 스크립트도 같은 위치에 없으면 clone합니다. 위치를 바꾸려면 `FMS_KEV_DIR`를 지정합니다. Kev를 사용하지 않을 환경에서는 설치와 실행 모두 `FMS_KEV_ENABLED=0`으로 설정합니다. Kev 모델 가중치는 설치 중 내려받지 않고 첫 서버 실행 시 선택한 모델에 맞춰 준비됩니다.
+메인 PC의 `~/.axbashrc`에는 Kev 경로 선택 설정이 들어갑니다. 이미 설치한 PC는 `bash scripts/setup.sh main`을 다시 실행하거나 해당 파일에 `scripts/main/bashrc_main.conf`의 Kev 설정을 반영해야 합니다.
 
 설치 후 새 터미널을 열어 셸 설정을 적용합니다. Docker 그룹에 처음 추가된 경우에는 로그아웃 후 다시 로그인합니다. 필요하면 역할별 점검을 다시 실행합니다.
 

@@ -77,6 +77,15 @@ for name in modules:
         importlib.import_module(name)
     except Exception as error:
         missing.append(f"{name}: {error}")
+if os.getenv("FMS_KEV_ENABLED", "1") == "1":
+    try:
+        import brotli
+        compressed = brotli.compress(b"fms")
+        decoded = brotli.Decompressor().process(compressed, output_buffer_limit=1024)
+        if decoded != b"fms":
+            raise RuntimeError("Brotli decompression returned unexpected data")
+    except Exception as error:
+        missing.append(f"Kev download Brotli decoder: {error}")
 for item in missing:
     print(f"[FAIL] Python import {item}")
 if not missing:

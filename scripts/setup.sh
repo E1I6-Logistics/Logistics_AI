@@ -101,7 +101,7 @@ install_main() {
         [ -f "$KEV_DIR/pyproject.toml" ] || { echo "[ERROR] Kev source missing: $KEV_DIR" >&2; return 1; }
         "$VENV_DIR/bin/python" -m pip install "$KEV_DIR[serve]"
         # ROS system packages are visible in this venv, so replace NumPy 1.x binary extensions for Kev's NumPy 2.x.
-        "$VENV_DIR/bin/python" -m pip install --upgrade "numexpr>=2.10.0" "Bottleneck>=1.4.0"
+        "$VENV_DIR/bin/python" -m pip install --upgrade "numexpr>=2.10.0" "Bottleneck>=1.4.0" "Brotli>=1.2.0"
     fi
 
     bash "$PROJECT_DIR/scripts/main/install_main.sh"
