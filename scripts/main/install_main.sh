@@ -111,6 +111,9 @@ echo "[3/6] Install Zenoh $ZENOH_VERSION"
 
 sudo apt install -y \
     "zenoh=$ZENOH_VERSION" \
+    "zenohd=$ZENOH_VERSION" \
+    "zenoh-plugin-rest=$ZENOH_VERSION" \
+    "zenoh-plugin-storage-manager=$ZENOH_VERSION" \
     "zenoh-bridge-ros2dds=$ZENOH_VERSION" \
     --allow-downgrades
 
@@ -123,6 +126,9 @@ echo "[4/6] Hold Zenoh packages"
 
 sudo apt-mark hold \
     zenoh \
+    zenohd \
+    zenoh-plugin-rest \
+    zenoh-plugin-storage-manager \
     zenoh-bridge-ros2dds
 
 
@@ -145,6 +151,10 @@ ros2 pkg prefix turtlebot3_msgs
 
 echo "[6/6] Verify Zenoh"
 
+for package in zenoh zenohd zenoh-plugin-rest zenoh-plugin-storage-manager zenoh-bridge-ros2dds; do
+    installed_version="$(dpkg-query -W -f='${Version}' "$package")"
+    [ "$installed_version" = "$ZENOH_VERSION" ] || { echo "[ERROR] $package version is $installed_version, expected $ZENOH_VERSION" >&2; exit 1; }
+done
 zenohd --version
 zenoh-bridge-ros2dds --version
 
