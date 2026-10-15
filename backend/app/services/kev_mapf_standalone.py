@@ -12,6 +12,8 @@ import argparse
 import json
 import sys
 import time
+import math
+
 from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
@@ -34,6 +36,17 @@ KEV_ZONE_INSTRUCTIONS = (
     "Return only a supplied criteria ID."
 )
 # [2단계 지침] 충돌 구간에서 두 로봇 중 먼저 통과할 우선순위 로봇(priority_robot) 결정
+KEV_PRIORITY_SCORE_INSTRUCTIONS = (
+    "Evaluate the priority of scoring_robot relative to "
+    "other robots in the current MAPF state. "
+    "Consider current position, route progress, "
+    "task priority, occupancy, and shared conflict zones. "
+    "Use the same evaluation criteria for every robot. "
+    "Higher scores indicate higher priority to proceed. "
+    "Do not invent arrival times or occupancy. "
+    "Do not treat the score as movement permission."
+)
+
 KEV_PRIORITY_INSTRUCTIONS = (
     "You are the MAPF priority-decision component. Choose ONE robot to have "
     "priority at the indicated shared resource, considering current position, "
@@ -187,6 +200,118 @@ class LiveKEV:
         self.model_seconds = 0.0
         self.forced = 0
         self.warnings: list[str] = []
+
+    def score(
+        self,
+        state: dict[str, Any],
+        question_id: str,
+    ) -> float:
+
+        result = self.selector.evaluate_score(
+            state,
+            [
+                "Very low priority",
+                "Low priority",
+                "Medium priority",
+                "High priority",
+                "Very high priority",
+            ],
+            KEV_PRIORITY_SCORE_INSTRUCTIONS,
+            question_id=question_id,
+        )
+
+        score = float(result["score"])
+
+        if not math.isfinite(score):
+            raise ValueError("Invalid KEV priority score")
+
+        self.calls += 1
+
+        self.model_seconds += float(result.get("total_duration_seconds") or 0.0)
+
+        print(
+            f"[KEV SCORE] " f"question={question_id} " f"score={score}",
+            file=sys.stderr,
+        )
+
+        return score
+    def score_many(
+        self,
+        state: dict[str, Any],
+        robot_ids: list[str],
+    ) -> dict[str, float]:
+        """여러 로봇의 우선순위를 KEV API 요청 1회로 평가한다."""
+
+        robot_ids = sorted(set(robot_ids))
+
+        if not robot_ids:
+            return {}
+
+        levels = [
+            "Very low priority",
+            "Low priority",
+            "Medium priority",
+            "High priority",
+            "Very high priority",
+        ]
+
+        questions = {}
+
+        for rid in robot_ids:
+            question_id = f"priority_score_{rid}"
+
+            questions[question_id] = {
+                "type": "score",
+                "instructions": (
+                    f"For this question, scoring_robot is {rid}. "
+                    + KEV_PRIORITY_SCORE_INSTRUCTIONS
+                ),
+                "criteria": levels,
+            }
+
+        # KEV API 1회 호출: 모든 로봇의 Score 동시 요청
+        response = self.selector.decide(
+            state,
+            questions,
+        )
+
+        scores = {}
+
+        for rid in robot_ids:
+            question_id = f"priority_score_{rid}"
+
+            # 기존 KevSelector와 동일한 응답 검증 사용
+            answer = self.selector._answer(
+                response,
+                question_id,
+                "score",
+            )
+
+            score = float(answer["score"])
+
+            if not math.isfinite(score):
+                raise ValueError(
+                    f"Invalid KEV priority score: {rid}"
+                )
+
+            scores[rid] = score
+
+        # 실제 HTTP API 호출 횟수는 1회
+        self.calls += 1
+
+        self.model_seconds += float(
+            response.get("total_duration_seconds") or 0.0
+        )
+
+        print(
+            f"[KEV SCORE BATCH] "
+            f"robots={robot_ids} "
+            f"scores={scores}",
+            file=sys.stderr,
+            flush=True,
+        )
+
+        return scores
 
     def pick(
         self,
@@ -566,6 +691,20 @@ class KevMAPF:
         """그래프, 로봇 상태, 판단 클라이언트(`live`), 점유·대기 정책(`config`) 및 최대 라운드/우회 한도를 초기화한다."""
         self.graph, self.robots, self.live = graph, robots, live
         self.rounds, self.reroutes = rounds, reroutes
+
+        # KEV 우선순위 판단 모드
+        self.priority_mode = config.get("priority_mode", "choice")
+
+        if self.priority_mode not in ("choice", "score"):
+            raise ValueError("Invalid priority_mode")
+
+        # 로봇별 KEV Score 저장
+        self.priority_scores: dict[str, float] = {}
+
+        # HOLD 행동 선택 허용
+        self.allow_proactive_hold = bool(
+            config.get("allow_proactive_hold", False)
+        )
         self.occupied: dict[str, str] = {
             str(k): str(v)
             for k, v in (config.get("zone_occupancy") or {}).items()
@@ -755,11 +894,18 @@ class KevMAPF:
         """최대 `self.rounds` 동안 공유 구간 충돌을 탐색하고 Kev 4단계 질의로 조정 계획(PROPOSED/REVIEW_REQUIRED/BLOCKED)을 수립한다."""
         start = time.perf_counter()
         status = "PROPOSED"
+        # 최초 한 번 충돌 구역 계산
+        routes = {r: x["path"] for r, x in self.robots.items()}
+        potential_conflict_zones = group_conflict_zones(zone_candidates(routes))
+
         for it in range(self.rounds):
-            routes = {r: x["path"] for r, x in self.robots.items()}
-            potential_conflict_zones = group_conflict_zones(
-                zone_candidates(routes)
-            )  # 충돌 가능성이 있는 후보 구역
+            # 여기서는 기존 충돌 구역 재사용
+            available_zones = {
+                zid: info
+                for zid, info in potential_conflict_zones.items()
+                if self._pair_for(zid, info) is not None
+            }
+            # 충돌 가능성이 있는 후보 구역
             available_zones = {
                 zid: info
                 for zid, info in potential_conflict_zones.items()
@@ -843,19 +989,130 @@ class KevMAPF:
                 )
                 status = "BLOCKED"
                 continue
-            pri_map = {f"p{i}": (hi, lo) for i, (hi, lo) in enumerate(possible)}
-            pchoices = {
-                key: f"{hi} receives priority over {lo}"
-                for key, (hi, lo) in pri_map.items()
-            }
-            priority_choice = self.live.pick(
-                self._state(zid, info, [a, b]),
-                pchoices,
-                KEV_PRIORITY_INSTRUCTIONS,
-                f"priority_{it}",
-            )
-            high = pri_map[priority_choice][0]
-            low = b if high == a else a
+            if self.priority_mode == "score":
+                # REROUTE가 불가능한 상황에서는
+                # 양보 로봇이 WAIT할 수 있는 우선순위만 허용
+                # if self.reroute_count >= self.reroutes:
+                if self.reroutes == 0:
+
+                    feasible_pairs = []
+
+                    for hi, lo in possible:
+
+                        # 기존 WAIT 가능성 검사 유지
+                        wait_nodes = self._wait_candidates(
+                            self.robots[lo],
+                            info,
+                        )
+
+                        if not wait_nodes:
+                            continue
+
+                        # 우선 출발할 로봇의 경로
+                        high_path = {
+                            str(n)
+                            for n in self.robots[hi]["path"]
+                        }
+
+                        # 양보할 로봇의 현재 위치
+                        # 현재 시뮬레이션은 경로 첫 노드가 현재 위치
+                        low_current_node = str(
+                            self.robots[lo]["path"][0]
+                        )
+
+                        # 양보 로봇은 출발하지 않으므로 현재 위치를 계속 점유함.
+                        # 우선 로봇이 그 위치를 지나가야 한다면 해당 우선순위 제외.
+                        if low_current_node in high_path:
+                            print(
+                                f"[MAPF PRIORITY REJECT] "
+                                f"high={hi} low={lo} "
+                                f"blocked_node={low_current_node}",
+                                flush=True,
+                            )
+                            continue
+
+                        feasible_pairs.append((hi, lo))
+
+                    if not feasible_pairs:
+
+                        print(
+                            f"[SCORE BLOCK CAUSE] "
+                            f"zone={zid} "
+                            f"robots={[a, b]} "
+                            f"possible={possible} "
+                            f"wait_candidates={[(hi, lo, self._wait_candidates(self.robots[lo], info)) for hi, lo in possible]} "
+                            f"assigned_wait={self.robot_wait_nodes} "
+                            f"reservations={self.wait_reservations} "
+                            f"priorities={sorted(self.priorities)}",
+                            flush=True,
+                        )
+
+                        self.decisions.append({
+                            "zone": zid,
+                            "robots": [a, b],
+                            "action": "HOLD",
+                            "reason": "NO_FEASIBLE_WAIT_OR_REROUTE",
+                        })
+                        status = "BLOCKED"
+                        break
+
+                    possible = feasible_pairs
+
+                # 아직 우선순위 점수를 계산하지 않았다면
+                if not self.priority_scores:
+
+                    # 모든 로봇이 동일한 MAPF 상황을 기준으로 평가받음
+                    common_state = {
+                        **self._graph_state(),
+                        "conflict_zones": potential_conflict_zones,
+                        "current_occupancy": self.occupied,
+                    }
+
+                    # 충돌에 관련된 로봇만 평가
+                    involved_robots = sorted(
+                        {
+                            rid
+                            for zone_info in potential_conflict_zones.values()
+                            for rid in zone_info["robots"]
+                        }
+                    )
+
+                    # 모든 로봇을 KEV API 요청 1회로 평가
+                    self.priority_scores.update(
+                        self.live.score_many(
+                            common_state,
+                            involved_robots,
+                        )
+                    )
+                # 기존 점수 재사용
+                # possible에 있는 안전 제약 통과 후보만 비교
+                high, low = min(
+                    possible,
+                    key=lambda pair: (
+                        -self.priority_scores[pair[0]],
+                        pair[0],
+                    ),
+                )
+
+            else:
+
+                # 기존 Choice 방식
+                pri_map = {f"p{i}": (hi, lo) for i, (hi, lo) in enumerate(possible)}
+
+                pchoices = {
+                    key: f"{hi} receives priority over {lo}"
+                    for key, (hi, lo) in pri_map.items()
+                }
+
+                priority_choice = self.live.pick(
+                    self._state(zid, info, [a, b]),
+                    pchoices,
+                    KEV_PRIORITY_INSTRUCTIONS,
+                    f"priority_{it}",
+                )
+
+                high = pri_map[priority_choice][0]
+                low = b if high == a else a
             # [3단계] 양보 로봇(low)의 충돌 회피 행동(WAIT / REROUTE / HOLD) 선택
             waiter = self.robots[low]
             wait_nodes = self._wait_candidates(waiter, info)
@@ -872,17 +1129,28 @@ class KevMAPF:
             )
             # [3단계] 양보 로봇의 행동 후보 구성
             action_choices = {}
-            # WAIT 가능한 노드가 있다면
+           # WAIT 가능 여부
             if wait_nodes:
-                action_choices["action_wait"] = "WAIT at a permitted upstream node."
-            # 우회 시도가 허용되어 있다면
+                action_choices["action_wait"] = (
+                    "WAIT: Stop at a permitted upstream node "
+                    "and allow the priority robot to proceed."
+                )
+
+            # REROUTE 가능 여부
             if self.reroute_count < self.reroutes:
                 action_choices["action_reroute"] = (
-                    "REROUTE: Attempt to generate a valid alternative route."
+                    "REROUTE: Attempt to generate a valid "
+                    "alternative route around the shared zone."
                 )
-            # WAIT와 REROUTE가 모두 후보로 없는 경우Allow connections+
-            if not action_choices:
-                action_choices["action_hold"] = "HOLD: No available resolution action."
+
+            # 안전을 위해 주행을 보류하는 선택지
+            if self.allow_proactive_hold or not action_choices:
+                action_choices["action_hold"] = (
+                    "HOLD: Do not dispatch this robot. "
+                    "Require a new planning or safety review."
+                )
+
+            # KEV 행동 판단
             action = self.live.pick(
                 {
                     **self._state(zid, info, [a, b]),
@@ -980,6 +1248,7 @@ class KevMAPF:
             elif action == "action_reroute":
                 self.reroute_count += 1
                 new_route, error = self._reroute(waiter, zid, info)
+
                 if new_route is not None:
                     waiter["path"] = new_route
                     waiter["source"] = (
@@ -988,8 +1257,19 @@ class KevMAPF:
                         else "mock_rerouted"
                     )
                     result.update(action="REROUTE", new_path=new_route)
+
+                    # 경로가 변경됐으므로 충돌 구역 재탐색
+                    routes = {r: x["path"] for r, x in self.robots.items()}
+
+                    potential_conflict_zones = group_conflict_zones(
+                        zone_candidates(routes)
+                    )
                 else:
-                    result.update(action="HOLD", reason="REROUTE_FAILED", details=error)
+                    result.update(
+                        action="HOLD",
+                        reason="REROUTE_FAILED",
+                        details=error,
+                    )
                     status = "BLOCKED"
             else:
                 result.update(action="HOLD", reason="KEV_SELECTED_HOLD")
