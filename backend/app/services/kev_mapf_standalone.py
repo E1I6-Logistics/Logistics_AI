@@ -16,34 +16,22 @@ from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
 
+from distro import info
 
 # 기존 FMS 그래프 구현을 재사용하면서 파일을 CLI로 직접 실행할 수 있도록 한다.
 if not __package__:
     sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from backend.app.services import route_service
 
-# 연결 위치: order_route_dispatcher.dispatch_order_route()의
-# required_path = result["path"] 이후, navigate_to_node() 호출 전.
-# 기존 result와 다른 로봇의 현재 상태·남은 경로를
-# plan_mapf_from_route_results()에 전달한다.
-#
-# 반환값 required_paths[order["robot_id"]]는 FMS용 list[str] 경로 후보.
-# WAIT/HOLD 처리와 실행 허가 후 기존 required_path 인자에 전달한다.
-#
-# 시뮬레이션: mock_fms.navigate_to_node()
-#   → TrafficManager → DistanceAStar.plan_timed() → 예약·주행
-# 실제 로봇: ros_gateway.navigate_to_node(_order_step=True)
-#   → RealNavigation → TrafficManager → Nav2 NavigateThroughPoses
-#
-# 현재 자동 호출·상태 수집·주행 연결은 미적용이며 제안만 반환한다.
-
 # [1단계 지침] 다중 로봇 경로에서 발견된 물리적 공유 노드/간선 중 가장 먼저 해결할 충돌 구간 선택
 KEV_ZONE_INSTRUCTIONS = (
-    "You are the MAPF conflict-zone selection component. The given candidates "
-    "are physical shared node/edge resources found on multiple robot routes. "
-    "Choose ONE candidate conflict to resolve first, preferably a nearby zone "
-    "that blocks imminent progress. Do not invent IDs. Answer only with a "
-    "supplied criteria ID. No travel time estimates are available."
+    "You are the MAPF conflict-zone selection component. "
+    "Each candidate represents one shared resource or a connected group "
+    "of shared nodes and edges. "
+    "Choose ONE candidate zone to resolve first, preferably one that "
+    "blocks imminent progress. "
+    "Do not invent IDs, arrival times, or occupancy. "
+    "Return only a supplied criteria ID."
 )
 # [2단계 지침] 충돌 구간에서 두 로봇 중 먼저 통과할 우선순위 로봇(priority_robot) 결정
 KEV_PRIORITY_INSTRUCTIONS = (
@@ -54,24 +42,18 @@ KEV_PRIORITY_INSTRUCTIONS = (
 )
 # [3단계 지침] 후순위(양보) 로봇이 상류에서 대기(WAIT)할지, 충돌 구간을 피해 우회(REROUTE)할지 결정
 KEV_ACTION_INSTRUCTIONS = (
-    "You are the MAPF conflict-resolution decision component. "
-    "Choose exactly one action for the lower-priority robot. "
-
-    "WAIT: Stop at one of the provided upstream wait nodes. "
-    "The robot resumes only after FMS confirms that "
-    "the shared resource is clear. "
-    "Prefer WAIT when a permitted upstream wait node exists "
-    "and no supplied state indicates it is unsafe. "
-
-    "REROUTE: Generate an alternative route avoiding "
-    "the shared conflict resource when rerouting is allowed. "
-
-    "HOLD: Use only when no feasible WAIT or REROUTE "
-    "can be established, or when input state is inconsistent. "
-    "HOLD requires operator intervention or replanning. "
-
-    "Never invent occupancy, timing, or safety clearance. "
-    "Return only a supplied criteria ID."
+    "Select exactly one supplied MAPF action ID. "
+    "WAIT: Prefer this when a verified upstream wait node exists. "
+    "REROUTE: Prefer this when WAIT is unavailable and "
+    "action_reroute is offered. "
+    "REROUTE only attempts to generate a new path; it does not move a robot. "
+    "HOLD: Choose when supplied evidence indicates the available "
+    "alternatives are infeasible or unsafe. "
+    "Do not assume rerouting is impossible without evidence. "
+    "The controller validates all generated paths and falls back "
+    "to HOLD if rerouting fails. "
+    "All movement needs independent FMS permission. "
+    "Return only a supplied action ID."
 )
 # [4단계 지침] WAIT 선택 시 충돌 구간 진입 전 안전하게 정차할 상류 대기 노드(wait_node) 선택
 KEV_WAIT_INSTRUCTIONS = (
@@ -86,7 +68,9 @@ KEV_WAIT_INSTRUCTIONS = (
 def _node(v: Any) -> int:
     """노드 ID를 정수(int)로 정규화하며, bool이나 실수(float) 같은 손실 변환 입력은 거부한다."""
     if isinstance(v, bool) or not isinstance(v, (int, str)):
-        raise ValueError("node ID must be an integer or integer string (not bool/float)")
+        raise ValueError(
+            "node ID must be an integer or integer string (not bool/float)"
+        )
     return int(v)
 
 
@@ -114,7 +98,9 @@ class Graph:
             _node(key): feature["properties"]
             for key, feature in route_service.node_lookup(data).items()
         }
-        self.edges = route_service.build_edge_weight_lookup(self.nodes, self.edge_records)
+        self.edges = route_service.build_edge_weight_lookup(
+            self.nodes, self.edge_records
+        )
         self.compact = route_service.build_compact_adjacency_graph(
             data, "kev-mapf-in-memory", require_stored_weight=True
         )
@@ -124,22 +110,30 @@ class Graph:
         """지정된 파일 경로에서 GeoJSON을 읽어 `Graph` 인스턴스를 생성한다."""
         return cls(json.loads(path.read_text(encoding="utf-8")))
 
-    def check_path(self, path: list[int], *, start: int | None = None, goal: int | None = None) -> None:
+    def check_path(
+        self, path: list[int], *, start: int | None = None, goal: int | None = None
+    ) -> None:
         """경로의 시작·끝점 일치, 유향 간선 존재 여부, 유향 간선 재사용 금지 및 노드 방문 상한(최대 2회)을 검증한다."""
         normalized = [_node(n) for n in path]
         if not normalized:
             raise ValueError("path must be nonempty")
         route_service.validate_and_calculate_path_distance(
-            self.nodes, self.edge_records, normalized,
+            self.nodes,
+            self.edge_records,
+            normalized,
             normalized[0] if start is None else start,
             normalized[-1] if goal is None else goal,
         )
         # 기존 예약 경계와 동일하게 유향 간선 재사용·노드 3회 이상 방문을 거부한다.
         steps = list(zip(normalized, normalized[1:]))
-        if len(set(steps)) != len(steps) or any(n > 2 for n in Counter(normalized).values()):
+        if len(set(steps)) != len(steps) or any(
+            n > 2 for n in Counter(normalized).values()
+        ):
             raise ValueError("path violates directed-edge reuse or node visit limit")
 
-    def virtual_graph(self, forbidden_nodes: set[int], forbidden_edges: set[tuple[int, int]]) -> dict[str, Any]:
+    def virtual_graph(
+        self, forbidden_nodes: set[int], forbidden_edges: set[tuple[int, int]]
+    ) -> dict[str, Any]:
         """제외할 충돌 노드·간선을 제거한 임시 GeoJSON을 메모리에 생성하고 원본 데이터는 보존한다."""
         features = []
         for f in self.data.get("features", []):
@@ -149,7 +143,11 @@ class Graph:
                     continue
             elif p.get("startid") is not None and p.get("endid") is not None:
                 a, b = _node(p["startid"]), _node(p["endid"])
-                if a in forbidden_nodes or b in forbidden_nodes or (a, b) in forbidden_edges:
+                if (
+                    a in forbidden_nodes
+                    or b in forbidden_nodes
+                    or (a, b) in forbidden_edges
+                ):
                     continue
             features.append(f)
         return {"type": "FeatureCollection", "features": features}
@@ -157,7 +155,8 @@ class Graph:
     def declared_wait_nodes(self) -> set[int]:
         """GeoJSON 노드 속성에서 `wait_allowed=True` 또는 `safe_wait=True`로 선언된 대기 가능 노드 집합을 반환한다."""
         return {
-            n for n, p in self.node_props.items()
+            n
+            for n, p in self.node_props.items()
             if p.get("wait_allowed") is True or p.get("safe_wait") is True
         }
 
@@ -165,7 +164,9 @@ class Graph:
 class LiveKEV:
     """기존 Logistics_AI의 경로 preview(`preview_llm_route`)와 `KevSelector`를 재사용하는 실시간 판단 클라이언트."""
 
-    def __init__(self, repo: Path, *, model: str, deadline: float, max_steps: int | None):
+    def __init__(
+        self, repo: Path, *, model: str, deadline: float, max_steps: int | None
+    ):
         """저장소 경로를 확인하고 `KevSelector` 및 호출 통계 카운터(`calls`, `forced`, `model_seconds`)를 초기화한다."""
         repo = repo.expanduser().resolve()
         target = repo / "backend/app/services/llm_route_preview.py"
@@ -176,6 +177,7 @@ class LiveKEV:
         # FMS 프로젝트에서 사용하는 Python 의존성이 필요하다.
         from backend.app.services.route_selector.kev_selector import KevSelector
         from backend.app.services.llm_route_preview import preview_llm_route
+
         self.selector = KevSelector(model=model)
         self.model = model
         self.preview_llm_route = preview_llm_route
@@ -186,14 +188,34 @@ class LiveKEV:
         self.forced = 0
         self.warnings: list[str] = []
 
-    def pick(self, state: dict[str, Any], candidates: dict[str, str], instructions: str, question_id: str) -> str:
+    def pick(
+        self,
+        state: dict[str, Any],
+        candidates: dict[str, str],
+        instructions: str,
+        question_id: str,
+    ) -> str:
         """후보가 1개면 API 호출 없이 강제 선택(`forced`)하고, 2개 이상이면 `KevSelector.select_choice()`로 판단한다."""
         if not candidates:
             raise ValueError(f"no selectable choices for {question_id}")
         if len(candidates) == 1:
             self.forced += 1
             return next(iter(candidates))
-        res = self.selector.select_choice(state, candidates, instructions, question_id=question_id)
+        res = self.selector.select_choice(
+            state, candidates, instructions, question_id=question_id
+        )
+        if question_id.startswith("action_"):
+            """res debug 출력"""
+            print(
+                f"\n[KEV ACTION DEBUG]"
+                f"\n  question: {question_id}"
+                f"\n  candidates: {candidates}"
+                f"\n  selected: {res['choice']}"
+                f"\n  probabilities: {res.get('probabilities', {})}"
+                f"\n  confidence: {res.get('confidence')}"
+                f"\n  answer_confidence: {res.get('answer_confidence')}",
+                file=sys.stderr,
+            )
         self.calls += 1
         self.model_seconds += float(res.get("total_duration_seconds") or 0.0)
         choice = str(res["choice"])
@@ -201,17 +223,30 @@ class LiveKEV:
             raise RuntimeError(f"KEV returned an invalid choice {choice!r}")
         return choice
 
-    def route(self, graph_data: dict, start: int, goal: int, *, selector: str = "kev", model: str | None = None) -> list[int]:
+    def route(
+        self,
+        graph_data: dict,
+        start: int,
+        goal: int,
+        *,
+        selector: str = "kev",
+        model: str | None = None,
+    ) -> list[int]:
         """기존 FMS preview(`preview_llm_route`)의 카탈로그·검증을 사용해 새로운 경로/우회 경로를 생성한다."""
         started = time.perf_counter()
         try:
             # 새 경로/우회만 추론한다. 카탈로그 오류를 별도 runner로 우회하지 않는다.
             result = self.preview_llm_route(
-                graph_data, str(start), str(goal), selector=selector,
+                graph_data,
+                str(start),
+                str(goal),
+                selector=selector,
                 model=self.model if model is None else model,
             )
             if not isinstance(result, dict) or not isinstance(result.get("path"), list):
-                raise ValueError("preview_llm_route() must return a dict with a path list")
+                raise ValueError(
+                    "preview_llm_route() must return a dict with a path list"
+                )
             path = [_node(n) for n in result["path"]]
             Graph(graph_data).check_path(path, start=start, goal=goal)
             self.calls += int(result.get("calls", 0))
@@ -277,11 +312,7 @@ def zone_candidates(paths: dict[str, list[int]]) -> dict[str, dict[str, Any]]:
     # ② 겹치는 노드 찾기
     for node, robots in nodes_by.items():
         if len(robots) >= 2:
-            c[f"node:{node}"] = {
-                "kind": "node",
-                "node": node,
-                "robots": sorted(robots)
-            }
+            c[f"node:{node}"] = {"kind": "node", "node": node, "robots": sorted(robots)}
     # ③ 겹치는 간선 찾기
     for edge, robots in edges_by.items():
         if len(robots) >= 2:
@@ -289,20 +320,125 @@ def zone_candidates(paths: dict[str, list[int]]) -> dict[str, dict[str, Any]]:
             c[f"edge:{a}:{b}"] = {
                 "kind": "edge",
                 "edge": [a, b],
-                "robots": sorted(robots)
+                "robots": sorted(robots),
             }
     return dict(sorted(c.items(), key=lambda x: x[0]))
 
 
+def group_conflict_zones(zones: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """같은 로봇들이 공유하고 서로 연결된 노드/간선을 하나의 구역으로 묶는다."""
+
+    keys = sorted(zones)
+    connected = {zid: set() for zid in keys}
+
+    def touched_nodes(info):
+        if info["kind"] == "node":
+            return {info["node"]}
+        return set(info["edge"])
+
+    # 1. 동일 로봇 집합이 공유하는 연결된 자원을 찾는다.
+    for i, key_a in enumerate(keys):
+        a = zones[key_a]
+
+        for key_b in keys[i + 1 :]:
+            b = zones[key_b]
+
+            # 참여 로봇 집합이 같아야 한다.
+            if a["robots"] != b["robots"]:
+                continue
+
+            # 노드끼리만 인접하다는 이유로 합치지는 않는다.
+            if a["kind"] == "node" and b["kind"] == "node":
+                continue
+
+            # 물리적으로 연결된 자원만 묶는다.
+            if not (touched_nodes(a) & touched_nodes(b)):
+                continue
+
+            connected[key_a].add(key_b)
+            connected[key_b].add(key_a)
+
+    # 2. 연결된 자원들을 그룹으로 구성한다.
+    visited = set()
+    grouped = {}
+
+    for key in keys:
+        if key in visited:
+            continue
+
+        stack = [key]
+        members = []
+
+        while stack:
+            current = stack.pop()
+
+            if current in visited:
+                continue
+
+            visited.add(current)
+            members.append(current)
+
+            stack.extend(sorted(connected[current] - visited))
+
+        members.sort()
+
+        # 단독 자원은 기존 형태 유지
+        if len(members) == 1:
+            grouped[members[0]] = zones[members[0]]
+            continue
+
+        # 여러 자원이 연결되었으면 하나의 구역으로 통합
+        grouped[f"zone:{members[0]}"] = {
+            "kind": "group",
+            "robots": zones[members[0]]["robots"],
+            "nodes": sorted(
+                zones[m]["node"] for m in members if zones[m]["kind"] == "node"
+            ),
+            "edges": sorted(
+                zones[m]["edge"] for m in members if zones[m]["kind"] == "edge"
+            ),
+            "resources": members,
+        }
+
+    return dict(sorted(grouped.items()))
+
+
 def first_zone_index(path: list[int], zone: dict[str, Any]) -> int | None:
-    """로봇 경로(`path`)에서 공유 구간(`zone`)에 처음 진입하는 인덱스 위치를 반환한다."""
-    if zone["kind"] == "node":
+    """경로에서 공유 구역에 최초 진입하는 위치를 찾는다."""
+
+    kind = zone["kind"]
+
+    if kind == "node":
         return next((i for i, n in enumerate(path) if n == zone["node"]), None)
-    a, b = zone["edge"]
-    return next(
-        (i + 1 for i, (u, v) in enumerate(zip(path, path[1:]))
-         if {u, v} == {a, b}), None
-    )
+
+    if kind == "edge":
+        a, b = zone["edge"]
+
+        return next(
+            (i for i, (u, v) in enumerate(zip(path, path[1:])) if {u, v} == {a, b}),
+            None,
+        )
+
+    if kind == "group":
+        group_nodes = set(zone["nodes"])
+
+        group_edges = {tuple(sorted(edge)) for edge in zone["edges"]}
+
+        indices = []
+
+        # 공유 노드에 최초 진입하는 위치
+        for i, n in enumerate(path):
+            if n in group_nodes:
+                indices.append(i)
+
+        # 공유 간선에 진입하기 시작하는 위치
+        for i, (a, b) in enumerate(zip(path, path[1:])):
+            if tuple(sorted((a, b))) in group_edges:
+                indices.append(i)
+
+        return min(indices) if indices else None
+
+    raise ValueError(f"Unknown zone kind: {kind}")
 
 
 def would_cycle(priorities: set[tuple[str, str]], high: str, low: str) -> bool:
@@ -364,22 +500,39 @@ def parse_robot_state(data: dict, graph: Graph, live: Any) -> dict[str, dict]:
             raise ValueError(f"unknown start/goal of {rid}")
         # path, route_result, result 중 한 가지를 받으며, 모두 없으면 새 경로를 생성한다.
         # route_result에는 preview_llm_route()의 결과를 그대로 전달할 수 있다.
-        candidates = [key for key in ("path", "route_result", "result") if raw.get(key) is not None]
+        candidates = [
+            key
+            for key in ("path", "route_result", "result")
+            if raw.get(key) is not None
+        ]
         if len(candidates) > 1:
-            raise ValueError(f"{rid}: choose one of path, route_result or result (not multiple)")
+            raise ValueError(
+                f"{rid}: choose one of path, route_result or result (not multiple)"
+            )
         if candidates:
             source = candidates[0]
-            raw_path = raw["path"] if source == "path" else raw[source].get("path") if isinstance(raw[source], dict) else None
+            raw_path = (
+                raw["path"]
+                if source == "path"
+                else raw[source].get("path") if isinstance(raw[source], dict) else None
+            )
             if not isinstance(raw_path, list) or not raw_path:
                 raise ValueError(f"{rid}: {source} must contain a nonempty path list")
             path = [_node(n) for n in raw_path]
             path_source = "provided" if source == "path" else "preview_result"
         else:
             path_source = "kev_preview" if not isinstance(live, MockKEV) else "mock_bfs"
-            path = live.route(graph.data, current, goal,
-                              selector=raw.get("selector", "kev"), model=raw.get("model"))
+            path = live.route(
+                graph.data,
+                current,
+                goal,
+                selector=raw.get("selector", "kev"),
+                model=raw.get("model"),
+            )
         if not path or path[0] != current or path[-1] != goal:
-            raise ValueError(f"{rid}: path must begin at current_node and end at goal_node")
+            raise ValueError(
+                f"{rid}: path must begin at current_node and end at goal_node"
+            )
         graph.check_path(path, start=current, goal=goal)
         robots[rid] = {
             "id": rid,
@@ -400,17 +553,31 @@ def parse_robot_state(data: dict, graph: Graph, live: Any) -> dict[str, dict]:
 class KevMAPF:
     """Kev 의사결정 클라이언트를 사용해 다중 로봇 간 공유 구간 충돌을 반복적으로 조정하는 엔진."""
 
-    def __init__(self, graph: Graph, robots: dict[str, dict], live: Any, config: dict, *, rounds: int = 16, reroutes: int = 3):
+    def __init__(
+        self,
+        graph: Graph,
+        robots: dict[str, dict],
+        live: Any,
+        config: dict,
+        *,
+        rounds: int = 16,
+        reroutes: int = 3,
+    ):
         """그래프, 로봇 상태, 판단 클라이언트(`live`), 점유·대기 정책(`config`) 및 최대 라운드/우회 한도를 초기화한다."""
         self.graph, self.robots, self.live = graph, robots, live
         self.rounds, self.reroutes = rounds, reroutes
         self.occupied: dict[str, str] = {
-            str(k): str(v) for k, v in (config.get("zone_occupancy") or {}).items()
+            str(k): str(v)
+            for k, v in (config.get("zone_occupancy") or {}).items()
             if v is not None
         }
         provided = config.get("wait_allowed_nodes")
         self.has_wait_policy = provided is not None or bool(graph.declared_wait_nodes())
-        self.certified_wait = ({_node(n) for n in provided} if provided is not None else graph.declared_wait_nodes())
+        self.certified_wait = (
+            {_node(n) for n in provided}
+            if provided is not None
+            else graph.declared_wait_nodes()
+        )
         for n in self.certified_wait:
             if n not in graph.nodes:
                 raise ValueError(f"wait_allowed_nodes contains missing node {n}")
@@ -420,15 +587,32 @@ class KevMAPF:
         self.warnings: list[str] = []
         self.reroute_count = 0
         self.processed: set[tuple[str, str, str]] = set()
+        # 이번 MAPF 계획의 대기 위치 예약
+        self.wait_reservations: dict[int, str] = {}
+
+        # 동일 로봇에 서로 다른 대기 위치가 배정되는 것 방지
+        self.robot_wait_nodes: dict[str, int] = {}
+
+    def _zone_occupants(self, zid: str, info: dict) -> list[str]:
+        """그룹에 속한 자원들의 현재 점유 로봇을 조회한다."""
+
+        resource_ids = [zid] + info.get("resources", [])
+
+        return sorted(
+            {self.occupied[rid] for rid in resource_ids if rid in self.occupied}
+        )
 
     def _graph_state(self) -> dict:
         """Kev 질의의 `state`에 공통으로 포함할 compact 그래프와 각 로봇의 인접 간선 정보를 구성한다."""
         return {
             "route_graph": self.graph.compact,
             "robots": [
-                {**robot, "available_edges": route_service.get_available_edges(
-                    self.graph.compact, robot["current_node"]
-                )}
+                {
+                    **robot,
+                    "available_edges": route_service.get_available_edges(
+                        self.graph.compact, robot["current_node"]
+                    ),
+                }
                 for robot in self.robots.values()
             ],
             "eta_available": False,
@@ -436,11 +620,14 @@ class KevMAPF:
 
     def _state(self, zone: str, info: dict, participants: list[str]) -> dict:
         """특정 충돌 구간(`zone`)과 참여 로봇(`participants`)에 대한 상세 의사결정 컨텍스트를 생성한다."""
+        occupants = self._zone_occupants(zone, info)
+
         return {
             **self._graph_state(),
             "shared_resource": zone,
             "shared_resource_details": info,
-            "occupant": self.occupied.get(zone),
+            "occupant": occupants[0] if len(occupants) == 1 else None,
+            "occupants": occupants,
             "participant_ids": participants,
             "known_priority_constraints": sorted([list(t) for t in self.priorities]),
             "safe_wait_nodes_verified": sorted(self.certified_wait),
@@ -450,46 +637,110 @@ class KevMAPF:
     def _pair_for(self, zone: str, info: dict) -> tuple[str, str] | None:
         """해당 공유 구간(`zone`)을 지나는 로봇들 중 아직 처리하지 않은 첫 번째 로봇 쌍 `(a, b)`를 반환한다."""
         rs = info["robots"]
-        pairs = [(a, b) for i, a in enumerate(rs) for b in rs[i+1:]]
-        return next(((a, b) for a, b in pairs if (zone, a, b) not in self.processed), None)
+        pairs = [(a, b) for i, a in enumerate(rs) for b in rs[i + 1 :]]
+        return next(
+            ((a, b) for a, b in pairs if (zone, a, b) not in self.processed), None
+        )
 
     def _wait_candidates(self, robot: dict, info: dict) -> list[int]:
-        """양보 로봇의 경로에서 충돌 구간(`info`) 진입 이전에 위치한 안전한 상류 대기 후보 노드 목록을 반환한다."""
+        """충돌 구역 진입 전 대기 가능하며 현재 점유되지 않은 노드를 반환한다."""
+
         path = robot["path"]
         before = first_zone_index(path, info)
+
         if before is None:
             return []
-        # 로봇의 남은 경로에서 공유 구간에 진입하기 전의 노드만 대기 후보로 사용한다.
+
         result = []
+        robot_id = robot["id"]
+
         for n in path[:before]:
+
+            # 1. 차단된 노드 제외
             if n in self.blocked_nodes:
                 continue
+
+            # 2. 대기 허용 노드인지 확인
             if self.has_wait_policy and n not in self.certified_wait:
                 continue
+
+            # 3. 다른 로봇이 점유한 노드 제외
+            occupant = self.occupied.get(f"node:{n}")
+
+            if occupant is not None and occupant != robot_id:
+                continue
+
+            # 4. 다른 관리 대상 AMR의 현재 위치와 겹치는 노드 제외
+            occupied_by_robot = any(
+                other_id != robot_id and other["current_node"] == n
+                for other_id, other in self.robots.items()
+            )
+
+            if occupied_by_robot:
+                continue
+
+            # 5. 다른 로봇에게 이미 대기 위치로 예약된 노드 제외
+            reserved_by = self.wait_reservations.get(n)
+
+            if reserved_by is not None and reserved_by != robot_id:
+                continue
+
+            # 6. 같은 로봇에 이미 배정된 대기 위치가 있으면 그 노드만 허용
+            assigned_node = self.robot_wait_nodes.get(robot_id)
+
+            if assigned_node is not None and n != assigned_node:
+                continue
+
+            # 7. 중복 없는 대기 후보 추가
             if n not in result:
                 result.append(n)
+
         return result
 
-    def _reroute(self, robot: dict, zid: str, info: dict) -> tuple[list[int] | None, str | None]:
+    def _reroute(
+        self, robot: dict, zid: str, info: dict
+    ) -> tuple[list[int] | None, str | None]:
         """충돌 구간(`info`)과 차단 노드를 제외한 임시 가상 그래프에서 양보 로봇의 우회 경로를 탐색·검증한다."""
         forbid_nodes = set(self.blocked_nodes)
         forbid_edges: set[tuple[int, int]] = set()
+
         if info["kind"] == "node":
             forbid_nodes.add(info["node"])
-        else:
+
+        elif info["kind"] == "edge":
             a, b = info["edge"]
             forbid_edges.update({(a, b), (b, a)})
+
+        elif info["kind"] == "group":
+
+            # 그룹에 속한 모든 공유 노드 제외
+            forbid_nodes.update(info["nodes"])
+
+            # 그룹에 속한 모든 공유 간선 제외
+            for a, b in info["edges"]:
+                forbid_edges.update({(a, b), (b, a)})
+
+        else:
+            raise ValueError(f"Unknown zone kind: {info['kind']}")
         if robot["current_node"] in forbid_nodes or robot["goal_node"] in forbid_nodes:
-            return None, "reroute cannot exclude current/goal node; use HOLD or change a task"
+            return (
+                None,
+                "reroute cannot exclude current/goal node; use HOLD or change a task",
+            )
         # 원본 지도는 보존하고 제외 구간을 제거한 임시 지도에서 주문의 AI 설정으로 우회한다.
         virtual = self.graph.virtual_graph(forbid_nodes, forbid_edges)
         try:
             candidate = self.live.route(
-                virtual, robot["current_node"], robot["goal_node"],
-                selector=robot["selector"], model=robot["model"],
+                virtual,
+                robot["current_node"],
+                robot["goal_node"],
+                selector=robot["selector"],
+                model=robot["model"],
             )
             candidate = [_node(n) for n in candidate]
-            self.graph.check_path(candidate, start=robot["current_node"], goal=robot["goal_node"])
+            self.graph.check_path(
+                candidate, start=robot["current_node"], goal=robot["goal_node"]
+            )
             for n in candidate:
                 if n in forbid_nodes:
                     raise ValueError("generated path entered forbidden node")
@@ -506,32 +757,65 @@ class KevMAPF:
         status = "PROPOSED"
         for it in range(self.rounds):
             routes = {r: x["path"] for r, x in self.robots.items()}
-            potential_conflict_zones = zone_candidates(routes) # 충돌 가능성이 있는 후보 구역
+            potential_conflict_zones = group_conflict_zones(
+                zone_candidates(routes)
+            )  # 충돌 가능성이 있는 후보 구역
             available_zones = {
-                zid: info for zid, info in potential_conflict_zones.items()
+                zid: info
+                for zid, info in potential_conflict_zones.items()
                 if self._pair_for(zid, info) is not None
             }
             if not available_zones:
                 break
             # [1단계] 해결할 공유 충돌 구간(zone) 선택
             zchoices = {
-                f"z{i}": f"zone={zid}, sharing={','.join(info['robots'])}, "
-                         f"occupant={self.occupied.get(zid, 'FREE')}"
+                f"z{i}": (
+                    f"zone={zid}, "
+                    f"sharing={','.join(info['robots'])}, "
+                    f"occupant={','.join(self._zone_occupants(zid, info)) or 'FREE'}"
+                )
                 for i, (zid, info) in enumerate(available_zones.items())
             }
             zkey = self.live.pick(
                 {**self._graph_state(), "zones": available_zones},
-                zchoices, KEV_ZONE_INSTRUCTIONS, f"mapf_zone_{it}"
+                zchoices,
+                KEV_ZONE_INSTRUCTIONS,
+                f"mapf_zone_{it}",
             )
             zid, info = list(available_zones.items())[int(zkey.removeprefix("z"))]
             pair = self._pair_for(zid, info)
             if pair is None:
                 continue
+
             a, b = pair
             self.processed.add((zid, a, b))
-            occupant = self.occupied.get(zid)
+            # 하나의 통합 구역 안에서 서로 다른 로봇이 점유 중이면 보류
+            occupants = self._zone_occupants(zid, info)
+            # 1. 서로 다른 로봇이 같은 통합 구역을 점유하는 경우
+            if len(occupants) > 1:
+                self.decisions.append(
+                    {
+                        "zone": zid,
+                        "robots": [a, b],
+                        "action": "HOLD",
+                        "reason": f"multiple occupants: {occupants}",
+                    }
+                )
+                status = "BLOCKED"
+                continue
+            # 2. 점유 로봇이 한 대라면 ID 추출
+            occupant = occupants[0] if occupants else None
+
+            # 3. 현재 판단 대상 외의 로봇이 점유 중인 경우
             if occupant and occupant not in (a, b):
-                self.decisions.append({"zone": zid, "robots": [a, b], "action": "HOLD", "reason": f"occupied by {occupant}"})
+                self.decisions.append(
+                    {
+                        "zone": zid,
+                        "robots": [a, b],
+                        "action": "HOLD",
+                        "reason": f"occupied by {occupant}",
+                    }
+                )
                 status = "BLOCKED"
                 continue
             # [2단계] 우선순위 사이클을 만들지 않는 후보 중 먼저 통과할 로봇(high) 선택
@@ -542,22 +826,40 @@ class KevMAPF:
             if not would_cycle(self.priorities, b, a):
                 possible.append((b, a))
             if occupant in pair:
-                possible = [(occupant, b if occupant == a else a)]
+                other = b if occupant == a else a
+
+                if would_cycle(self.priorities, occupant, other):
+                    possible = []
+                else:
+                    possible = [(occupant, other)]
             if not possible:
-                self.decisions.append({"zone": zid, "robots": [a, b], "action": "HOLD", "reason": "all priority choices create cycles"})
+                self.decisions.append(
+                    {
+                        "zone": zid,
+                        "robots": [a, b],
+                        "action": "HOLD",
+                        "reason": "all priority choices create cycles",
+                    }
+                )
                 status = "BLOCKED"
                 continue
             pri_map = {f"p{i}": (hi, lo) for i, (hi, lo) in enumerate(possible)}
-            pchoices = {key: f"{hi} receives priority over {lo}" for key, (hi, lo) in pri_map.items()}
-            priority_choice = self.live.pick(self._state(zid, info, [a, b]), pchoices, KEV_PRIORITY_INSTRUCTIONS, f"priority_{it}")
+            pchoices = {
+                key: f"{hi} receives priority over {lo}"
+                for key, (hi, lo) in pri_map.items()
+            }
+            priority_choice = self.live.pick(
+                self._state(zid, info, [a, b]),
+                pchoices,
+                KEV_PRIORITY_INSTRUCTIONS,
+                f"priority_{it}",
+            )
             high = pri_map[priority_choice][0]
             low = b if high == a else a
-            if not occupant:
-                self.priorities.add((high, low))
             # [3단계] 양보 로봇(low)의 충돌 회피 행동(WAIT / REROUTE / HOLD) 선택
             waiter = self.robots[low]
             wait_nodes = self._wait_candidates(waiter, info)
-            
+
             """
                 wait_nodes 디버깅용
             """
@@ -566,48 +868,125 @@ class KevMAPF:
                 f"priority={high}, "
                 f"yield={low}, "
                 f"wait_nodes={wait_nodes}",
-                file=sys.stderr
+                file=sys.stderr,
             )
-            
+            # [3단계] 양보 로봇의 행동 후보 구성
             action_choices = {}
+            # WAIT 가능한 노드가 있다면
             if wait_nodes:
-                action_choices["action_wait"] = "WAIT at an upstream node, release only on real zone-clear event"
+                action_choices["action_wait"] = "WAIT at a permitted upstream node."
+            # 우회 시도가 허용되어 있다면
             if self.reroute_count < self.reroutes:
-                action_choices["action_reroute"] = "REROUTE via the existing FMS preview with the robot route selector/model"
-            action_choices["action_hold"] = "HOLD and require operator or future event (safe fallback)"
+                action_choices["action_reroute"] = (
+                    "REROUTE: Attempt to generate a valid alternative route."
+                )
+            # WAIT와 REROUTE가 모두 후보로 없는 경우Allow connections+
+            if not action_choices:
+                action_choices["action_hold"] = "HOLD: No available resolution action."
             action = self.live.pick(
-                {**self._state(zid, info, [a, b]), "yield_robot": low,
-                 "candidate_wait_nodes": wait_nodes},
-                action_choices, KEV_ACTION_INSTRUCTIONS, f"action_{it}"
+                {
+                    **self._state(zid, info, [a, b]),
+                    "yield_robot": low,
+                    "candidate_wait_nodes": wait_nodes,
+                },
+                action_choices,
+                KEV_ACTION_INSTRUCTIONS,
+                f"action_{it}",
             )
+
             result: dict[str, Any] = {
-                "zone": zid, "robots": [a, b], "priority_robot": high,
-                "yield_robot": low, "occupied_by": occupant,
-                "action": "HOLD", "wait_node": None,
+                "zone": zid,
+                "robots": [a, b],
+                "priority_robot": high,
+                "yield_robot": low,
+                "occupied_by": occupant,
+                "action": "HOLD",
+                "wait_node": None,
                 "needs_fms_approval": True,
                 "priority_robot_action": "REQUEST_PROCEED_AFTER_FMS_PERMISSION",
             }
             # [4단계] WAIT인 경우 상류 대기 노드 선택, REROUTE인 경우 가상 그래프 우회 경로 생성
             if action == "action_wait":
                 wait_map = {f"w{i}": n for i, n in enumerate(wait_nodes)}
-                wc = {key: f"Wait at node {n} (on remaining route before {zid})" for key, n in wait_map.items()}
+                wc = {
+                    key: f"Wait at node {n} (on remaining route before {zid})"
+                    for key, n in wait_map.items()
+                }
                 select = self.live.pick(
-                    {**self._state(zid, info, [a, b]), "wait_robot": low,
-                     "wait_nodes": wait_nodes}, wc, KEV_WAIT_INSTRUCTIONS, f"wait_node_{it}"
+                    {
+                        **self._state(zid, info, [a, b]),
+                        "wait_robot": low,
+                        "wait_nodes": wait_nodes,
+                    },
+                    wc,
+                    KEV_WAIT_INSTRUCTIONS,
+                    f"wait_node_{it}",
                 )
                 selected = wait_map[select]
-                result.update(action="WAIT", wait_node=selected,
-                              wait_node_verified=(selected in self.certified_wait),
-                              note="FMS must stop robot before zone and wait for actual release event")
-                if not result["wait_node_verified"]:
-                    status = "REVIEW_REQUIRED" if status == "PROPOSED" else status
-                    self.warnings.append(f"{low}: wait node {selected} is NOT physically certified")
+
+                reserved_by = self.wait_reservations.get(selected)
+                assigned_node = self.robot_wait_nodes.get(low)
+
+                # 예약 충돌이 발생하면 안전하게 HOLD
+                if (
+                    selected not in wait_nodes
+                    or (reserved_by is not None and reserved_by != low)
+                    or (assigned_node is not None and assigned_node != selected)
+                ):
+                    result.update(
+                        action="HOLD", reason="WAIT_NODE_RESERVATION_CONFLICT"
+                    )
+                    status = "BLOCKED"
+
+                else:
+                    # 대기 노드 예약
+                    self.wait_reservations[selected] = low
+                    self.robot_wait_nodes[low] = selected
+
+                    result.update(
+                        action="WAIT",
+                        wait_node=selected,
+                        wait_node_verified=(selected in self.certified_wait),
+                        note="FMS must reserve the wait node and stop robot before the conflict zone",
+                    )
+
+                    if not result["wait_node_verified"]:
+                        if status == "PROPOSED":
+                            status = "REVIEW_REQUIRED"
+                        self.warnings.append(
+                            f"{low}: wait node {selected} is NOT physically certified"
+                        )
+                        # 다른 AMR의 남은 이동 경로와 WAIT 노드가 겹치는지 확인
+                    crossing_robots = sorted(
+                        rid
+                        for rid, other in self.robots.items()
+                        if rid != low and selected in other["path"]
+                    )
+
+                    # FMS에서 확인할 수 있도록 판단 결과에 기록
+                    result["wait_path_overlaps"] = crossing_robots
+
+                    if crossing_robots:
+                        self.warnings.append(
+                            f"{low}: WAIT node {selected} overlaps routes of "
+                            f"{', '.join(crossing_robots)}; "
+                            "FMS traffic reservation verification required"
+                        )
+
+                        # 시간 기반 통행 예약이 검증되지 않았으므로
+                        # 일반적인 PROPOSED 상태로 두지 않음
+                        if status == "PROPOSED":
+                            status = "REVIEW_REQUIRED"
             elif action == "action_reroute":
                 self.reroute_count += 1
                 new_route, error = self._reroute(waiter, zid, info)
                 if new_route is not None:
                     waiter["path"] = new_route
-                    waiter["source"] = "kev_rerouted" if not isinstance(self.live, MockKEV) else "mock_rerouted"
+                    waiter["source"] = (
+                        "kev_rerouted"
+                        if not isinstance(self.live, MockKEV)
+                        else "mock_rerouted"
+                    )
                     result.update(action="REROUTE", new_path=new_route)
                 else:
                     result.update(action="HOLD", reason="REROUTE_FAILED", details=error)
@@ -615,17 +994,34 @@ class KevMAPF:
             else:
                 result.update(action="HOLD", reason="KEV_SELECTED_HOLD")
                 status = "BLOCKED"
+            # WAIT 또는 REROUTE가 성공했을 때만 우선순위 기록
+            if result["action"] in ("WAIT", "REROUTE"):
+
+                if not would_cycle(self.priorities, high, low):
+                    self.priorities.add((high, low))
+
+                else:
+                    result.update(action="HOLD", reason="PRIORITY_CYCLE_DETECTED")
+                    status = "BLOCKED"
+
+            # 최종 판단 결과 저장
             self.decisions.append(result)
         else:
             status = "BLOCKED"
-            self.warnings.append(f"max_rounds={self.rounds} reached; more conflicts may remain")
+            self.warnings.append(
+                f"max_rounds={self.rounds} reached; more conflicts may remain"
+            )
 
-        remaining = zone_candidates({r: x["path"] for r, x in self.robots.items()})
+        remaining = group_conflict_zones(
+            zone_candidates({r: x["path"] for r, x in self.robots.items()})
+        )
         for rid, robot in self.robots.items():
             forbidden_used = sorted(set(robot["path"]) & self.blocked_nodes)
             if forbidden_used:
                 status = "BLOCKED"
-                self.warnings.append(f"{rid}: path still contains explicitly blocked nodes {forbidden_used}")
+                self.warnings.append(
+                    f"{rid}: path still contains explicitly blocked nodes {forbidden_used}"
+                )
         if any(d["action"] == "HOLD" for d in self.decisions):
             status = "BLOCKED"
         # 공유 구간을 순차적으로 통과하도록 제어하면 경로 공유가 곧 충돌을 뜻하지 않는다.
@@ -635,7 +1031,9 @@ class KevMAPF:
             "status": status,
             "robot_count": len(self.robots),
             "paths": {rid: r["path"] for rid, r in sorted(self.robots.items())},
-            "path_sources": {rid: r["source"] for rid, r in sorted(self.robots.items())},
+            "path_sources": {
+                rid: r["source"] for rid, r in sorted(self.robots.items())
+            },
             "potential_shared_zones": remaining,
             "decisions": self.decisions,
             "global_priority_relations": [list(x) for x in sorted(self.priorities)],
@@ -658,7 +1056,9 @@ class KevMAPF:
         }
 
 
-def preview_order_route_for_mapf(graph: dict, order: dict, current_node: int | str, node: int | str) -> dict:
+def preview_order_route_for_mapf(
+    graph: dict, order: dict, current_node: int | str, node: int | str
+) -> dict:
     """결과가 아직 없을 때만 dispatcher와 같은 preview 호출로 경로를 생성한다."""
     from backend.app.services.llm_route_preview import preview_llm_route
 
@@ -701,7 +1101,10 @@ def plan_mapf_from_route_results(
     for request in route_requests:
         order = request["order"]
         robot = mapf_robot_from_route_result(
-            order["robot_id"], request["current_node"], request["node"], request["result"],
+            order["robot_id"],
+            request["current_node"],
+            request["node"],
+            request["result"],
             status=request.get("status", "IDLE"),
             task_priority=request.get("task_priority", 0),
         )
@@ -717,9 +1120,12 @@ def plan_mapf_from_route_results(
         planner = LiveKEV(
             Path(__file__).resolve().parents[3],
             model=settings.get("mapf_model", "kev-08b"),
-            deadline=0.15, max_steps=None,
+            deadline=0.15,
+            max_steps=None,
         )
-    result = KevMAPF(route_graph, robots, planner, settings, rounds=rounds, reroutes=reroutes).resolve()
+    result = KevMAPF(
+        route_graph, robots, planner, settings, rounds=rounds, reroutes=reroutes
+    ).resolve()
     # FMS 전달용 str ID로 변환한다. WAIT/HOLD 실행 정책과 허가를 연결하기 전에는
     # mock_fms/ros_gateway.navigate_to_node(required_path=...)로 자동 전달하지 않는다.
     result["required_paths"] = {
@@ -730,42 +1136,120 @@ def plan_mapf_from_route_results(
 
 def demo_data() -> tuple[Graph, dict]:
     """`--demo` 실행 모드에서 사용할 내장 9-노드 GeoJSON 그래프와 3대의 AMR 예제 작업을 반환한다."""
-    points = {1:(0,1),2:(1,1),3:(2,1),4:(3,1),5:(0,0),6:(1,0),7:(3,0),8:(4,1),9:(5,1)}
-    edges = [(1,2),(2,3),(3,4),(5,6),(6,3),(3,7),(4,8),(8,9),(3,2),(2,1)]
+    points = {
+        1: (0, 1),
+        2: (1, 1),
+        3: (2, 1),
+        4: (3, 1),
+        5: (0, 0),
+        6: (1, 0),
+        7: (3, 0),
+        8: (4, 1),
+        9: (5, 1),
+    }
+    edges = [
+        (1, 2),
+        (2, 3),
+        (3, 4),
+        (5, 6),
+        (6, 3),
+        (3, 7),
+        (4, 8),
+        (8, 9),
+        (3, 2),
+        (2, 1),
+    ]
     features = [
-        {"type":"Feature", "geometry":{"type":"Point","coordinates":list(xy)},
-         "properties":{"id":n,"wait_allowed":n in (2,6)}}
-        for n,xy in points.items()
+        {
+            "type": "Feature",
+            "geometry": {"type": "Point", "coordinates": list(xy)},
+            "properties": {"id": n, "wait_allowed": n in (2, 6)},
+        }
+        for n, xy in points.items()
     ]
     features += [
-        {"type":"Feature", "geometry":{"type":"LineString","coordinates":[list(points[a]),list(points[b])]},
-         "properties":{"id":i+50,"startid":a,"endid":b,"weight":1.0}}
-        for i,(a,b) in enumerate(edges)
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "LineString",
+                "coordinates": [list(points[a]), list(points[b])],
+            },
+            "properties": {"id": i + 50, "startid": a, "endid": b, "weight": 1.0},
+        }
+        for i, (a, b) in enumerate(edges)
     ]
-    graph = Graph({"type":"FeatureCollection","features":features})
-    jobs = {"robots":[
-        {"id":"amr_1","current_node":1,"goal_node":4,"path":[1,2,3,4],"task_priority":1},
-        {"id":"amr_2","current_node":5,"goal_node":7,"path":[5,6,3,7],"task_priority":2},
-        {"id":"amr_3","current_node":8,"goal_node":9,"path":[8,9],"task_priority":3},
-    ],"wait_allowed_nodes":[2,6],"zone_occupancy":{}}
+    graph = Graph({"type": "FeatureCollection", "features": features})
+    jobs = {
+        "robots": [
+            {
+                "id": "amr_1",
+                "current_node": 1,
+                "goal_node": 4,
+                "path": [1, 2, 3, 4],
+                "task_priority": 1,
+            },
+            {
+                "id": "amr_2",
+                "current_node": 5,
+                "goal_node": 7,
+                "path": [5, 6, 3, 7],
+                "task_priority": 2,
+            },
+            {
+                "id": "amr_3",
+                "current_node": 8,
+                "goal_node": 9,
+                "path": [8, 9],
+                "task_priority": 3,
+            },
+        ],
+        "wait_allowed_nodes": [2, 6],
+        "zone_occupancy": {},
+    }
     return graph, jobs
 
 
 def main(argv: list[str] | None = None) -> int:
     """CLI 진입점: `--demo`, `--mock`, 또는 실시간 `LiveKEV` 모드로 MAPF 충돌 해결을 실행하고 결과를 JSON으로 저장한다."""
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--repo", type=Path, help="Local UNMODIFIED Logistics_AI checkout (live mode)")
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    ap.add_argument(
+        "--repo", type=Path, help="Local UNMODIFIED Logistics_AI checkout (live mode)"
+    )
     ap.add_argument("--graph", type=Path, help="Route GeoJSON from that checkout")
-    ap.add_argument("--jobs", type=Path, help="JSON with robots + optional path or route_result (preview result['path'])")
+    ap.add_argument(
+        "--jobs",
+        type=Path,
+        help="JSON with robots + optional path or route_result (preview result['path'])",
+    )
     ap.add_argument("--output", type=Path, default=Path("mapf_result.json"))
     ap.add_argument("--model", default="kev-08b")
-    ap.add_argument("--deadline", type=float, default=0.15, help="deprecated compatibility option; live preview uses model catalog")
-    ap.add_argument("--max-steps", type=int, default=None, help="deprecated; live preview uses model catalog")
+    ap.add_argument(
+        "--deadline",
+        type=float,
+        default=0.15,
+        help="deprecated compatibility option; live preview uses model catalog",
+    )
+    ap.add_argument(
+        "--max-steps",
+        type=int,
+        default=None,
+        help="deprecated; live preview uses model catalog",
+    )
     ap.add_argument("--max-rounds", type=int, default=16)
     ap.add_argument("--max-reroutes", type=int, default=3)
     modes = ap.add_mutually_exclusive_group()
-    modes.add_argument("--demo", action="store_true", help="built-in offline mock demo; NO real KEV inference")
-    modes.add_argument("--mock", action="store_true", help="offline decisions with supplied --graph and --jobs; NO real KEV inference")
+    modes.add_argument(
+        "--demo",
+        action="store_true",
+        help="built-in offline mock demo; NO real KEV inference",
+    )
+    modes.add_argument(
+        "--mock",
+        action="store_true",
+        help="offline decisions with supplied --graph and --jobs; NO real KEV inference",
+    )
     a = ap.parse_args(argv)
     if a.demo:
         graph, config = demo_data()
@@ -782,11 +1266,15 @@ def main(argv: list[str] | None = None) -> int:
         else:
             if a.repo is None:
                 ap.error("live mode also requires --repo")
-            live = LiveKEV(a.repo, model=a.model, deadline=a.deadline, max_steps=a.max_steps)
+            live = LiveKEV(
+                a.repo, model=a.model, deadline=a.deadline, max_steps=a.max_steps
+            )
     if a.max_rounds < 1 or a.max_reroutes < 0:
         ap.error("invalid planning limits")
     robots = parse_robot_state(config, graph, live)
-    result = KevMAPF(graph, robots, live, config, rounds=a.max_rounds, reroutes=a.max_reroutes).resolve()
+    result = KevMAPF(
+        graph, robots, live, config, rounds=a.max_rounds, reroutes=a.max_reroutes
+    ).resolve()
     if a.demo:
         result["mode"] = "MOCK_DEMO_NOT_MODEL_INFERENCE"
     elif a.mock:
