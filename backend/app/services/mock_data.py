@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from copy import deepcopy
 from datetime import datetime, timezone
 from time import monotonic
@@ -23,6 +24,22 @@ _MOCK_ROBOT_DEFINITIONS = {
     "robot2": {"node_id": "1", "status": "IDLE", "battery": 78.0},
     "robot3": {"node_id": "2", "status": "IDLE", "battery": 64.0},
 }
+
+# 실험용 배터리 초기값. 예: SIM_BATTERY_OVERRIDE="robot1=50,robot2=78,robot3=92"
+# 변수가 없으면 _MOCK_ROBOT_DEFINITIONS의 기본 배터리를 그대로 쓴다.
+def _battery_overrides() -> dict[str, float]:
+    value = os.getenv("SIM_BATTERY_OVERRIDE", "").strip()
+    if not value:
+        return {}
+    overrides = {}
+    for item in value.split(","):
+        robot_id, separator, battery = item.partition("=")
+        robot_id = robot_id.strip()
+        if not separator or robot_id not in _MOCK_ROBOT_DEFINITIONS:
+            raise ValueError(f"SIM_BATTERY_OVERRIDE 형식이 잘못됐습니다: {item!r} (예: robot1=50,robot2=78)")
+        overrides[robot_id] = float(battery)
+    return overrides
+
 
 _MOCK_CONNECTIONS = {"10.10.141.225": "robot1", "10.10.141.221": "robot2", "10.10.141.222": "robot3"}
 
@@ -49,13 +66,16 @@ class MockFmsStore:
             self._last_tick = monotonic()
             self._robots.clear()
             self._blocked_ips.clear()
+            battery_overrides = _battery_overrides()
             for robot_id, definition in _MOCK_ROBOT_DEFINITIONS.items():
                 node = get_node(definition["node_id"])
                 self._robots[robot_id] = {
                     "robot_id": robot_id,
                     "ui_id": to_ui_robot_id(robot_id),
                     "status": definition["status"],
-                    "battery": definition["battery"],
+                    # 기존 코드. 실험용 SIM_BATTERY_OVERRIDE가 있으면 그 값을 우선한다.
+                    # "battery": definition["battery"],
+                    "battery": battery_overrides.get(robot_id, definition["battery"]),
                     "x": node["x"],
                     "y": node["y"],
                     "yaw": 0.0,

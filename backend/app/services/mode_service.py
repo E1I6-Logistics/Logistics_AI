@@ -14,7 +14,9 @@ OperationMode = Literal["algorithm", "ai"]
 # Traffic and safety continue to use the existing algorithms in both modes.
 FEATURE_ENGINES = {
     "algorithm": {"route": "algorithm", "dispatch": "algorithm", "workstation": "algorithm"},
-    "ai": {"route": "ai", "dispatch": "algorithm", "workstation": "algorithm"},
+    # 기존 AI 모드 설정. KEV 배차를 먼저 적용하는 동안 경로는 기존 알고리즘을 사용한다.
+    # "ai": {"route": "ai", "dispatch": "algorithm", "workstation": "algorithm"},
+    "ai": {"route": "algorithm", "dispatch": "ai", "workstation": "algorithm"},
 }
 
 

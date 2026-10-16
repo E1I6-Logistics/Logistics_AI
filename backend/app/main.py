@@ -44,6 +44,16 @@ for logger_name in ("uvicorn.error", "uvicorn.access"):
             logging.Formatter("[%(asctime)s] [%(levelname)s] [UVICORN] %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
         )
 
+# 백엔드 앱 로그(KEV 배차 선택 등)를 INFO부터 출력한다. 다른 라이브러리 로그는 그대로 둔다.
+app_logger = logging.getLogger(__package__)
+app_logger.setLevel(logging.INFO)
+if not app_logger.handlers:
+    app_handler = logging.StreamHandler()
+    app_handler.setFormatter(
+        logging.Formatter("[%(asctime)s] [%(levelname)s] [%(name)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
+    )
+    app_logger.addHandler(app_handler)
+
 
 # 서버 시작과 종료 시 필요한 자원을 관리한다.
 @asynccontextmanager

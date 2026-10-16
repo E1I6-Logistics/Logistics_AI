@@ -10,9 +10,14 @@ from time import monotonic
 def available_robots(mode, busy_ids, returning_ids=(), operation_mode="algorithm"):
     from .mode_service import feature_engine
 
-    # AI dispatch can be connected here later; both modes currently use this policy.
-    if feature_engine("dispatch", operation_mode) != "algorithm":
-        raise ValueError("지원하지 않는 배차 방식입니다.")
+    # 기존에는 algorithm 배차만 허용했다. 후보 필터링은 AI 배차에서도 동일하게 사용한다.
+    # if feature_engine("dispatch", operation_mode) != "algorithm":
+    #     raise ValueError("지원하지 않는 배차 방식입니다.")
+
+    dispatch_engine = feature_engine("dispatch", operation_mode)
+    if dispatch_engine not in {"algorithm", "ai"}:
+        raise ValueError(f"지원하지 않는 배차 방식입니다: {dispatch_engine}")
+
     if mode == "simulation":
         from .mock_data import mock_fms
 
