@@ -199,6 +199,7 @@ def test_kev_dispatch_debug_log_is_opt_in(monkeypatch, caplog, debug_enabled):
     assert record == {
         "order_id": order["order_id"],
         "question_id": captured["question_id"],
+        "excluded_last_robot": None,
         "state": captured["state"],
         "choices": captured["candidates"],
         "instructions": captured["instructions"],
@@ -301,6 +302,46 @@ def test_kev_dispatch_excludes_last_robot_when_others_available(monkeypatch):
     # 직전 로봇만 남으면 그대로 배정한다.
     assert order_manager._select_robot_with_kev(row, ["robot1"], "simulation") == "robot1"
     assert len(seen) == 1
+
+
+# 직전 로봇을 KEV 후보에서 뺐다면 디버그 JSON에 excluded_last_robot으로 남기는지 검증한다.
+def test_kev_dispatch_debug_log_records_excluded_last_robot(monkeypatch, caplog):
+    _reset(monkeypatch)
+    monkeypatch.setenv("KEV_DISPATCH_DEBUG", "1")
+    caplog.set_level(logging.INFO, logger="backend.app.services.order_manager")
+
+    class FakeKevSelector:
+        def select_choice(self, **kwargs):
+            return {"choice": "robot3", "probabilities": {"robot2": 0.4, "robot3": 0.6}}
+
+    order_manager._kev_dispatch_selector = FakeKevSelector()
+    row = {
+        "order_id": "retry-1",
+        "items": {"A": 1, "B": 0, "C": 0, "D": 0},
+        "total_quantity": 1,
+        "pickup_nodes": ["5"],
+        "last_robot_id": "robot1",
+    }
+    assert order_manager._select_robot_with_kev(row, ["robot1", "robot2", "robot3"], "simulation") == "robot3"
+
+    debug_messages = [
+        record.getMessage()
+        for record in caplog.records
+        if record.name == "backend.app.services.order_manager"
+        and record.getMessage().startswith("KEV_DISPATCH_DEBUG ")
+    ]
+    assert len(debug_messages) == 1
+    record = json.loads(debug_messages[0].removeprefix("KEV_DISPATCH_DEBUG "))
+    assert record["excluded_last_robot"] == "robot1"
+    assert list(record["choices"]) == ["robot2", "robot3"]
+    assert record["state"]["order"]["last_robot_id"] == "robot1"
+
+    # 제외 뒤 후보가 한 대만 남으면 KEV를 부르지 않고 skip 로그에 제외 로봇을 남긴다.
+    caplog.clear()
+    assert order_manager._select_robot_with_kev(row, ["robot1", "robot2"], "simulation") == "robot2"
+    messages = [record.getMessage() for record in caplog.records]
+    assert not any(message.startswith("KEV_DISPATCH_DEBUG ") for message in messages)
+    assert any("skipped (single candidate)" in m and "excluded_last_robot=robot1" in m for m in messages)
 
 
 # KEV 실패 후 쿨다운 동안에는 KEV를 다시 호출하지 않고 기존 배차를 사용하는지 검증한다.
@@ -994,3 +1035,88 @@ def test_order_api_accepts_items_without_robot_or_workstation(monkeypatch):
     assert created["robot_id"] is None
     assert created["workstation_node"] is None
     assert created["pickup_nodes"] == ["5", "6"]
+
+
+# 시뮬레이션 /api/robots가 주문 중인 로봇을 IDLE이어도 배차 불가로 표시하는지 검증한다.
+def test_robots_api_reports_dispatch_status_in_simulation(monkeypatch):
+    _reset(monkeypatch)
+    from backend.app.routers.robots import fetch_robots
+
+    async def scenario():
+        order = order_manager.create_order(items={"A": 1, "B": 0, "C": 0, "D": 0}, total_quantity=1)
+        before = {row["robot_id"]: row for row in await fetch_robots()}
+        assert all(row["dispatch_available"] for row in before.values())
+        assert all(row["dispatch_block_reason"] is None for row in before.values())
+        assert all(row["assigned_order_id"] is None for row in before.values())
+
+        await order_manager.tick()
+        # 픽업대에서 기다리는 것처럼 주행 상태는 IDLE이지만 주문은 진행 중인 상태를 만든다.
+        mock_fms.stop_robot("robot1")
+        after = {row["robot_id"]: row for row in await fetch_robots()}
+        assert after["robot1"]["status"] == "IDLE"
+        assert after["robot1"]["assigned_order_id"] == order["order_id"]
+        assert after["robot1"]["dispatch_available"] is False
+        assert after["robot1"]["dispatch_block_reason"] == "assigned_order"
+        assert after["robot2"]["dispatch_available"] is True
+        await asyncio.gather(*list(simulation_order_runner.tasks.values()))
+
+    asyncio.run(scenario())
+
+
+# 실제 모드 /api/robots가 order_dispatcher와 같은 기준으로 막힌 이유를 표시하는지 검증한다.
+def test_robots_api_reports_dispatch_status_in_real_mode(monkeypatch):
+    _reset(monkeypatch)
+    from backend.app.models.robot import Robot, RobotState
+    from backend.app.ros2.ros_gateway import ros_gateway
+    from backend.app.routers.robots import fetch_robots
+    from backend.app.services.fleet_manager import fleet_manager
+
+    robots = []
+    for robot_id, node in (("robot1", "0"), ("robot2", "1"), ("robot3", "2")):
+        robot = Robot(robot_id)
+        robot.set_connected(True)
+        robot.update_pose(0, 0, 0)
+        robot.occupied_node = node
+        robot.set_state(RobotState.IDLE)
+        robots.append(robot)
+    robots[2].set_connected(False)
+    monkeypatch.setattr(fleet_manager, "get_all_robots", lambda: robots)
+    monkeypatch.setattr(ros_gateway, "navigation_active", lambda robot_id: robot_id == "robot2")
+    monkeypatch.setattr(type(mode_manager), "mode", property(lambda _self: "real"))
+    order_manager.orders["o1"] = {"order_id": "o1", "robot_id": "robot1", "status": "IN_PROGRESS", "mode": "real"}
+
+    rows = {row["robot_id"]: row for row in asyncio.run(fetch_robots())}
+    assert rows["robot1"]["assigned_order_id"] == "o1"
+    assert rows["robot1"]["dispatch_block_reason"] == "assigned_order"
+    assert rows["robot2"]["dispatch_block_reason"] == "navigating"
+    assert rows["robot3"]["dispatch_block_reason"] == "disconnected"
+    assert not any(row["dispatch_available"] for row in rows.values())
+
+
+# 다른 스레드가 주문 lock을 잡고 있으면 기다리지 않고 status_busy로 응답하는지 검증한다.
+def test_robots_api_does_not_wait_for_order_lock(monkeypatch):
+    import threading
+
+    _reset(monkeypatch)
+    from backend.app.routers.robots import fetch_robots
+
+    locked = threading.Event()
+    release = threading.Event()
+
+    def hold_lock():
+        with order_manager.lock:
+            locked.set()
+            release.wait(5)
+
+    thread = threading.Thread(target=hold_lock)
+    thread.start()
+    try:
+        locked.wait(5)
+        started = monotonic()
+        rows = asyncio.run(fetch_robots())
+        assert monotonic() - started < 0.5
+        assert all(row["dispatch_available"] is None for row in rows)
+        assert all(row["dispatch_block_reason"] == "status_busy" for row in rows)
+    finally:
+        release.set()
+        thread.join()

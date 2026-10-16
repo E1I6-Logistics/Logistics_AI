@@ -417,6 +417,41 @@ ORDER-004에서 보듯 API의 `status: IDLE`만으로는 배차 가능 여부를
 
 한계: 시뮬레이션에서만 검증했다. 시뮬레이션 배터리는 주행 중 줄지 않으므로 초기값 기준의 판단만 확인했다. 재시도 주문(`last_robot_id` 회피)과 실제 로봇(`fleet_manager`) 경로는 A′ 범위에 포함되지 않는다.
 
+### D-5. 재시도 주문의 직전 로봇 제외 (2026-10-16)
+
+V3 지시문에서 빠진 "직전 로봇 회피"를 코드 규칙으로 옮긴 뒤, 실제 KEV 서버로 재시도 흐름을 확인했다. 시뮬레이션 주문은 API로 `FAILED`를 만들 수 없다. 정지 명령을 보내면 주문이 `CANCELLED`가 된다. 그래서 `tools/retry_scenario.py`가 백엔드 모듈을 직접 불러 백엔드와 같은 10Hz 루프(`order_manager.tick()` → `mock_fms.advance_simulation()`)를 돌린다. 운영 코드는 수정하지 않았다.
+
+절차 (FMS 백엔드는 끄고 KEV 서버만 켠 상태):
+
+```bash
+source /opt/ros/jazzy/setup.bash
+~/venv/robot/bin/python tools/retry_scenario.py
+```
+
+스크립트는 `SIM_BATTERY_OVERRIDE=robot1=30,robot2=78,robot3=92`와 `KEV_DISPATCH_DEBUG=1`을 직접 설정한다. 8000 포트가 열려 있으면 실행을 멈춘다. 그다음 아래 순서로 진행한다.
+
+1. AI 모드로 주문 1건을 넣고 첫 배정을 기록한다.
+2. 픽업대 작업 중(`WORKING_AT_PICKUP`)에 `order_manager.fail()`을 호출한다. 주행 중(MOVING)에 실패시키면 자동 복귀가 시작되지 않는다.
+3. 실패 로봇이 station으로 복귀하고, 세 대 모두 `dispatch_available=true`가 될 때까지 기다린다.
+4. `retry_order()`를 호출한 뒤 재배정 결과와 KEV debug JSON을 기록한다.
+
+결과 (1회). 이때는 사용자 백엔드가 켜져 있어 `--allow-backend`로 실행했다. 스크립트는 별도 프로세스라 백엔드와 메모리 상태를 공유하지 않는다.
+
+| 단계 | 결과 |
+|---|---|
+| 첫 배정 | robot3. 후보 robot1·2·3, P = 0.1405 / 0.2961 / **0.5634** (A′와 같음) |
+| fail() 직후 | status=FAILED, recovery=PENDING, last_robot_id=None |
+| 복귀 후 retry | status=PENDING, **last_robot_id=robot3** |
+| 재시도 KEV 입력 | 후보 robot1·robot2, **excluded_last_robot=robot3**, `state.order.last_robot_id=robot3` |
+| 재시도 KEV 응답 | P(robot1)=0.3966, P(robot2)=**0.6034**, confidence 0.2068 → robot2 |
+| 최종 배정 | **robot2**, fallback 없음 |
+
+판정: 5개 항목(첫 배정 robot3, 재시도 후보 robot1·robot2, excluded_last_robot=robot3, 선택 robot2, fallback 없음) 모두 PASS.
+
+- 줄어든 후보(30/78)에서도 배터리가 높은 robot2를 골랐다. A′ 참고 회차 ORDER-003(같은 두 후보)의 P(robot2)=0.6184와 값이 조금 다르다. 이번 입력에는 `last_robot_id=robot3`이 state에 들어 있었으므로 입력이 같지 않다.
+- 제외는 KEV 입력 전에 코드로 처리하므로, 재시도 주문에서 직전 로봇이 다시 선택되는 일은 KEV 응답과 관계없이 일어나지 않는다. 단, 직전 로봇만 남으면 그 로봇을 배정한다.
+- 한계: HTTP 계층과 실제 로봇 경로는 거치지 않았다. 실패는 인위적으로 주입했다.
+
 #### 이후 개선 방향
 
 - 배터리 하한처럼 반드시 지켜야 하는 조건은 현장 정책으로 기준을 정한 뒤 `available_robots()`에서 코드로 처리한다. 예를 들어 정책상 40% 미만 로봇을 제외하기로 합의한 경우, 이를 KEV 프롬프트가 아닌 코드 필터로 보장한다.
@@ -448,6 +483,7 @@ ORDER-004에서 보듯 API의 `status: IDLE`만으로는 배차 가능 여부를
 | C 알고리즘 회귀 | 1 | 통과 | 기본 배터리 92/78/64; robot1 배정 및 주문 완료; KEV POST 0→0, 관련 backend 로그 없음 | 해당 시뮬레이션 조건에서 algorithm 경로가 KEV를 호출하지 않음 확인 |
 | D1/D2/D3 선택 입력·확률 분석 | D1 5회 + D2 14 + D3 30 direct requests | 직접 재생 완료 | D3 정확도: V1 2/6, V2 6/6, V3 6/6; R1a criteria-only 6/6, R1b state-only 5/6 | V2/V3는 최고 배터리 선택. R1b 한 오답은 재현성 추가 확인 필요 |
 | D4 Backend 반영/A′ | Backend 변경 완료; A′ 6회 (+참고 2회) | A′ 완료 (2026-10-16) | order_id state 제거, V3 prompt, robot_id 정렬, last_robot_id 코드 제외; fallback/algorithm 모드 유지 | 30/78/92 조건에서 6/6 robot3, 매회 P(robot3)=0.5634 1위, fallback 없음 |
+| D5 재시도 직전 로봇 제외 | 1 | 통과 (5/5 판정 항목) | 첫 배정 robot3 → fail/복귀/retry → 후보 robot1·robot2, excluded_last_robot=robot3, P(robot2)=0.6034 → robot2 | `tools/retry_scenario.py` 프로세스 내 시험. HTTP 계층·실제 로봇 미포함, 실패는 인위 주입 |
 
 ### 테스트 기준 및 D-1 계측 검증
 

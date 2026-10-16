@@ -9,6 +9,7 @@ from threading import RLock
 from time import monotonic
 from uuid import uuid4
 
+from ..config import REAL_POSE_TIMEOUT_S
 from ..models.robot import RobotState
 from ..ros2.ros_gateway import CHARGING_STATION_NODES, NODE_OMX_MAP, ros_gateway
 from ..schemas.robot import normalize_robot_id
@@ -26,6 +27,8 @@ logger = logging.getLogger(__name__)
 # 배차 KEV 호출은 주문 tick 안에서 동기로 실행되므로 짧게 끊고, 실패 후에는 잠시 호출하지 않는다.
 KEV_DISPATCH_TIMEOUT_SECONDS = float(os.getenv("KEV_DISPATCH_TIMEOUT_SECONDS", "3"))
 KEV_DISPATCH_COOLDOWN_SECONDS = float(os.getenv("KEV_DISPATCH_COOLDOWN_SECONDS", "30"))
+# /api/robots 조회가 배차 tick을 기다리지 않도록 주문 lock 대기 시간을 짧게 둔다.
+DISPATCH_STATUS_LOCK_TIMEOUT_S = 0.05
 
 
 class OrderManager:
@@ -279,6 +282,113 @@ class OrderManager:
         for order_id in ids:
             self.cancel_order(order_id, return_to_station=False)
 
+    # /api/robots 조회용으로 로봇별 배차 가능 여부와 막힌 이유를 만든다.
+    # 주문 lock은 주문 목록을 복사하는 동안만 짧게 잡고, 못 잡으면 기다리지 않고 None을 돌려준다.
+    def dispatch_status(self, mode):
+        if not self.lock.acquire(timeout=DISPATCH_STATUS_LOCK_TIMEOUT_S):
+            return None
+        try:
+            assigned = {
+                row["robot_id"]: row["order_id"]
+                for row in self.orders.values()
+                if row["status"] == "IN_PROGRESS" and row["robot_id"]
+            }
+            recovering = set(self.recovering)
+            returning = set(self.returning)
+            failed_recovery = {
+                row["robot_id"]
+                for row in self.orders.values()
+                if row["mode"] == mode
+                and row["status"] in ("FAILED", "CANCELLED")
+                and row.get("recovery_status") in ("BLOCKED", "STOPPED")
+            }
+        finally:
+            self.lock.release()
+
+        # tick()의 busy 계산과 같은 기준을 쓴다.
+        busy = set(assigned) | recovering
+        held = set()
+        if mode == "simulation":
+            from .mock_data import mock_fms
+
+            robots = {row["robot_id"]: row for row in mock_fms.robot_snapshots(mode)}
+            for robot_id in failed_recovery:
+                snapshot = robots.get(robot_id)
+                if snapshot and snapshot["occupied_node"] != CHARGING_STATION_NODES.get(robot_id):
+                    held.add(robot_id)
+            busy |= held
+        else:
+            robots = {robot.robot_id: robot for robot in fleet_manager.get_all_robots()}
+        try:
+            available = set(available_robots(mode, busy, returning, mode_manager.operation_mode))
+        except ValueError:
+            available = set()
+
+        result = {}
+        for robot_id, robot in robots.items():
+            if scenario_manager.active:
+                reason = "scenario_active"
+            elif robot_id in available:
+                reason = None
+            elif robot_id in assigned:
+                reason = "assigned_order"
+            elif robot_id in recovering:
+                reason = "recovering"
+            elif robot_id in held:
+                reason = "recovery_hold"
+            elif mode == "simulation":
+                reason = self._simulation_block_reason(robot_id, robot, returning)
+            else:
+                reason = self._real_block_reason(robot_id, robot, returning)
+            result[robot_id] = {
+                "assigned_order_id": assigned.get(robot_id),
+                "dispatch_available": reason is None,
+                "dispatch_block_reason": reason,
+            }
+        return result
+
+    # 시뮬레이션 로봇이 배차 후보에서 빠진 이유를 order_dispatcher 조건 순서대로 찾는다.
+    @staticmethod
+    def _simulation_block_reason(robot_id, snapshot, returning):
+        if snapshot.get("connection_state") != "ONLINE":
+            return "disconnected"
+        if (
+            robot_id in returning
+            and snapshot.get("occupied_node") != CHARGING_STATION_NODES.get(robot_id)
+            and snapshot.get("goal_node") is None
+        ):
+            return "returning_stopped"
+        if snapshot.get("occupied_node") is None or snapshot.get("occupied_edge") is not None:
+            return "on_edge"
+        if snapshot.get("goal_node") is not None or snapshot.get("route") is not None:
+            return "navigating"
+        if snapshot.get("status") != "IDLE":
+            return "not_idle"
+        return "unavailable"
+
+    # 실제 로봇이 배차 후보에서 빠진 이유를 order_dispatcher 조건 순서대로 찾는다.
+    @staticmethod
+    def _real_block_reason(robot_id, robot, returning):
+        if not robot.connected:
+            return "disconnected"
+        if robot.order_id is not None:
+            return "robot_order"
+        if robot.occupied_node is None:
+            return "on_edge"
+        if robot.pose_received_at is None or monotonic() - robot.pose_received_at > REAL_POSE_TIMEOUT_S:
+            return "stale_pose"
+        if (
+            robot_id in returning
+            and robot.occupied_node != CHARGING_STATION_NODES.get(robot_id)
+            and robot.state != RobotState.NAVIGATING
+        ):
+            return "returning_stopped"
+        if robot.goal_node is not None or robot.route is not None or ros_gateway.navigation_active(robot_id):
+            return "navigating"
+        if robot.state != RobotState.IDLE:
+            return "not_idle"
+        return "unavailable"
+
     # KEV 배차 판단에 사용할 로봇 상태를 만든다.
     def _dispatch_robot_profile(self, robot_id, mode):
         if mode == "simulation":
@@ -315,11 +425,20 @@ class OrderManager:
         # 재시도 주문은 다른 후보가 있으면 직전 로봇을 KEV 후보에서 뺀다.
         # V1 지시문의 "Avoid the last robot"을 지시문 대신 코드 규칙으로 옮긴 것이다.
         last_robot_id = row.get("last_robot_id")
+        excluded_last_robot = None
         if last_robot_id in candidates and len(candidates) > 1:
             candidates = [candidate for candidate in candidates if candidate != last_robot_id]
+            excluded_last_robot = last_robot_id
         # Kev choice API는 후보가 두 개 이상이어야 한다.
         if len(candidates) == 1:
-            logger.info("KEV dispatch skipped (single candidate): robot=%s order=%s", candidates[0], row["order_id"])
+            # 기존 로그. 직전 로봇 제외 여부를 함께 남기도록 바꾼다.
+            # logger.info("KEV dispatch skipped (single candidate): robot=%s order=%s", candidates[0], row["order_id"])
+            logger.info(
+                "KEV dispatch skipped (single candidate): robot=%s order=%s excluded_last_robot=%s",
+                candidates[0],
+                row["order_id"],
+                excluded_last_robot,
+            )
             return candidates[0]
 
         profiles = []
@@ -384,6 +503,7 @@ class OrderManager:
         debug_record = {
             "order_id": row["order_id"],
             "question_id": question_id,
+            "excluded_last_robot": excluded_last_robot,
             "state": state,
             "choices": choices,
             "instructions": instructions,
