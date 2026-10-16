@@ -1,6 +1,8 @@
 """주문 실행의 순서와 작업대 선택을 검증한다."""
 
 import asyncio
+import json
+import logging
 import pytest
 from time import monotonic
 
@@ -20,6 +22,8 @@ def _reset(monkeypatch):
     order_manager.recovering.clear()
     order_manager._return_started.clear()
     order_manager._route_tasks.clear()
+    order_manager._kev_dispatch_selector = None
+    order_manager._kev_dispatch_retry_at = 0.0
     workstation_manager._assigned.clear()
     simulation_order_runner.tasks.clear()
     simulation_order_runner.work_seconds = 0.01
@@ -83,8 +87,8 @@ def test_four_operating_modes_use_feature_policies(monkeypatch, environment, ope
         assert (result["mode"], result["operation_mode"]) == (environment, operation)
         assert (await get_mode())["operation_mode"] == operation
         assert result["feature_engines"] == {
-            "route": "ai" if operation == "ai" else "algorithm",
-            "dispatch": "algorithm",
+            "route": "algorithm",
+            "dispatch": "ai" if operation == "ai" else "algorithm",
             "workstation": "algorithm",
         }
         order = await create_order(
@@ -97,9 +101,255 @@ def test_four_operating_modes_use_feature_policies(monkeypatch, environment, ope
             )
         )
         assert order["operation_mode"] == operation
-        assert order["driving_mode"] == ("llm" if operation == "ai" else "standard")
+        assert order["driving_mode"] == "standard"
         assert order["mode"] == environment
         assert workstation_manager.choose(order["order_id"], environment, operation) == "3"
+
+    try:
+        asyncio.run(scenario())
+    finally:
+        mode_manager.set_mode("simulation", "algorithm")
+
+
+# AI 배차 모드에서 KEV가 선택한 후보 로봇을 주문에 할당하는지 검증한다.
+def test_kev_dispatch_selects_candidate_robot(monkeypatch):
+    _reset(monkeypatch)
+
+    class FakeKevSelector:
+        def select_choice(self, **kwargs):
+            assert set(kwargs["candidates"]) == {"robot1", "robot2", "robot3"}
+            return {"choice": "robot2"}
+
+    async def scenario():
+        mode_manager.set_mode("simulation", "ai")
+        order_manager._kev_dispatch_selector = FakeKevSelector()
+        order = order_manager.create_order(
+            items={"A": 1, "B": 0, "C": 0, "D": 0},
+            total_quantity=1,
+        )
+        await order_manager.tick()
+        assert order_manager.get_order(order["order_id"])["robot_id"] == "robot2"
+        await asyncio.gather(*list(simulation_order_runner.tasks.values()))
+
+    try:
+        asyncio.run(scenario())
+    finally:
+        mode_manager.set_mode("simulation", "algorithm")
+
+
+# KEV 요청/응답 JSON 디버그 로그가 opt-in으로만 출력되는지 검증한다.
+@pytest.mark.parametrize("debug_enabled", [True, False])
+def test_kev_dispatch_debug_log_is_opt_in(monkeypatch, caplog, debug_enabled):
+    _reset(monkeypatch)
+    captured = {}
+    if debug_enabled:
+        monkeypatch.setenv("KEV_DISPATCH_DEBUG", "1")
+    else:
+        monkeypatch.delenv("KEV_DISPATCH_DEBUG", raising=False)
+    caplog.set_level(logging.INFO, logger="backend.app.services.order_manager")
+
+    class FakeKevSelector:
+        def select_choice(self, **kwargs):
+            captured.update(kwargs)
+            return {
+                "choice": "robot2",
+                "confidence": 0.4,
+                "answer_confidence": 0.6,
+                "probabilities": {"robot1": 0.2, "robot2": 0.6, "robot3": 0.2},
+            }
+
+    async def scenario():
+        mode_manager.set_mode("simulation", "ai")
+        order_manager._kev_dispatch_selector = FakeKevSelector()
+        order = order_manager.create_order(items={"A": 1, "B": 0, "C": 0, "D": 0}, total_quantity=1)
+        await order_manager.tick()
+        assert order_manager.get_order(order["order_id"])["robot_id"] == "robot2"
+        await asyncio.gather(*list(simulation_order_runner.tasks.values()))
+        return order
+
+    try:
+        order = asyncio.run(scenario())
+    finally:
+        mode_manager.set_mode("simulation", "algorithm")
+
+    assert captured["question_id"] == f"dispatch_{order['order_id']}"
+    assert "order_id" not in captured["state"]["order"]
+    assert [profile["robot_id"] for profile in captured["state"]["robots"]] == [
+        "robot1",
+        "robot2",
+        "robot3",
+    ]
+    assert captured["instructions"] == (
+        "Among idle and non-returning robots, choose the one with the highest battery. "
+        "Use other fields only to break exact ties. Return only one candidate ID."
+    )
+
+    debug_messages = [
+        record.getMessage()
+        for record in caplog.records
+        if record.name == "backend.app.services.order_manager"
+        and record.getMessage().startswith("KEV_DISPATCH_DEBUG ")
+    ]
+    if not debug_enabled:
+        assert debug_messages == []
+        return
+
+    assert len(debug_messages) == 1
+    record = json.loads(debug_messages[0].removeprefix("KEV_DISPATCH_DEBUG "))
+    assert record == {
+        "order_id": order["order_id"],
+        "question_id": captured["question_id"],
+        "state": captured["state"],
+        "choices": captured["candidates"],
+        "instructions": captured["instructions"],
+        "response": {
+            "probabilities": {"robot1": 0.2, "robot2": 0.6, "robot3": 0.2},
+            "confidence": 0.4,
+            "answer_confidence": 0.6,
+            "choice": "robot2",
+        },
+    }
+
+
+# KEV 요청 오류도 디버그 모드에서 요청과 오류 정보를 한 줄로 기록하는지 검증한다.
+def test_kev_dispatch_debug_log_records_request_error(monkeypatch, caplog):
+    _reset(monkeypatch)
+    monkeypatch.setenv("KEV_DISPATCH_DEBUG", "1")
+    caplog.set_level(logging.INFO, logger="backend.app.services.order_manager")
+
+    class FailingKevSelector:
+        def select_choice(self, **kwargs):
+            raise TimeoutError("simulated timeout")
+
+    async def scenario():
+        mode_manager.set_mode("simulation", "ai")
+        order_manager._kev_dispatch_selector = FailingKevSelector()
+        order = order_manager.create_order(items={"A": 1, "B": 0, "C": 0, "D": 0}, total_quantity=1)
+        await order_manager.tick()
+        assert order_manager.get_order(order["order_id"])["robot_id"] == "robot1"
+        await asyncio.gather(*list(simulation_order_runner.tasks.values()))
+        return order
+
+    try:
+        order = asyncio.run(scenario())
+    finally:
+        mode_manager.set_mode("simulation", "algorithm")
+
+    debug_messages = [
+        record.getMessage()
+        for record in caplog.records
+        if record.name == "backend.app.services.order_manager"
+        and record.getMessage().startswith("KEV_DISPATCH_DEBUG ")
+    ]
+    assert len(debug_messages) == 1
+    record = json.loads(debug_messages[0].removeprefix("KEV_DISPATCH_DEBUG "))
+    assert record["order_id"] == order["order_id"]
+    assert record["question_id"] == f"dispatch_{order['order_id']}"
+    assert record["state"]["order"]["items"] == {"A": 1, "B": 0, "C": 0, "D": 0}
+    assert list(record["choices"]) == ["robot1", "robot2", "robot3"]
+    assert record["response"] is None
+    assert record["error"] == {"type": "TimeoutError", "message": "simulated timeout"}
+
+
+# KEV 호출이 실패하면 기존 규칙 기반 배차로 자동 복구하는지 검증한다.
+def test_kev_dispatch_falls_back_to_algorithm(monkeypatch):
+    _reset(monkeypatch)
+
+    class FailingKevSelector:
+        def select_choice(self, **kwargs):
+            raise RuntimeError("KEV server unavailable")
+
+    async def scenario():
+        mode_manager.set_mode("simulation", "ai")
+        order_manager._kev_dispatch_selector = FailingKevSelector()
+        order = order_manager.create_order(
+            items={"A": 1, "B": 0, "C": 0, "D": 0},
+            total_quantity=1,
+        )
+        await order_manager.tick()
+        assert order_manager.get_order(order["order_id"])["robot_id"] == "robot1"
+        await asyncio.gather(*list(simulation_order_runner.tasks.values()))
+
+    try:
+        asyncio.run(scenario())
+    finally:
+        mode_manager.set_mode("simulation", "algorithm")
+
+
+# 재시도 주문은 다른 후보가 있으면 직전 로봇을 KEV 후보에서 빼는지 검증한다.
+def test_kev_dispatch_excludes_last_robot_when_others_available(monkeypatch):
+    _reset(monkeypatch)
+    seen = []
+
+    class FakeKevSelector:
+        def select_choice(self, **kwargs):
+            seen.append(set(kwargs["candidates"]))
+            return {"choice": sorted(kwargs["candidates"])[0]}
+
+    order_manager._kev_dispatch_selector = FakeKevSelector()
+    row = {
+        "order_id": "retry-1",
+        "items": {"A": 1, "B": 0, "C": 0, "D": 0},
+        "total_quantity": 1,
+        "pickup_nodes": ["5"],
+        "last_robot_id": "robot1",
+    }
+    chosen = order_manager._select_robot_with_kev(row, ["robot1", "robot2", "robot3"], "simulation")
+    assert seen == [{"robot2", "robot3"}]
+    assert chosen == "robot2"
+
+    # 직전 로봇만 남으면 그대로 배정한다.
+    assert order_manager._select_robot_with_kev(row, ["robot1"], "simulation") == "robot1"
+    assert len(seen) == 1
+
+
+# KEV 실패 후 쿨다운 동안에는 KEV를 다시 호출하지 않고 기존 배차를 사용하는지 검증한다.
+def test_kev_dispatch_failure_starts_cooldown(monkeypatch):
+    _reset(monkeypatch)
+    calls = []
+
+    class FailingKevSelector:
+        def select_choice(self, **kwargs):
+            calls.append(kwargs["question_id"])
+            raise RuntimeError("KEV server unavailable")
+
+    async def scenario():
+        mode_manager.set_mode("simulation", "ai")
+        order_manager._kev_dispatch_selector = FailingKevSelector()
+        first = order_manager.create_order(items={"A": 1, "B": 0, "C": 0, "D": 0}, total_quantity=1)
+        second = order_manager.create_order(items={"A": 1, "B": 0, "C": 0, "D": 0}, total_quantity=1)
+        await order_manager.tick()
+        assert len(calls) == 1
+        assert order_manager.get_order(first["order_id"])["robot_id"] == "robot1"
+        assert order_manager.get_order(second["order_id"])["robot_id"] == "robot2"
+        await asyncio.gather(*list(simulation_order_runner.tasks.values()))
+
+    try:
+        asyncio.run(scenario())
+    finally:
+        mode_manager.set_mode("simulation", "algorithm")
+
+
+# 주문 API로 등록한 AI 모드 주문도 KEV 배차를 사용하는지 검증한다.
+def test_order_api_ai_mode_uses_kev_dispatch(monkeypatch):
+    _reset(monkeypatch)
+    from backend.app.routers.orders import create_order
+    from backend.app.schemas.order import CreateOrderRequest
+
+    class FakeKevSelector:
+        def select_choice(self, **kwargs):
+            return {"choice": "robot3"}
+
+    async def scenario():
+        mode_manager.set_mode("simulation", "ai")
+        order_manager._kev_dispatch_selector = FakeKevSelector()
+        order = await create_order(
+            CreateOrderRequest(items={"A": 1, "B": 0, "C": 0, "D": 0}, total_quantity=1)
+        )
+        assert order_manager.get_order(order["order_id"])["operation_mode"] == "ai"
+        await order_manager.tick()
+        assert order_manager.get_order(order["order_id"])["robot_id"] == "robot3"
+        await asyncio.gather(*list(simulation_order_runner.tasks.values()))
 
     try:
         asyncio.run(scenario())

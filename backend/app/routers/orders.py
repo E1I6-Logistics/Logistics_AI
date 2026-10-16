@@ -26,6 +26,7 @@ async def create_order(payload: CreateOrderRequest):
             total_quantity=payload.total_quantity,
             order_name=payload.order_name,
             driving_mode=driving_mode,
+            operation_mode=operation_mode,
             selector=payload.selector,
             model=payload.model,
         )
