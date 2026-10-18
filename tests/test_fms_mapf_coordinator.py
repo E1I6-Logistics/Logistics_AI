@@ -1,4 +1,4 @@
-"""[테스트 모듈: test_fms_mapf_coordinator.py - FMS MAPF Coordinator 및 분리된 kev_ 모듈 단위 테스트]"""
+"""[테스트 모듈: test_fms_mapf_coordinator.py - FMS MAPF Coordinator, Dispatcher 및 REROUTE 파이프라인 단위 테스트]"""
 
 import unittest
 from unittest.mock import patch
@@ -11,10 +11,25 @@ from backend.app.services.fms_mapf_coordinator import (
 from backend.app.services.kev_mapf import (
     KevMAPF,
     parse_robot_state,
-    plan_mapf_from_route_results,
+    review_prepared_mapf_candidate,
     would_cycle,
 )
 from tests.mock.kev_mock import MockKEV, demo_data
+
+
+class ReroutePlanner(MockKEV):
+    """action_reroute를 선택하고 우회 경로를 반환하는 테스트 전용 Planner."""
+
+    def __init__(self, rerouted_path: list[int]):
+        self.rerouted_path = rerouted_path
+
+    def pick(self, state, candidates, instructions, question_id):
+        if question_id.startswith("action_") and "action_reroute" in candidates:
+            return "action_reroute"
+        return super().pick(state, candidates, instructions, question_id)
+
+    def route(self, graph_data, start, goal, *, selector="kev", model=None):
+        return list(self.rerouted_path)
 
 
 class KevCoordinatorAndMockTests(unittest.TestCase):
@@ -46,7 +61,9 @@ class KevCoordinatorAndMockTests(unittest.TestCase):
         review_ok = {
             "status": "REVIEW_REQUIRED",
             "decisions": [{"action": "WAIT", "wait_node_verified": True, "wait_node": 2}],
-            "warnings": ["amr_2: WAIT node 2 overlaps routes of amr_1; FMS traffic reservation verification required"],
+            "warnings": [
+                "amr_2: WAIT node 2 overlaps routes of amr_1; FMS traffic reservation verification required"
+            ],
         }
         self.assertTrue(is_fms_reviewable_advisory(review_ok))
 
@@ -121,6 +138,85 @@ class KevCoordinatorAndMockTests(unittest.TestCase):
             self.assertEqual(policy["status"], "REVIEW_ONLY")
             self.assertIn("r2", policy["deferred"])
             self.assertEqual(policy["fms_check_candidates"], [])
+
+    def test_reroute_is_accepted_by_coordinator_and_dispatcher(self):
+        """REROUTE 성공 시 Coordinator가 차단하지 않고 출발 후보로 분류하며, Dispatcher가 우회 경로를 채택하는지 검증."""
+        from tests.test_kev_mapf_integration import graph_data
+
+        g_data = graph_data()
+        coord = FmsMapfCoordinator()
+        order_a = {"robot_id": "a", "selector": "kev", "model": "kev-08b", "mode": "simulation"}
+        order_b = {"robot_id": "b", "selector": "kev", "model": "kev-08b", "mode": "simulation"}
+
+        coord.register_preview(order_a, "1", "4", {"path": ["1", "2", "3", "4"]})
+        req_b = coord.stage_preview(order_b, "5", "7", {"path": ["5", "3", "7"]})
+        prepared_b = {
+            "graph": g_data,
+            "request": req_b,
+            "result": {"path": ["5", "3", "7"]},
+            "required_path": ["5", "3", "7"],
+        }
+
+        fake_snapshots = [
+            {
+                "robot_id": "a",
+                "status": "NAVIGATING",
+                "connection_state": "ONLINE",
+                "stop_requested": False,
+                "occupied_node": "1",
+                "occupied_edge": None,
+                "goal_node": "4",
+                "navigation_id": "nav_a",
+                "route": {
+                    "node_ids": ["1", "2", "3", "4"],
+                    "segment_index": 0,
+                    "phase": "MOVING",
+                    "departure_at": 0.0,
+                    "segment_departures": [],
+                },
+            },
+            {
+                "robot_id": "b",
+                "status": "IDLE",
+                "connection_state": "ONLINE",
+                "stop_requested": False,
+                "occupied_node": "5",
+                "occupied_edge": None,
+                "goal_node": None,
+                "navigation_id": None,
+                "route": None,
+            },
+        ]
+
+        fake_mock_data = unittest.mock.MagicMock()
+        fake_mock_data.mock_fms.robot_snapshots.return_value = fake_snapshots
+        fake_mock_data.mock_fms.robot_snapshot.return_value = fake_snapshots[1]
+
+        with (
+            patch.dict("sys.modules", {"backend.app.services.mock_data": fake_mock_data}),
+            patch("backend.app.services.kev_mapf.kev_dispatcher.fms_mapf_coordinator", coord),
+            patch("backend.app.services.kev_mapf.kev_dispatcher.load_route_graph", return_value=g_data),
+            patch("backend.app.services.kev_mapf.kev_dispatcher.mode_manager", unittest.mock.MagicMock(mode="simulation")),
+        ):
+            advisory = coord.evaluate_mixed_simulation_advisory(
+                g_data,
+                planner=ReroutePlanner([5, 6, 7]),
+                config={"wait_allowed_nodes": [], "max_reroutes": 3, "priority_mode": "choice"},
+            )
+            self.assertEqual(advisory["status"], "PROPOSED")
+            self.assertEqual(advisory["required_paths"]["b"], ["5", "6", "7"])
+
+            policy = coord.classify_mixed_pending_advisory(advisory)
+            self.assertEqual(policy["status"], "REVIEW_ONLY")
+            self.assertIn("b", policy["fms_check_candidates"])
+            self.assertEqual(policy["rerouted"]["b"], ["5", "6", "7"])
+
+            reviewed = review_prepared_mapf_candidate(
+                order_b, "7", "5", prepared_b, advisory
+            )
+            self.assertEqual(reviewed["status"], "REVIEW_ONLY")
+            self.assertTrue(reviewed["rerouted"])
+            self.assertEqual(reviewed["required_path"], ["5", "6", "7"])
 
 
 if __name__ == "__main__":
