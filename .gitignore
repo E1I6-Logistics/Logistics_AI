@@ -171,3 +171,6 @@ robots_ws/
 # Mosquitto runtime data
 infra/mosquitto/data/
 infra/mosquitto/log/
+
+# antigravity skills
+.agents/
