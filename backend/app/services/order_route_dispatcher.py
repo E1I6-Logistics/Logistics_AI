@@ -44,9 +44,11 @@ async def dispatch_order_route(order, node, current_node, valid=None):
     if feature_engine("route", operation_mode) == "ai":
         if current_node is None:
             raise ValueError("AI 경로의 출발 노드를 확인할 수 없습니다.")
+        from .kev_mapf.kev_traffic import live_traffic
         from .llm_route_preview import preview_llm_route
 
         graph = load_route_graph()
+        traffic = live_traffic(order["robot_id"], graph=graph) if mode == "simulation" else None
         try:
             result = await asyncio.to_thread(
                 preview_llm_route,
@@ -55,6 +57,7 @@ async def dispatch_order_route(order, node, current_node, valid=None):
                 node,
                 selector=order["selector"],
                 model=order["model"],
+                traffic=traffic,
             )
         except (ValueError, RuntimeError) as exc:
             raise ValueError(f"AI 경로 생성 실패(N{current_node} → N{node}): {exc}") from exc

@@ -36,7 +36,9 @@ def _validated_result(
         checked_path, distance = validate_and_calculate_path_distance(points, edges, path, start, target)
     else:
         checked_path = [int(n) for n in path]
-    baseline = plan_route(str(start), str(target), graph, require_stored_weight=True)
+    baseline = plan_route(
+        str(start), str(target), graph, require_stored_weight=True, avoid_major_nodes=True
+    )
     metrics = compare_path_metrics(
         [int(node) for node in baseline["node_ids"]], float(baseline["cost"]), checked_path, float(distance)
     )

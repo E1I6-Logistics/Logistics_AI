@@ -97,8 +97,16 @@ def build_route_inputs(
     return points, edges
 
 
+_MAJOR_NODE_IDS = frozenset(str(n) for n in range(7))
+
+
 def plan_route(
-    start_id: str, goal_id: str, graph: dict[str, Any] | None = None, *, require_stored_weight: bool = False
+    start_id: str,
+    goal_id: str,
+    graph: dict[str, Any] | None = None,
+    *,
+    require_stored_weight: bool = False,
+    avoid_major_nodes: bool | None = None,
 ) -> dict[str, Any]:
     """Calculate a directed shortest path with A* and resolved edge weights."""
     graph = graph if graph is not None else load_route_graph()
@@ -138,21 +146,37 @@ def plan_route(
     def heuristic(node_id: str) -> float:
         return heuristic_scale * math.dist(points[node_id], points[goal_id])
 
-    distances = {start_id: 0.0}
-    previous: dict[str, tuple[str, str]] = {}
-    queue = [(heuristic(start_id), 0.0, start_id)]
-    while queue:
-        _, distance, current = heapq.heappop(queue)
-        if distance > distances[current]:
-            continue
-        if current == goal_id:
-            break
-        for neighbor, weight, edge_id in adjacency[current]:
-            candidate = distance + weight
-            if candidate < distances.get(neighbor, math.inf):
-                distances[neighbor] = candidate
-                previous[neighbor] = (current, edge_id)
-                heapq.heappush(queue, (candidate + heuristic(neighbor), candidate, neighbor))
+    if avoid_major_nodes is None:
+        avoid_major_nodes = not require_stored_weight
+    forbidden = (
+        _MAJOR_NODE_IDS - {start_id, goal_id}
+        if avoid_major_nodes and _MAJOR_NODE_IDS.issubset(nodes)
+        else frozenset()
+    )
+
+    def _search(blocked_nodes: frozenset[str]) -> tuple[dict[str, float], dict[str, tuple[str, str]]]:
+        dists = {start_id: 0.0}
+        prev: dict[str, tuple[str, str]] = {}
+        queue = [(heuristic(start_id), 0.0, start_id)]
+        while queue:
+            _, distance, current = heapq.heappop(queue)
+            if distance > dists[current]:
+                continue
+            if current == goal_id:
+                break
+            for neighbor, weight, edge_id in adjacency[current]:
+                if neighbor in blocked_nodes:
+                    continue
+                candidate = distance + weight
+                if candidate < dists.get(neighbor, math.inf):
+                    dists[neighbor] = candidate
+                    prev[neighbor] = (current, edge_id)
+                    heapq.heappush(queue, (candidate + heuristic(neighbor), candidate, neighbor))
+        return dists, prev
+
+    distances, previous = _search(forbidden)
+    if goal_id not in distances and forbidden:
+        distances, previous = _search(frozenset())
 
     if goal_id not in distances:
         raise ValueError(f"노드 {start_id}에서 {goal_id}까지 연결된 경로가 없습니다.")

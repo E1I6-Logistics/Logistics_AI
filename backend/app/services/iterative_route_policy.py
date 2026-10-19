@@ -29,6 +29,7 @@ NEXT_NODE_INSTRUCTIONS = (
 )
 
 MAX_VISITS_PER_NODE = 2
+MAJOR_TASK_NODES = frozenset(range(7))
 
 # 좌표 기반 방향·남은 직선거리 정보가 주어질 때 추가하는 지시문.
 DIRECTION_INSTRUCTIONS = (
@@ -142,11 +143,18 @@ def next_node_options(
 
     previous_node = path[-2] if len(path) >= 2 else None
     raw_edges = get_available_edges(compact_graph, current)
+    start_node = int(path[0]) if path else int(current)
+    forbidden_major = (
+        MAJOR_TASK_NODES - {start_node, int(current), int(target)}
+        if target is not None and MAJOR_TASK_NODES.issubset(nodes)
+        else frozenset()
+    )
 
     # 주어진 경로 선택이 허용되는지 확인한다.
-    def allowed(node: int, *, allow_previous: bool) -> bool:
+    def allowed(node: int, *, allow_previous: bool, skip_major: bool = True) -> bool:
         return (
             node != current
+            and (not skip_major or node not in forbidden_major)
             and (allow_previous or node != previous_node)
             and (current, node) not in used_edges
             and visit_counts.get(node, 0) < max_visits_per_node
@@ -154,6 +162,13 @@ def next_node_options(
 
     strict_edges = [edge for edge in raw_edges if allowed(int(edge["node"]), allow_previous=False)]
     recovery_edges = [edge for edge in raw_edges if allowed(int(edge["node"]), allow_previous=True)]
+    if not strict_edges and not recovery_edges and forbidden_major:
+        strict_edges = [
+            edge for edge in raw_edges if allowed(int(edge["node"]), allow_previous=False, skip_major=False)
+        ]
+        recovery_edges = [
+            edge for edge in raw_edges if allowed(int(edge["node"]), allow_previous=True, skip_major=False)
+        ]
     backtrack_allowed = not strict_edges and bool(recovery_edges)
     available_edges = recovery_edges if backtrack_allowed else strict_edges
 
@@ -162,6 +177,9 @@ def next_node_options(
     else:
         strict_nodes = [node for node in nodes if allowed(node, allow_previous=False)]
         recovery_nodes = [node for node in nodes if allowed(node, allow_previous=True)]
+        if not strict_nodes and not recovery_nodes and forbidden_major:
+            strict_nodes = [node for node in nodes if allowed(node, allow_previous=False, skip_major=False)]
+            recovery_nodes = [node for node in nodes if allowed(node, allow_previous=True, skip_major=False)]
         backtrack_allowed = not strict_nodes and bool(recovery_nodes)
         candidate_nodes = recovery_nodes if backtrack_allowed else strict_nodes
 

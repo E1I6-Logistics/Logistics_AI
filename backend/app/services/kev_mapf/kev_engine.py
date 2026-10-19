@@ -501,6 +501,11 @@ class KevMAPF:
                     result.update(action="REROUTE", new_path=new_route)
                     routes = {r: x["path"] for r, x in self.robots.items()}
                     potential_conflict_zones = group_conflict_zones(zone_candidates(routes))
+                elif self.has_wait_policy and wait_nodes:
+                    result["reroute_fallback_reason"] = error
+                    status = self._apply_wait(
+                        it, zid, info, pair, low, wait_nodes, result, status
+                    )
                 else:
                     result.update(action="HOLD", reason="REROUTE_FAILED", details=error)
                     status = "BLOCKED"

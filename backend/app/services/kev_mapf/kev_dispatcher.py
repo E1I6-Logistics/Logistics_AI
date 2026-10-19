@@ -314,10 +314,10 @@ async def dispatch_simulation_mapf(
             if current_state == last_state:
                 await asyncio.sleep(0.2)
                 continue
-            last_state = deepcopy(current_state)
 
             mixed = c.prepare_mixed_simulation_requests()
             if mixed["issues"]:
+                last_state = None
                 await asyncio.sleep(0.2)
                 continue
 
@@ -330,6 +330,7 @@ async def dispatch_simulation_mapf(
 
             if not single:
                 if mixed["status"] != "READY":
+                    last_state = None
                     await asyncio.sleep(0.2)
                     continue
 
@@ -350,10 +351,17 @@ async def dispatch_simulation_mapf(
                     },
                 )
                 if not is_fms_reviewable_advisory(advisory):
+                    last_state = None
+                    await asyncio.sleep(0.2)
                     continue
 
                 policy = c.classify_mixed_pending_advisory(advisory)
-                if policy["status"] != "REVIEW_ONLY" or rid not in policy["fms_check_candidates"]:
+                if policy["status"] != "REVIEW_ONLY":
+                    last_state = None
+                    await asyncio.sleep(0.2)
+                    continue
+                if rid not in policy["fms_check_candidates"]:
+                    last_state = deepcopy(current_state)
                     continue
 
             with c._lock, mock_fms._lock:
@@ -368,6 +376,7 @@ async def dispatch_simulation_mapf(
                         or latest["pending_robot_ids"] != [rid]
                         or latest["active_robot_ids"]
                     ):
+                        last_state = None
                         continue
                     path = validate_prepared_order_route(
                         order, node, current_node, prepared, valid=valid
@@ -377,6 +386,7 @@ async def dispatch_simulation_mapf(
                         order, node, current_node, prepared, advisory, valid=valid
                     )
                     if reviewed["status"] != "REVIEW_ONLY":
+                        last_state = None
                         continue
                     path = reviewed["required_path"]
 

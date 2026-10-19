@@ -412,6 +412,123 @@ class KevTrafficRouteTests(unittest.TestCase):
         self.assertTrue(res["exact_path_match"])
         self.assertIn(DIRECTION_INSTRUCTIONS, selector.calls[0]["instructions"])
 
+    def test_major_task_nodes_excluded_as_intermediate_transit(self) -> None:
+        """실제 창고 맵(test.geojson)에서 주요 노드(0..6)가 출발·목적지 사이의 경유지에서 제외되는지 검증한다."""
+        from backend.app.services.pathfinding import DistanceAStar
+        from backend.app.services.route_service import load_route_graph, plan_route
+
+        warehouse = load_route_graph()
+        prepared = _prepared_graph(warehouse)
+
+        # N5 -> N3: N6(Pickup 2)이 제외되어 N5에서 후보가 [7] 하나만 남음
+        opts_5_to_3 = next_node_options(
+            prepared["compact_graph"],
+            prepared["nodes"],
+            5,
+            [5],
+            set(),
+            {5: 1},
+            target=3,
+            points=prepared["points"],
+        )
+        self.assertEqual(opts_5_to_3["candidate_nodes"], [7])
+
+        # N6 -> N4: N5(Pickup 1)가 제외되어 N6에서 후보가 [11] 하나만 남음
+        opts_6_to_4 = next_node_options(
+            prepared["compact_graph"],
+            prepared["nodes"],
+            6,
+            [6],
+            set(),
+            {6: 1},
+            target=4,
+            points=prepared["points"],
+        )
+        self.assertEqual(opts_6_to_4["candidate_nodes"], [11])
+
+        # N5 -> N6: 출발·목적지가 모두 주요 노드이면 6은 목적지이므로 제외되지 않음
+        opts_5_to_6 = next_node_options(
+            prepared["compact_graph"],
+            prepared["nodes"],
+            5,
+            [5],
+            set(),
+            {5: 1},
+            target=6,
+            points=prepared["points"],
+        )
+        self.assertEqual(opts_5_to_6["candidate_nodes"], [6, 7])
+
+        self.assertEqual(plan_route("5", "3", warehouse)["node_ids"], ["5", "7", "11", "3"])
+        self.assertEqual(plan_route("6", "4", warehouse)["node_ids"], ["6", "11", "12", "4"])
+        self.assertEqual(plan_route("0", "6", warehouse)["node_ids"], ["0", "10", "8", "7", "11", "6"])
+        self.assertEqual(plan_route("5", "6", warehouse)["node_ids"], ["5", "6"])
+
+        planner = DistanceAStar(warehouse)
+        self.assertEqual(planner.plan("5", "3").route, ("5", "7", "11", "3"))
+        self.assertEqual(planner.plan("6", "4").route, ("6", "11", "12", "4"))
+        self.assertEqual(planner.plan("0", "6").route, ("0", "10", "8", "7", "11", "6"))
+        self.assertEqual(planner.plan("5", "6").route, ("5", "6"))
+
+    def test_kev_mapf_reroute_failure_falls_back_to_wait(self) -> None:
+        """KEV-MAPF에서 REROUTE가 실패하더라도 대기 가능 노드가 있으면 WAIT로 폴백하는지 검증한다."""
+        from backend.app.services.kev_mapf.kev_engine import KevMAPF
+        from backend.app.services.kev_mapf.kev_graph import Graph
+        from backend.app.services.route_service import load_route_graph
+
+        warehouse = Graph(load_route_graph())
+        robots = {
+            "robot3": {
+                "id": "robot3",
+                "current_node": 5,
+                "goal_node": 3,
+                "path": [5, 7, 11, 3],
+                "selector": "kev",
+                "model": "kev-08b",
+                "source": "initial",
+            },
+            "robot2": {
+                "id": "robot2",
+                "current_node": 6,
+                "goal_node": 4,
+                "path": [6, 11, 12, 4],
+                "selector": "kev",
+                "model": "kev-08b",
+                "source": "initial",
+            },
+        }
+
+        class _RerouteThenWaitLive:
+            calls = 0
+            forced = 0
+            model_seconds = 0.0
+            warnings: list[str] = []
+
+            def score_many(self, state: dict, robot_ids: list[str]) -> dict[str, float]:
+                return {"robot3": 0.9, "robot2": 0.2}
+
+            def pick(self, state: dict, choices: dict, instructions: str, question_id: str) -> str:
+                if "action_reroute" in choices:
+                    return "action_reroute"
+                return next(iter(choices))
+
+            def route(self, *args, **kwargs):
+                raise RuntimeError("no detour available")
+
+        engine = KevMAPF(
+            warehouse,
+            robots,
+            _RerouteThenWaitLive(),
+            {"priority_mode": "score", "wait_allowed_nodes": [5, 6]},
+        )
+        advisory = engine.resolve()
+        self.assertIn(advisory["status"], ("PROPOSED", "REVIEW_REQUIRED"))
+        self.assertEqual(len(advisory["decisions"]), 1)
+        self.assertEqual(advisory["decisions"][0]["action"], "WAIT")
+        self.assertEqual(advisory["decisions"][0]["yield_robot"], "robot2")
+        self.assertEqual(advisory["decisions"][0]["wait_node"], 6)
+        self.assertIn("no detour available", advisory["decisions"][0]["reroute_fallback_reason"])
+
 
 if __name__ == "__main__":
     unittest.main()
