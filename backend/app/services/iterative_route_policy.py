@@ -106,7 +106,7 @@ def _can_reach_target(
     if next_node in forbidden_nodes:
         return False
     blocked_edges = used_edges | {(current, next_node)}
-    seen = {next_node}
+    seen = {current, next_node}
     queue = [next_node]
     while queue:
         node = queue.pop(0)
@@ -259,6 +259,36 @@ def next_node_options(
         ]
     backtrack_allowed = not strict_edges and bool(recovery_edges)
     available_edges = recovery_edges if backtrack_allowed else strict_edges
+    if len(available_edges) > 1 and target is not None and candidate_scope == "neighbors":
+        cand_list = [int(edge["node"]) for edge in available_edges]
+        dominated = {
+            v
+            for v in cand_list
+            for u in cand_list
+            if u != v
+            and not _can_reach_target(
+                compact_graph,
+                current,
+                v,
+                int(target),
+                used_edges,
+                visit_counts,
+                max_visits_per_node,
+                forbidden_major | {u},
+            )
+            and _can_reach_target(
+                compact_graph,
+                current,
+                u,
+                int(target),
+                used_edges,
+                visit_counts,
+                max_visits_per_node,
+                forbidden_major | {v},
+            )
+        }
+        if dominated and len(dominated) < len(available_edges):
+            available_edges = [edge for edge in available_edges if int(edge["node"]) not in dominated]
 
     if candidate_scope == "neighbors":
         candidate_nodes = [int(edge["node"]) for edge in available_edges]

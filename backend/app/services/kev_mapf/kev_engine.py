@@ -209,6 +209,8 @@ class KevMAPF:
                 raise ValueError("generated path entered forbidden node")
             if any((a, b) in forbid_edges for a, b in zip(candidate, candidate[1:])):
                 raise ValueError("generated path entered forbidden edge")
+            if any(a in candidate and b in candidate for a, b in forbid_edges):
+                raise ValueError("generated path still traverses both endpoints of forbidden edge")
             return candidate, None
         except Exception as exc:
             return None, f"{type(exc).__name__}: {exc}"

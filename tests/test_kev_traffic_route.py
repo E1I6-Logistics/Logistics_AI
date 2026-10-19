@@ -446,7 +446,7 @@ class KevTrafficRouteTests(unittest.TestCase):
         )
         self.assertEqual(opts_6_to_4["candidate_nodes"], [11])
 
-        # N5 -> N6: 출발·목적지가 모두 주요 노드이면 6은 목적지이므로 제외되지 않음
+        # N5 -> N6: 출발·목적지가 모두 주요 노드이면 6은 목적지이므로 제외되지 않고 직접 선택됨
         opts_5_to_6 = next_node_options(
             prepared["compact_graph"],
             prepared["nodes"],
@@ -457,7 +457,7 @@ class KevTrafficRouteTests(unittest.TestCase):
             target=6,
             points=prepared["points"],
         )
-        self.assertEqual(opts_5_to_6["candidate_nodes"], [6, 7])
+        self.assertEqual(opts_5_to_6["candidate_nodes"], [6])
 
         self.assertEqual(plan_route("5", "3", warehouse)["node_ids"], ["5", "7", "11", "3"])
         self.assertEqual(plan_route("6", "4", warehouse)["node_ids"], ["6", "11", "12", "4"])
@@ -631,6 +631,109 @@ class KevTrafficRouteTests(unittest.TestCase):
         )
         self.assertEqual(perm_blocked.decision, "replan")
         self.assertEqual(perm_blocked.reason, "occupied")
+
+    def test_dominated_detour_neighbor_is_pruned_and_parallel_corridors_preserved(self) -> None:
+        """필수 경유지(N12)를 거칠 수밖에 없는 우회 이웃(N7)은 제거되고, 실제 평행 대안 경로(N8->N7/N12)는 유지되는지 검증한다."""
+        from backend.app.services.route_service import load_route_graph
+
+        warehouse = load_route_graph()
+        prepared = _prepared_graph(warehouse)
+        traffic = {"occupied_nodes": {12: "robot1"}, "robot_paths": {"robot1": [12, 4]}}
+
+        # N6 -> N11 이동 직후(target=4): N7로 가더라도 반드시 N12를 거쳐야 하므로 N7은 지배되어 제거되고 [12]만 남는다.
+        opts_at_11 = next_node_options(
+            prepared["compact_graph"],
+            prepared["nodes"],
+            11,
+            [6, 11],
+            {(6, 11)},
+            {6: 1, 11: 1},
+            target=4,
+            traffic=traffic,
+            points=prepared["points"],
+        )
+        self.assertEqual(opts_at_11["candidate_nodes"], [12])
+
+        res = run_selected_route(
+            _StubSelector(),
+            prepared,
+            {"start": 6, "target": 4},
+            candidate_scope="neighbors",
+            deadline=5.0,
+            traffic=traffic,
+            include_direction=True,
+        )
+        self.assertTrue(res["valid_path"])
+        self.assertEqual(res["path"], [6, 11, 12, 4])
+        self.assertEqual(res["api_call_count"], 0)
+
+        # 반면 N10 -> N8 이동 직후(target=3): N7(8->7->11->3)과 N12(8->12->11->3)는 서로를 거치지 않는 평행 대안이므로 둘 다 유지된다.
+        opts_at_8 = next_node_options(
+            prepared["compact_graph"],
+            prepared["nodes"],
+            8,
+            [0, 10, 8],
+            {(0, 10), (10, 8)},
+            {0: 1, 10: 1, 8: 1},
+            target=3,
+            points=prepared["points"],
+        )
+        self.assertEqual(sorted(opts_at_8["candidate_nodes"]), [7, 12])
+
+    def test_kev_mapf_edge_reroute_rejects_both_endpoints_loop(self) -> None:
+        """KEV-MAPF 간선 충돌(edge:11:12) 우회 시 양 끝점(11, 12)을 모두 그대로 지나는 ㄷ자 루프(6->11->7->8->12->4)를 거부하고 WAIT로 폴백하는지 검증한다."""
+        from backend.app.services.kev_mapf.kev_engine import KevMAPF
+        from backend.app.services.kev_mapf.kev_graph import Graph
+        from backend.app.services.route_service import load_route_graph
+
+        warehouse = Graph(load_route_graph())
+        robots = {
+            "robot1": {
+                "id": "robot1",
+                "current_node": 12,
+                "goal_node": 3,
+                "path": [12, 11, 3],
+                "selector": "kev",
+                "model": "kev-08b",
+                "source": "initial",
+            },
+            "robot3": {
+                "id": "robot3",
+                "current_node": 6,
+                "goal_node": 4,
+                "path": [6, 11, 12, 4],
+                "selector": "kev",
+                "model": "kev-08b",
+                "source": "initial",
+            },
+        }
+
+        class _LoopRerouteLive:
+            calls = 0
+            forced = 0
+            model_seconds = 0.0
+            warnings: list[str] = []
+
+            def score_many(self, state: dict, robot_ids: list[str]) -> dict[str, float]:
+                return {"robot1": 0.9, "robot3": 0.2}
+
+            def pick(self, state: dict, choices: dict, instructions: str, question_id: str) -> str:
+                if "action_reroute" in choices:
+                    return "action_reroute"
+                return next(iter(choices))
+
+            def route(self, *args, **kwargs):
+                return [6, 11, 7, 8, 12, 4]
+
+        engine = KevMAPF(
+            warehouse,
+            robots,
+            _LoopRerouteLive(),
+            {"priority_mode": "score", "wait_allowed_nodes": [6, 12]},
+        )
+        ok_path, err = engine._reroute(robots["robot3"], "edge:11:12", {"kind": "edge", "edge": [11, 12], "robots": ["robot1", "robot3"]})
+        self.assertIsNone(ok_path)
+        self.assertIn("both endpoints of forbidden edge", err or "")
 
 
 if __name__ == "__main__":
