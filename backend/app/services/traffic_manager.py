@@ -238,11 +238,18 @@ class TrafficManager:
                 return SegmentPermission("replan", "missing_reservation")
             if now <= route["segment_departures"][index]:
                 return SegmentPermission("waiting", "departure_time")
-            if any(
-                other is not robot and occupied_resource(other, graph) in (resource, target)
-                for other in self._robots.values()
-            ):
-                return SegmentPermission("replan", "occupied")
+            for other in self._robots.values():
+                if other is robot:
+                    continue
+                occ = occupied_resource(other, graph)
+                if occ == resource:
+                    return SegmentPermission("replan", "occupied")
+                if occ == target and (
+                    now >= destination.start
+                    or other["route"] is None
+                    or other["route"].get("departure_at") is None
+                ):
+                    return SegmentPermission("replan", "occupied")
             if self.is_resource_protected(robot_id, resource) or self.is_resource_protected(robot_id, target):
                 return SegmentPermission("replan", "offline_robot_route")
             if (

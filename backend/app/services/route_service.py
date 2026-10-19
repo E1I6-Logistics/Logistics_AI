@@ -7,6 +7,7 @@ positive-cost/coordinate fallback unless a caller requests strict weights.
 
 from __future__ import annotations
 
+import copy
 import heapq
 import json
 import math
@@ -15,17 +16,24 @@ from pathlib import Path
 from typing import Any
 
 ROUTE_GRAPH_PATH = Path(__file__).resolve().parents[3] / "routes" / os.getenv("FMS_ROUTE_GRAPH", "test.geojson")
+_GRAPH_CACHE: tuple[Path, int, dict[str, Any]] | None = None
 
 
 def load_route_graph() -> dict[str, Any]:
     """Load and validate the configured GeoJSON route graph."""
+    global _GRAPH_CACHE
     if not ROUTE_GRAPH_PATH.is_file():
         raise FileNotFoundError(f"Route Graph 파일 없음: {ROUTE_GRAPH_PATH}")
+    resolved = ROUTE_GRAPH_PATH.resolve()
+    mtime_ns = resolved.stat().st_mtime_ns
+    if _GRAPH_CACHE is not None and _GRAPH_CACHE[0] == resolved and _GRAPH_CACHE[1] == mtime_ns:
+        return copy.deepcopy(_GRAPH_CACHE[2])
     with ROUTE_GRAPH_PATH.open("r", encoding="utf-8") as file:
         graph = json.load(file)
     if graph.get("type") != "FeatureCollection":
         raise ValueError("Route Graph는 GeoJSON FeatureCollection 형식이어야 합니다.")
-    return graph
+    _GRAPH_CACHE = (resolved, mtime_ns, graph)
+    return copy.deepcopy(graph)
 
 
 def node_lookup(graph: dict[str, Any] | None = None) -> dict[str, dict[str, Any]]:

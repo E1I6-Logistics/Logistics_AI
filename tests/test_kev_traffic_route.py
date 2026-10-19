@@ -529,6 +529,109 @@ class KevTrafficRouteTests(unittest.TestCase):
         self.assertEqual(advisory["decisions"][0]["wait_node"], 6)
         self.assertIn("no detour available", advisory["decisions"][0]["reroute_fallback_reason"])
 
+    def test_bottleneck_occupied_node_and_start_major_reentry_prevent_dead_end(self) -> None:
+        """병목 노드(N11)가 점유 중일 때 목적지(N6) 도달 불능 우회 및 출발 주요 노드(N4) 재진입 막다른 길을 방지하는지 검증한다."""
+        from backend.app.services.route_service import load_route_graph
+
+        warehouse = load_route_graph()
+        prepared = _prepared_graph(warehouse)
+        traffic = {"occupied_nodes": {11: "robot3"}, "robot_paths": {"robot3": [11, 3]}}
+
+        # N4 -> N12 이동 직후: 출발 주요 노드 4로의 역방향 재진입은 금지되고,
+        # N11을 제외하면 N6에 도달할 수 없으므로 traffic_fallback=True로 11이 유지된다.
+        opts_at_12 = next_node_options(
+            prepared["compact_graph"],
+            prepared["nodes"],
+            12,
+            [4, 12],
+            {(4, 12)},
+            {4: 1, 12: 1},
+            target=6,
+            traffic=traffic,
+            points=prepared["points"],
+        )
+        self.assertNotIn(4, opts_at_12["candidate_nodes"])
+        self.assertIn(11, opts_at_12["candidate_nodes"])
+        self.assertTrue(opts_at_12["traffic_fallback"])
+
+        class _ProgressSelector:
+            name = "kev"
+
+            def select_choice(self, st: dict, candidates: dict, instructions: str, *, question_id: str = "q") -> dict:
+                best = min(
+                    st["available_edges"],
+                    key=lambda e: (e.get("progress", 0.0) <= 0, e["weight"] + e.get("dist_to_target", 0.0)),
+                )
+                return {"choice": f"node_{best['node']}", "confidence": 0.95}
+
+        res = run_selected_route(
+            _ProgressSelector(),
+            prepared,
+            {"start": 4, "target": 6},
+            candidate_scope="neighbors",
+            deadline=5.0,
+            traffic=traffic,
+            include_direction=True,
+        )
+        self.assertTrue(res["valid_path"])
+        self.assertEqual(res["path"], [4, 12, 11, 6])
+
+    def test_check_segment_permission_ignores_transient_target_occupancy_before_reservation_window(self) -> None:
+        """목적 노드의 예약 시작 시각(destination.start) 이전에 다른 주행 중 로봇이 일시 통과 중이면 replan하지 않는지 검증한다."""
+        from backend.app.services.pathfinding import DistanceAStar
+        from backend.app.services.route_service import load_route_graph
+        from backend.app.services.traffic_manager import TrafficManager
+
+        warehouse = load_route_graph()
+        planner = DistanceAStar(warehouse)
+
+        def _make_robot(rid: str, node: str) -> dict:
+            xy = planner.nodes[node]
+            return {
+                "robot_id": rid,
+                "x": xy[0],
+                "y": xy[1],
+                "yaw": 0.0,
+                "status": "IDLE",
+                "current_node": node,
+                "occupied_node": node,
+                "occupied_edge": None,
+                "goal_node": None,
+                "navigation_id": None,
+                "route": None,
+                "request_order": None,
+                "stop_requested": False,
+            }
+
+        robots = {"robot1": _make_robot("robot1", "7"), "robot2": _make_robot("robot2", "11")}
+        tm = TrafficManager(robots, speed_mps=1.0, safety_margin=0.2)
+        tm.request_navigation_after_stop("robot2", "3", now=0.0, graph=warehouse)
+        tm.request_navigation_after_stop("robot1", "6", now=0.0, graph=warehouse)
+
+        r1 = robots["robot1"]
+        r2 = robots["robot2"]
+        self.assertIsNotNone(r1["route"])
+        self.assertIsNotNone(r2["route"])
+
+        # robot2가 아직 node:11을 점유 중이지만 활성 스케줄(departure_at != None)로 주행 중이고,
+        # robot1은 7->11 간선 출발 시각 직후(robot1의 node:11 destination.start 이전)일 때 allowed여야 한다.
+        import math
+
+        dep_r1 = r1["route"]["segment_departures"][0]
+        arr_r1 = dep_r1 + math.dist(planner.nodes["7"], planner.nodes["11"]) / tm.speed_mps
+        perm = tm.check_segment_permission(
+            "robot1", now=dep_r1 + 0.05, expected_arrival_at=arr_r1, graph=warehouse
+        )
+        self.assertEqual(perm.decision, "allowed")
+
+        # 반면 robot2의 스케줄이 해제(정지/대기)된 상태로 node:11을 막고 있으면 즉시 replan이어야 한다.
+        r2["route"]["departure_at"] = None
+        perm_blocked = tm.check_segment_permission(
+            "robot1", now=dep_r1 + 0.05, expected_arrival_at=arr_r1, graph=warehouse
+        )
+        self.assertEqual(perm_blocked.decision, "replan")
+        self.assertEqual(perm_blocked.reason, "occupied")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -217,25 +217,30 @@ export default function WarehouseMap({
         {/* 로봇별 활성 경로. 도착/정지 telemetry의 route=null이면 자동 해제. */}
         {!raw && layers.route && (
           <g data-testid="robot-routes" pointerEvents="none">
-            {robotStates.filter(robot => visibleRobotIds.includes(robot.id) && robot.route).map(robot => (
-              <g key={robot.id} data-robot-route={robot.id} data-route-phase={robot.route!.phase}>
-                {robot.route!.edge_ids.map((edgeId, index) => {
-                  const from = nodes[robot.route!.node_ids[index]]
-                  const to = nodes[robot.route!.node_ids[index + 1]]
-                  if (!from || !to) return null
-                  return <path key={`${edgeId}-${index}`} data-active-edge={edgeId}
-                    d={`M${from.x} ${from.y}L${to.x} ${to.y}`} fill="none"
-                    stroke={ROBOT_COLORS[robot.id]} strokeWidth={px(5)} strokeLinecap="round" opacity={0.8} />
-                })}
-                {robot.route!.node_ids.map((nodeId, index) => {
-                  const node = nodes[nodeId]
-                  if (!node) return null
-                  return <circle key={`${nodeId}-${index}`} data-active-node={nodeId}
-                    cx={node.x} cy={node.y} r={px(6)} fill={ROBOT_COLORS[robot.id]}
-                    stroke="#fff" strokeWidth={px(1.5)} />
-                })}
-              </g>
-            ))}
+            {robotStates.filter(robot => visibleRobotIds.includes(robot.id) && robot.route).map(robot => {
+              const startIndex = Math.max(0, robot.route!.segment_index ?? 0)
+              const remainingEdges = robot.route!.edge_ids.slice(startIndex)
+              const remainingNodes = robot.route!.node_ids.slice(startIndex)
+              return (
+                <g key={robot.id} data-robot-route={robot.id} data-route-phase={robot.route!.phase}>
+                  {remainingEdges.map((edgeId, index) => {
+                    const from = nodes[remainingNodes[index]]
+                    const to = nodes[remainingNodes[index + 1]]
+                    if (!from || !to) return null
+                    return <path key={`${edgeId}-${startIndex + index}`} data-active-edge={edgeId}
+                      d={`M${from.x} ${from.y}L${to.x} ${to.y}`} fill="none"
+                      stroke={ROBOT_COLORS[robot.id]} strokeWidth={px(5)} strokeLinecap="round" opacity={0.8} />
+                  })}
+                  {remainingNodes.map((nodeId, index) => {
+                    const node = nodes[nodeId]
+                    if (!node) return null
+                    return <circle key={`${nodeId}-${startIndex + index}`} data-active-node={nodeId}
+                      cx={node.x} cy={node.y} r={px(6)} fill={ROBOT_COLORS[robot.id]}
+                      stroke="#fff" strokeWidth={px(1.5)} />
+                  })}
+                </g>
+              )
+            })}
           </g>
         )}
 

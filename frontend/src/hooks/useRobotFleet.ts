@@ -108,7 +108,7 @@ export function useRobotFleet() {
 
     const robotTimer = window.setInterval(
       refreshRobots,
-      100,
+      2000,
     )
 
     return () => {

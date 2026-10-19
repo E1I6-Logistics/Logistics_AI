@@ -90,23 +90,88 @@ def _apply_direction(
     return enriched
 
 
+def _can_reach_target(
+    compact_graph: dict[str, Any],
+    current: int,
+    next_node: int,
+    target: int,
+    used_edges: set[tuple[int, int]],
+    visit_counts: dict[int, int],
+    max_visits_per_node: int,
+    forbidden_nodes: set[int] | frozenset[int],
+) -> bool:
+    """current -> next_node 이동 후 남은 허용 간선·방문 제한 안에서 target에 도달 가능한지 확인한다."""
+    if next_node == target:
+        return True
+    if next_node in forbidden_nodes:
+        return False
+    blocked_edges = used_edges | {(current, next_node)}
+    seen = {next_node}
+    queue = [next_node]
+    while queue:
+        node = queue.pop(0)
+        for edge in get_available_edges(compact_graph, node):
+            nbr = int(edge["node"])
+            if (node, nbr) in blocked_edges or nbr in forbidden_nodes:
+                continue
+            if visit_counts.get(nbr, 0) >= max_visits_per_node:
+                continue
+            if nbr == target:
+                return True
+            if nbr not in seen:
+                seen.add(nbr)
+                queue.append(nbr)
+    return False
+
+
 def _apply_traffic(
     available_edges: list[dict[str, Any]],
     candidate_nodes: list[int],
     target: int | None,
     traffic: dict[str, Any],
+    *,
+    compact_graph: dict[str, Any] | None = None,
+    current: int | None = None,
+    used_edges: set[tuple[int, int]] | None = None,
+    visit_counts: dict[int, int] | None = None,
+    max_visits_per_node: int = MAX_VISITS_PER_NODE,
+    forbidden_major: frozenset[int] = frozenset(),
 ) -> tuple[list[dict[str, Any]], list[int], bool]:
     """다른 로봇의 현재 점유 노드(목적지 제외)를 후보에서 빼고, 남은 경로를 shared_with로 표시한다.
 
-    필터 후 후보가 0개면 기존 후보로 폴백한다 (뒤단 KEV-MAPF/FMS가 WAIT로 처리).
+    필터 후 후보가 0개이거나 점유 노드를 피해서는 목적지에 도달할 수 없으면 기존 후보로 폴백한다.
     """
     occupied = {int(n) for n in traffic.get("occupied_nodes", {})}
     blocked = occupied - ({int(target)} if target is not None else set())
-    kept = [n for n in candidate_nodes if n not in blocked]
+
+    def _viable(node: int) -> bool:
+        if node in blocked:
+            return False
+        if (
+            target is not None
+            and compact_graph is not None
+            and current is not None
+            and used_edges is not None
+            and visit_counts is not None
+        ):
+            return _can_reach_target(
+                compact_graph,
+                current,
+                node,
+                int(target),
+                used_edges,
+                visit_counts,
+                max_visits_per_node,
+                forbidden_major | blocked,
+            )
+        return True
+
+    kept = [n for n in candidate_nodes if _viable(n)]
     fallback = not kept and bool(candidate_nodes)
     if not fallback:
+        kept_set = set(kept)
         candidate_nodes = kept
-        available_edges = [e for e in available_edges if int(e["node"]) not in blocked]
+        available_edges = [e for e in available_edges if int(e["node"]) in kept_set]
 
     sharers: dict[int, list[str]] = {}
     for rid, robot_path in sorted(traffic.get("robot_paths", {}).items()):
@@ -143,22 +208,34 @@ def next_node_options(
 
     previous_node = path[-2] if len(path) >= 2 else None
     raw_edges = get_available_edges(compact_graph, current)
-    start_node = int(path[0]) if path else int(current)
     forbidden_major = (
-        MAJOR_TASK_NODES - {start_node, int(current), int(target)}
+        MAJOR_TASK_NODES - {int(target)}
         if target is not None and MAJOR_TASK_NODES.issubset(nodes)
         else frozenset()
     )
 
     # 주어진 경로 선택이 허용되는지 확인한다.
-    def allowed(node: int, *, allow_previous: bool, skip_major: bool = True) -> bool:
-        return (
-            node != current
-            and (not skip_major or node not in forbidden_major)
-            and (allow_previous or node != previous_node)
-            and (current, node) not in used_edges
-            and visit_counts.get(node, 0) < max_visits_per_node
-        )
+    def allowed(node: int, *, allow_previous: bool, skip_major: bool = True, check_reach: bool = True) -> bool:
+        if (
+            node == current
+            or (skip_major and node in forbidden_major)
+            or (not allow_previous and node == previous_node)
+            or (current, node) in used_edges
+            or visit_counts.get(node, 0) >= max_visits_per_node
+        ):
+            return False
+        if check_reach and target is not None and candidate_scope == "neighbors":
+            return _can_reach_target(
+                compact_graph,
+                current,
+                node,
+                int(target),
+                used_edges,
+                visit_counts,
+                max_visits_per_node,
+                forbidden_major if skip_major else frozenset(),
+            )
+        return True
 
     strict_edges = [edge for edge in raw_edges if allowed(int(edge["node"]), allow_previous=False)]
     recovery_edges = [edge for edge in raw_edges if allowed(int(edge["node"]), allow_previous=True)]
@@ -169,17 +246,32 @@ def next_node_options(
         recovery_edges = [
             edge for edge in raw_edges if allowed(int(edge["node"]), allow_previous=True, skip_major=False)
         ]
+    if not strict_edges and not recovery_edges:
+        strict_edges = [
+            edge
+            for edge in raw_edges
+            if allowed(int(edge["node"]), allow_previous=False, skip_major=False, check_reach=False)
+        ]
+        recovery_edges = [
+            edge
+            for edge in raw_edges
+            if allowed(int(edge["node"]), allow_previous=True, skip_major=False, check_reach=False)
+        ]
     backtrack_allowed = not strict_edges and bool(recovery_edges)
     available_edges = recovery_edges if backtrack_allowed else strict_edges
 
     if candidate_scope == "neighbors":
         candidate_nodes = [int(edge["node"]) for edge in available_edges]
     else:
-        strict_nodes = [node for node in nodes if allowed(node, allow_previous=False)]
-        recovery_nodes = [node for node in nodes if allowed(node, allow_previous=True)]
+        strict_nodes = [node for node in nodes if allowed(node, allow_previous=False, check_reach=False)]
+        recovery_nodes = [node for node in nodes if allowed(node, allow_previous=True, check_reach=False)]
         if not strict_nodes and not recovery_nodes and forbidden_major:
-            strict_nodes = [node for node in nodes if allowed(node, allow_previous=False, skip_major=False)]
-            recovery_nodes = [node for node in nodes if allowed(node, allow_previous=True, skip_major=False)]
+            strict_nodes = [
+                node for node in nodes if allowed(node, allow_previous=False, skip_major=False, check_reach=False)
+            ]
+            recovery_nodes = [
+                node for node in nodes if allowed(node, allow_previous=True, skip_major=False, check_reach=False)
+            ]
         backtrack_allowed = not strict_nodes and bool(recovery_nodes)
         candidate_nodes = recovery_nodes if backtrack_allowed else strict_nodes
 
@@ -191,7 +283,16 @@ def next_node_options(
     traffic_fallback = False
     if traffic is not None:
         available_edges, candidate_nodes, traffic_fallback = _apply_traffic(
-            available_edges, candidate_nodes, target, traffic
+            available_edges,
+            candidate_nodes,
+            target,
+            traffic,
+            compact_graph=compact_graph,
+            current=current,
+            used_edges=used_edges,
+            visit_counts=visit_counts,
+            max_visits_per_node=max_visits_per_node,
+            forbidden_major=forbidden_major,
         )
 
     result = {

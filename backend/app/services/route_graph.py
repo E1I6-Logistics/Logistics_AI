@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import math
+from pathlib import Path
 from typing import Any
 
 from ..config import ROUTE_GRAPH_PATH
+
+_GRAPH_CACHE: tuple[Path, int, dict[str, Any]] | None = None
 
 """
 {
@@ -45,13 +49,19 @@ from ..config import ROUTE_GRAPH_PATH
 # Route Graph GeoJSON 파일 로드 기능
 # 경로 그래프를 불러온다.
 def load_route_graph() -> dict[str, Any]:
+    global _GRAPH_CACHE
     if not ROUTE_GRAPH_PATH.exists():
         raise FileNotFoundError(f"Route Graph 파일 없음: {ROUTE_GRAPH_PATH}")
+    resolved = ROUTE_GRAPH_PATH.resolve()
+    mtime_ns = resolved.stat().st_mtime_ns
+    if _GRAPH_CACHE is not None and _GRAPH_CACHE[0] == resolved and _GRAPH_CACHE[1] == mtime_ns:
+        return copy.deepcopy(_GRAPH_CACHE[2])
     with ROUTE_GRAPH_PATH.open("r", encoding="utf-8") as file:
         graph = json.load(file)
     if graph.get("type") != "FeatureCollection":
         raise ValueError("Route Graph는 GeoJSON FeatureCollection 형식이어야 합니다.")
-    return graph
+    _GRAPH_CACHE = (resolved, mtime_ns, graph)
+    return copy.deepcopy(graph)
 
 
 # Node Features 추출 기능
