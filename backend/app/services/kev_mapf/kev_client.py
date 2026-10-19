@@ -174,16 +174,22 @@ class LiveKEV:
         *,
         selector: str = "kev",
         model: str | None = None,
+        traffic: dict[str, Any] | None = None,
     ) -> list[int]:
         """기존 FMS preview(`preview_llm_route`)의 카탈로그·검증을 사용해 새로운 경로/우회 경로를 생성한다."""
         started = time.perf_counter()
         try:
+            kwargs: dict[str, Any] = {
+                "selector": selector,
+                "model": self.model if model is None else model,
+            }
+            if traffic is not None:
+                kwargs["traffic"] = traffic
             result = self.preview_llm_route(
                 graph_data,
                 str(start),
                 str(goal),
-                selector=selector,
-                model=self.model if model is None else model,
+                **kwargs,
             )
             if not isinstance(result, dict) or not isinstance(result.get("path"), list):
                 raise ValueError("preview_llm_route() must return a dict with a path list")

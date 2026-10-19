@@ -260,11 +260,18 @@ def get_available_edges(
         raise ValueError(f"현재 노드가 graph에 없습니다: {current_node}")
 
     visited = {int(node) for node in (visited_nodes or [])}
-    available = [
-        {"node": int(edge["to"]), "weight": _model_weight(edge["weight"])}
-        for edge in compact_graph_edges(graph)
-        if int(edge["from"]) == current_node and int(edge["to"]) not in visited
-    ]
+    if graph.get("type") == "CompactAdjacencyGraph" and isinstance(graph.get("adjacency"), dict):
+        available = [
+            {"node": int(item["to"]), "weight": _model_weight(item["weight"])}
+            for item in graph["adjacency"].get(str(current_node), [])
+            if int(item["to"]) not in visited
+        ]
+    else:
+        available = [
+            {"node": int(edge["to"]), "weight": _model_weight(edge["weight"])}
+            for edge in compact_graph_edges(graph)
+            if int(edge["from"]) == current_node and int(edge["to"]) not in visited
+        ]
     return sorted(available, key=lambda item: (item["node"], item["weight"]))
 
 

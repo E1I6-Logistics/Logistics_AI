@@ -6,7 +6,14 @@ import math
 import time
 from typing import Any
 
-from .iterative_route_policy import MAX_VISITS_PER_NODE, NEXT_NODE_INSTRUCTIONS, next_node_options, next_node_state
+from .iterative_route_policy import (
+    DIRECTION_INSTRUCTIONS,
+    MAX_VISITS_PER_NODE,
+    NEXT_NODE_INSTRUCTIONS,
+    TRAFFIC_INSTRUCTIONS,
+    next_node_options,
+    next_node_state,
+)
 from .route_service import validate_and_calculate_path_distance
 
 
@@ -42,7 +49,14 @@ def run_selected_route(
     max_steps: int | None = None,
     *,
     instructions: str = NEXT_NODE_INSTRUCTIONS,
+    traffic: dict[str, Any] | None = None,
+    include_direction: bool = False,
 ) -> dict[str, Any]:
+    points = prepared.get("points") if include_direction else None
+    if points:
+        instructions = f"{instructions} {DIRECTION_INSTRUCTIONS}"
+    if traffic is not None:
+        instructions = f"{instructions} {TRAFFIC_INSTRUCTIONS}"
     start, target = case["start"], case["target"]
     current = start
     path = [start]
@@ -78,6 +92,9 @@ def run_selected_route(
             visit_counts,
             candidate_scope=candidate_scope,
             max_visits_per_node=max_visits_per_node,
+            target=target,
+            traffic=traffic,
+            points=points,
         )
         previous_node = options["previous_node"]
         neighbor_edges = options["available_edges"]
@@ -157,6 +174,8 @@ def run_selected_route(
             options,
             context_mode=context_mode,
             max_visits_per_node=max_visits_per_node,
+            traffic=traffic,
+            points=points,
         )
         step_started = time.perf_counter()
         step_record: dict[str, Any] = {

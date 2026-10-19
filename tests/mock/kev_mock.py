@@ -24,7 +24,7 @@ class MockKEV:
             return "action_wait"
         return next(iter(candidates))
 
-    def route(self, graph_data, start, goal, *, selector="kev", model=None):
+    def route(self, graph_data, start, goal, *, selector="kev", model=None, traffic=None):
         """오프라인 데모·테스트를 위해 단순 너비 우선 탐색(BFS)으로 연결 경로를 찾는다."""
         graph = Graph(graph_data)
         todo = [[start]]

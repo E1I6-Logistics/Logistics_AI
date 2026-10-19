@@ -28,7 +28,7 @@ class ReroutePlanner(MockKEV):
             return "action_reroute"
         return super().pick(state, candidates, instructions, question_id)
 
-    def route(self, graph_data, start, goal, *, selector="kev", model=None):
+    def route(self, graph_data, start, goal, *, selector="kev", model=None, traffic=None):
         return list(self.rerouted_path)
 
 

@@ -28,6 +28,7 @@ from .kev_conflict import (
     zone_candidates,
 )
 from .kev_graph import Graph, _node
+from .kev_traffic import mapf_traffic
 
 
 class KevMAPF:
@@ -74,6 +75,7 @@ class KevMAPF:
         self.processed: set[tuple[str, str, str]] = set()
         self.wait_reservations: dict[int, str] = {}
         self.robot_wait_nodes: dict[str, int] = {}
+        self._cached_graph_state: dict | None = None
 
     def _zone_occupants(self, zid: str, info: dict) -> list[str]:
         """그룹에 속한 자원들의 현재 점유 로봇을 조회한다."""
@@ -82,19 +84,21 @@ class KevMAPF:
 
     def _graph_state(self) -> dict:
         """Kev 질의의 `state`에 공통으로 포함할 compact 그래프와 각 로봇의 인접 간선 정보를 구성한다."""
-        return {
-            "route_graph": self.graph.compact,
-            "robots": [
-                {
-                    **robot,
-                    "available_edges": route_service.get_available_edges(
-                        self.graph.compact, robot["current_node"]
-                    ),
-                }
-                for robot in self.robots.values()
-            ],
-            "eta_available": False,
-        }
+        if self._cached_graph_state is None:
+            self._cached_graph_state = {
+                "route_graph": self.graph.compact,
+                "robots": [
+                    {
+                        **robot,
+                        "available_edges": route_service.get_available_edges(
+                            self.graph.compact, robot["current_node"]
+                        ),
+                    }
+                    for robot in self.robots.values()
+                ],
+                "eta_available": False,
+            }
+        return self._cached_graph_state
 
     def _state(self, zone: str, info: dict, participants: list[str]) -> dict:
         """특정 충돌 구간(`zone`)과 참여 로봇(`participants`)에 대한 상세 의사결정 컨텍스트를 생성한다."""
@@ -178,14 +182,25 @@ class KevMAPF:
             )
 
         virtual = self.graph.virtual_graph(forbid_nodes, forbid_edges)
+        traffic = mapf_traffic(self.robots, robot["id"], occupied=self.occupied)
         try:
-            candidate = self.live.route(
-                virtual,
-                robot["current_node"],
-                robot["goal_node"],
-                selector=robot["selector"],
-                model=robot["model"],
-            )
+            try:
+                candidate = self.live.route(
+                    virtual,
+                    robot["current_node"],
+                    robot["goal_node"],
+                    selector=robot["selector"],
+                    model=robot["model"],
+                    traffic=traffic,
+                )
+            except TypeError:
+                candidate = self.live.route(
+                    virtual,
+                    robot["current_node"],
+                    robot["goal_node"],
+                    selector=robot["selector"],
+                    model=robot["model"],
+                )
             candidate = [_node(n) for n in candidate]
             self.graph.check_path(
                 candidate, start=robot["current_node"], goal=robot["goal_node"]
@@ -482,6 +497,7 @@ class KevMAPF:
                         if isinstance(self.live, LiveKEV)
                         else "mock_rerouted"
                     )
+                    self._cached_graph_state = None
                     result.update(action="REROUTE", new_path=new_route)
                     routes = {r: x["path"] for r, x in self.robots.items()}
                     potential_conflict_zones = group_conflict_zones(zone_candidates(routes))

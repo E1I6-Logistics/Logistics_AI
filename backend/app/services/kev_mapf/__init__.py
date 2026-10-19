@@ -44,6 +44,7 @@ from .kev_dispatcher import (
 )
 from .kev_engine import KevMAPF
 from .kev_graph import Graph, _node, _node_sort
+from .kev_traffic import live_traffic, mapf_traffic
 
 __all__ = [
     "Graph",
@@ -73,4 +74,6 @@ __all__ = [
     "dispatch_prepared_order_route",
     "review_prepared_mapf_candidate",
     "dispatch_simulation_mapf",
+    "live_traffic",
+    "mapf_traffic",
 ]
