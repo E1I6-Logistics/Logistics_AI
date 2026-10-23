@@ -3,7 +3,9 @@
 import argparse
 import json
 import os
+import signal
 import subprocess
+import sys
 import threading
 import time
 from pathlib import Path
@@ -43,6 +45,16 @@ directory = Path(__file__).resolve().parent
 state_path = Path(os.environ.get("OMX_INVENTORY_STATE_PATH", "~/.local/state/lerobot/omx_inventory.json")).expanduser()
 
 new_order_script = directory / "omx_new_order.sh"
+omx3_script = directory / "run_e_interactive.py"
+omx3_policy = os.environ.get(
+    "OMX3_POLICY_PATH",
+    "outputs/train/warehouse_item_e_132_merged_act_300k/checkpoints/250000/pretrained_model",
+)
+omx3_port = os.environ.get(
+    "OMX3_FOLLOWER_PORT",
+    "/dev/serial/by-id/usb-ROBOTIS_OpenRB-150_100E8DB15157375037202020FF0F2015-if00",
+)
+
 
 
 # =============================================================
@@ -54,8 +66,9 @@ client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION1)
 job_lock = threading.Lock()
 
 current_job_id = None
-current_state = "NOT_IMPLEMENTED" if robot_id in WORKSTATION_IDS else "IDLE"
+current_state = "NOT_IMPLEMENTED" if robot_id == "omx4" else "IDLE"
 current_orders = None
+omx3_process = None
 
 
 # =============================================================
@@ -244,10 +257,42 @@ def execute_orders(job_id, orders):
     print("[ORDER] 전체 주문 완료 | " f"총 소요시간: " f"{elapsed(time.monotonic() - started)}", flush=True)
 
 
-# OMX 하역 작업을 실행한다.
+# OMX3: MQTT 작업 요청 1건당 E 모델 프로그램을 한 번 실행한다.
 def execute_unload(job_id, items):
-    # omx3/omx4의 실제 하차 동작을 구현할 자리. 구현 전에는 호출하지 않는다.
-    pass
+    if robot_id != "omx3":
+        raise RuntimeError(f"{robot_id} 하차 동작은 구현되지 않았습니다.")
+
+    policy_path = Path(omx3_policy).expanduser()
+    if not policy_path.is_absolute():
+        policy_path = directory / policy_path
+    if not (policy_path / "config.json").is_file():
+        raise FileNotFoundError(f"OMX3 정책 파일 없음: {policy_path / 'config.json'}")
+    if not omx3_script.is_file():
+        raise FileNotFoundError(f"OMX3 실행 파일 없음: {omx3_script}")
+    if not Path(omx3_port).exists():
+        raise FileNotFoundError(f"OMX3 컨트롤러 연결 확인 필요: {omx3_port}")
+
+    env = os.environ.copy()
+    env.update({
+        "E_DISPLAY_DATA": "false",
+        "E_FOLLOWER_PORT": omx3_port,
+        "E_POLICY_PATH": str(policy_path),
+    })
+    print(f"[OMX3] Job {job_id}: E 모델 실행 {policy_path}", flush=True)
+    global omx3_process
+    proc = subprocess.Popen(
+        [sys.executable, str(omx3_script)], cwd=directory, env=env,
+        start_new_session=True,
+    )
+    omx3_process = proc
+    try:
+        returncode = proc.wait()
+    finally:
+        omx3_process = None
+    if returncode != 0:
+        raise RuntimeError(f"OMX3 프로그램 비정상 종료 (exit={returncode})")
+    # exit=0은 프로그램 정상 종료이지 물리적 하차 성공을 검증한 값은 아니다.
+
 
 
 # =============================================================
@@ -271,7 +316,10 @@ def run_job(job_id, orders):
 
         send_status()
 
-        execute_orders(job_id, orders)
+        if robot_id == "omx3":
+            execute_unload(job_id, orders)
+        else:
+            execute_orders(job_id, orders)
 
         success = True
 
@@ -295,7 +343,9 @@ def run_job(job_id, orders):
         if success:
             print(f"[ORDER] Job 완료: {job_id}", flush=True)
 
-        send_result(job_id, success, "Order completed" if success else result_message)
+        done_message = ("Script exited normally; physical completion unverified"
+                        if robot_id == "omx3" else "Order completed")
+        send_result(job_id, success, done_message if success else result_message)
 
 
 # =============================================================
@@ -319,8 +369,8 @@ def on_command(data):
 
         return
 
-    if robot_id in WORKSTATION_IDS:
-        print(f"[MQTT] {robot_id} 하차 동작은 아직 구현되지 않았습니다.", flush=True)
+    if robot_id == "omx4":
+        print("[MQTT] omx4 하차 동작은 아직 구현되지 않았습니다.", flush=True)
         send_ack(job_id, False)
         return
 
@@ -339,7 +389,8 @@ def on_command(data):
     if current_job_id == job_id:
 
         try:
-            same_orders = tuple(make_orders(items)) == current_orders
+            same_orders = (True if robot_id == "omx3"
+                           else tuple(make_orders(items)) == current_orders)
         except ValueError:
             same_orders = False
 
@@ -372,7 +423,8 @@ def on_command(data):
 
     try:
 
-        orders = make_orders(items)
+        # OMX3은 품목/수량에 관계없이 command 1건당 한 번 실행한다.
+        orders = ("TRIGGER",) if robot_id == "omx3" else make_orders(items)
 
     except Exception as exc:
 
@@ -452,12 +504,29 @@ client.on_message = on_message
 
 
 # =============================================================
+# 종료 시 OMX3의 자식 프로세스도 종료 (로봇팔 안전정지는 별도 보장 필요)
+# =============================================================
+
+
+def stop_omx3_process(signum, frame):
+    if robot_id == "omx3" and omx3_process is not None:
+        try:
+            os.killpg(omx3_process.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+    raise SystemExit(128 + signum)
+
+
+# =============================================================
 # Main
 # =============================================================
 
 
 # 명령행 프로그램의 실행 절차를 시작한다.
 def main():
+
+    signal.signal(signal.SIGTERM, stop_omx3_process)
+    signal.signal(signal.SIGINT, stop_omx3_process)
 
     print("==============================")
     print("OMX MQTT Client")
@@ -470,8 +539,9 @@ def main():
     print("==============================")
 
     if robot_id in PICKUP_ITEMS and not new_order_script.exists():
-
-        raise FileNotFoundError(f"omx_new_order.sh가 없습니다: " f"{new_order_script}")
+        raise FileNotFoundError(f"omx_new_order.sh가 없습니다: {new_order_script}")
+    if robot_id == "omx3" and not omx3_script.is_file():
+        raise FileNotFoundError(f"run_e_interactive.py가 없습니다: {omx3_script}")
 
     client.connect(broker_ip, broker_port, 60)
 
