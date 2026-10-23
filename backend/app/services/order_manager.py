@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+import math
 import os
 from datetime import datetime, timezone
 from threading import RLock
@@ -18,17 +19,38 @@ from .mode_service import mode_manager, feature_engine
 from .mqtt_manager import mqtt_manager
 from .order_dispatcher import available_robots
 from .order_route_dispatcher import dispatch_order_route
+from .route_service import plan_route
 from .scenario_service import scenario_manager
 from .workstation_manager import workstation_manager
 
 
 logger = logging.getLogger(__name__)
 
-# 배차 KEV 호출은 주문 tick 안에서 동기로 실행되므로 짧게 끊고, 실패 후에는 잠시 호출하지 않는다.
+# 기존 주석. KEV 호출을 lock 밖 스레드로 옮겨서 tick이 이벤트 루프를 막지 않는다.
+# # 배차 KEV 호출은 주문 tick 안에서 동기로 실행되므로 짧게 끊고, 실패 후에는 잠시 호출하지 않는다.
+# 배차 KEV 호출은 tick 한 번을 그만큼 늦추므로 짧게 끊고, 실패 후에는 잠시 호출하지 않는다.
 KEV_DISPATCH_TIMEOUT_SECONDS = float(os.getenv("KEV_DISPATCH_TIMEOUT_SECONDS", "3"))
 KEV_DISPATCH_COOLDOWN_SECONDS = float(os.getenv("KEV_DISPATCH_COOLDOWN_SECONDS", "30"))
+# tick 한 번에서 KEV 결과를 받아 배차를 다시 시도하는 최대 횟수. 남은 주문은 다음 tick에서 처리한다.
+KEV_DISPATCH_MAX_ROUNDS = 4
 # /api/robots 조회가 배차 tick을 기다리지 않도록 주문 lock 대기 시간을 짧게 둔다.
 DISPATCH_STATUS_LOCK_TIMEOUT_S = 0.05
+
+
+def _kev_dispatch_eta_tie_seconds():
+    """Return the configured ETA window, rejecting an invalid policy value."""
+    seconds = float(os.getenv("KEV_DISPATCH_ETA_TIE_SECONDS", "2"))
+    if seconds < 0:
+        raise ValueError("KEV_DISPATCH_ETA_TIE_SECONDS는 0 이상이어야 합니다.")
+    return seconds
+
+
+def _kev_dispatch_eta_speed_mps():
+    """Return the ETA conversion speed configured for the active deployment."""
+    speed_mps = float(os.getenv("KEV_DISPATCH_ETA_SPEED_MPS", "0.2"))
+    if speed_mps <= 0:
+        raise ValueError("KEV_DISPATCH_ETA_SPEED_MPS는 0보다 커야 합니다.")
+    return speed_mps
 
 
 class OrderManager:
@@ -419,9 +441,62 @@ class OrderManager:
         }
 
     # 배차 가능한 후보 중 한 대를 KEV로 선택한다.
+    # tick은 lock 밖에서 KEV를 부르기 위해 준비(_prepare_kev_dispatch)와 호출(_request_kev_dispatch)을 따로 쓴다.
     def _select_robot_with_kev(self, row, candidates, mode):
-        if not candidates:
+        kind, value = self._prepare_kev_dispatch(row, candidates, mode)
+        if kind == "robot":
+            return value
+        return self._request_kev_dispatch(value)
+
+    # 한 로봇이 주문의 첫 픽업 노드에 도달하는 최단 거리와 ETA를 계산한다.
+    @staticmethod
+    def _pickup_eta(profile, pickup_nodes):
+        current_node = profile.get("current_node")
+        if current_node is None:
+            raise ValueError(f"현재 노드가 없는 로봇입니다: {profile['robot_id']}")
+
+        routes = []
+        for pickup_node in pickup_nodes:
+            route = plan_route(str(current_node), str(pickup_node))
+            routes.append((float(route["cost"]), str(pickup_node)))
+        if not routes:
+            raise ValueError("주문에 픽업 노드가 없습니다.")
+        distance_m, pickup_node = min(routes)
+        return {
+            "pickup_node": pickup_node,
+            "pickup_distance_m": distance_m,
+            "pickup_eta_seconds": distance_m / _kev_dispatch_eta_speed_mps(),
+        }
+
+    @staticmethod
+    def _select_robot_by_dispatch_rules(profiles):
+        """Choose the temporary code baseline inside one ETA near-tie group."""
+
+        # 임시 비교 기준선: 작업량·작업 후 예상 배터리 정책이 확정되기 전까지만 사용한다.
+        # 우선순위는 IDLE·비복귀, 현재 배터리 높은 순, robot_id 오름차순이다.
+        # battery가 None, 비수치, NaN이면 유효한 배터리 값보다 뒤로 보낸다.
+        def priority(profile):
+            state = profile.get("state")
+            idle_and_not_returning = state == RobotState.IDLE.value and not profile.get("returning")
+            try:
+                battery = float(profile.get("battery"))
+            except (TypeError, ValueError):
+                battery = None
+            if battery is None or not math.isfinite(battery):
+                battery_priority = (1, 0.0)
+            else:
+                battery_priority = (0, -battery)
+            return (0 if idle_and_not_returning else 1, *battery_priority, str(profile["robot_id"]))
+
+        if not profiles:
             return None
+        return min(profiles, key=priority)["robot_id"]
+
+    # KEV 호출 전에 후보를 정리한다. ("robot", 로봇 ID 또는 None) 또는 ("request", 요청)을 반환한다.
+    # lock 안에서 호출한다.
+    def _prepare_kev_dispatch(self, row, candidates, mode):
+        if not candidates:
+            return "robot", None
         # 재시도 주문은 다른 후보가 있으면 직전 로봇을 KEV 후보에서 뺀다.
         # V1 지시문의 "Avoid the last robot"을 지시문 대신 코드 규칙으로 옮긴 것이다.
         last_robot_id = row.get("last_robot_id")
@@ -439,7 +514,7 @@ class OrderManager:
                 row["order_id"],
                 excluded_last_robot,
             )
-            return candidates[0]
+            return "robot", candidates[0]
 
         profiles = []
         for robot_id in candidates:
@@ -447,21 +522,50 @@ class OrderManager:
             if profile is not None:
                 profiles.append(profile)
         if not profiles:
-            return None
+            return "robot", None
+        try:
+            eta_tie_window_seconds = _kev_dispatch_eta_tie_seconds()
+            for profile in profiles:
+                profile.update(self._pickup_eta(profile, row["pickup_nodes"]))
+        except (OSError, TypeError, ValueError) as exc:
+            # ETA를 계산할 수 없으면 안전하게 기존 알고리즘 fallback을 사용한다.
+            logger.warning("KEV dispatch ETA preparation failed; falling back to algorithm: order=%s error=%r", row["order_id"], exc)
+            return "robot", None
+
         profiles.sort(key=lambda profile: profile["robot_id"])
+        minimum_eta_seconds = min(profile["pickup_eta_seconds"] for profile in profiles)
+        near_eta_profiles = [
+            profile
+            for profile in profiles
+            if profile["pickup_eta_seconds"] <= minimum_eta_seconds + eta_tie_window_seconds
+        ]
+        excluded_by_eta = [
+            profile["robot_id"] for profile in profiles if profile not in near_eta_profiles
+        ]
+        for profile in near_eta_profiles:
+            profile["eta_delta_seconds"] = profile["pickup_eta_seconds"] - minimum_eta_seconds
+
+        if len(near_eta_profiles) == 1:
+            robot_id = near_eta_profiles[0]["robot_id"]
+            logger.info(
+                "KEV dispatch skipped (ETA winner): robot=%s order=%s eta=%.3fs tie_window=%.3fs excluded=%s",
+                robot_id,
+                row["order_id"],
+                minimum_eta_seconds,
+                eta_tie_window_seconds,
+                excluded_by_eta,
+            )
+            return "robot", robot_id
+
+        profiles = near_eta_profiles
+        candidates = [profile["robot_id"] for profile in profiles]
         if len(profiles) == 1:
             logger.info(
                 "KEV dispatch skipped (single profile): robot=%s order=%s", profiles[0]["robot_id"], row["order_id"]
             )
-            return profiles[0]["robot_id"]
+            return "robot", profiles[0]["robot_id"]
 
-        if self._kev_dispatch_selector is None:
-            from .route_selector.kev_selector import KevSelector
-
-            # 기존 코드. 기본 KEV_TIMEOUT_SECONDS(60초)를 그대로 써서 tick이 오래 멈출 수 있었다.
-            # self._kev_dispatch_selector = KevSelector()
-            # KEV_MODEL, KEV_HOST 등은 환경변수에서 읽는다. 배차 timeout만 경로 선택과 따로 둔다.
-            self._kev_dispatch_selector = KevSelector(timeout_seconds=KEV_DISPATCH_TIMEOUT_SECONDS)
+        rule_baseline_choice = self._select_robot_by_dispatch_rules(profiles)
 
         choices = {
             profile["robot_id"]: (
@@ -470,7 +574,11 @@ class OrderManager:
                 f"current_node={profile['current_node']}, "
                 f"occupied_node={profile['occupied_node']}, "
                 f"goal_node={profile['goal_node']}, "
-                f"returning={profile['returning']}"
+                f"returning={profile['returning']}, "
+                f"pickup_node={profile['pickup_node']}, "
+                f"pickup_distance_m={profile['pickup_distance_m']:.3f}, "
+                f"pickup_eta_seconds={profile['pickup_eta_seconds']:.3f}, "
+                f"eta_delta_seconds={profile['eta_delta_seconds']:.3f}"
             )
             for profile in profiles
         }
@@ -485,6 +593,14 @@ class OrderManager:
                 "last_robot_id": row.get("last_robot_id"),
             },
             "robots": profiles,
+            "dispatch_context": {
+                "eta_filter_applied": True,
+                "minimum_pickup_eta_seconds": minimum_eta_seconds,
+                "eta_tie_window_seconds": eta_tie_window_seconds,
+                "excluded_by_eta": excluded_by_eta,
+                "post_task_battery_available": False,
+                "recent_workload_available": False,
+            },
         }
         # 기존 지시문(V1). D-3에서 최고 배터리 선택 정확도가 2/6이어서 V3로 바꾼다.
         # instructions = (
@@ -494,26 +610,55 @@ class OrderManager:
         #     "Avoid the last robot when another suitable robot is available. "
         #     "Return only one candidate ID."
         # )
+        # 수정 전 V3 지시문. 배터리를 최우선으로 선택했으나 ETA 우선 정책과 맞지 않아 교체한다.
+        # instructions = (
+        #     "Among idle and non-returning robots, choose the one with the highest battery. "
+        #     "Use other fields only to break exact ties. Return only one candidate ID."
+        # )
         instructions = (
-            "Among idle and non-returning robots, choose the one with the highest battery. "
-            "Use other fields only to break exact ties. Return only one candidate ID."
+            "All listed robots have passed code safety checks and are within the configured pickup ETA near-tie window. "
+            "Choose exactly one listed candidate ID. Do not re-rank candidates by pickup ETA and do not treat battery as a safety threshold. "
+            "Prefer an IDLE, non-returning robot when operational state differs. Use the current battery only as secondary context; "
+            "it is not an estimated post-task battery. Return only one candidate ID."
         )
         question_id = f"dispatch_{row['order_id']}"
-        debug_enabled = os.getenv("KEV_DISPATCH_DEBUG") == "1"
         debug_record = {
             "order_id": row["order_id"],
             "question_id": question_id,
             "excluded_last_robot": excluded_last_robot,
+            # KEV 입력에는 넣지 않는다. 비교 기록과 KEV 오류 시 코드 fallback에만 쓴다.
+            "rule_baseline_choice": rule_baseline_choice,
             "state": state,
             "choices": choices,
             "instructions": instructions,
         }
+        # state, choices는 lock 안에서 만든 사본이라 lock 밖에서 읽어도 된다.
+        return "request", {
+            "order_id": row["order_id"],
+            "candidates": list(candidates),
+            "rule_baseline_choice": rule_baseline_choice,
+            "debug_record": debug_record,
+        }
+
+    # 준비한 요청으로 KEV를 호출하고 선택된 로봇 ID를 반환한다. 공유 상태를 건드리지 않으므로 lock 밖에서 호출한다.
+    def _request_kev_dispatch(self, request):
+        if self._kev_dispatch_selector is None:
+            from .route_selector.kev_selector import KevSelector
+
+            # 기존 코드. 기본 KEV_TIMEOUT_SECONDS(60초)를 그대로 써서 tick이 오래 멈출 수 있었다.
+            # self._kev_dispatch_selector = KevSelector()
+            # KEV_MODEL, KEV_HOST 등은 환경변수에서 읽는다. 배차 timeout만 경로 선택과 따로 둔다.
+            self._kev_dispatch_selector = KevSelector(timeout_seconds=KEV_DISPATCH_TIMEOUT_SECONDS)
+
+        debug_record = request["debug_record"]
+        candidates = request["candidates"]
+        debug_enabled = os.getenv("KEV_DISPATCH_DEBUG") == "1"
         try:
             result = self._kev_dispatch_selector.select_choice(
-                state=state,
-                candidates=choices,
-                instructions=instructions,
-                question_id=question_id,
+                state=debug_record["state"],
+                candidates=debug_record["choices"],
+                instructions=debug_record["instructions"],
+                question_id=debug_record["question_id"],
             )
         except Exception as exc:
             if debug_enabled:
@@ -552,9 +697,22 @@ class OrderManager:
         if chosen_robot not in candidates:
             raise RuntimeError(f"KEV가 후보 목록에 없는 로봇을 선택했습니다: {chosen_robot}")
         logger.info(
-            "KEV dispatch selected robot=%s order=%s candidates=%s", chosen_robot, row["order_id"], candidates
+            "KEV dispatch selected robot=%s order=%s candidates=%s rule_baseline=%s",
+            chosen_robot,
+            request["order_id"],
+            candidates,
+            request["rule_baseline_choice"],
         )
         return chosen_robot
+
+    # tick에서 KEV 요청을 별도 스레드로 보내고, 예외도 결과로 돌려준다.
+    async def _run_kev_dispatch(self, request):
+        result = {"order_id": request["order_id"], "candidates": request["candidates"]}
+        try:
+            result["choice"] = await asyncio.to_thread(self._request_kev_dispatch, request)
+        except Exception as exc:
+            result["error"] = exc
+        return result
 
     # 현재 규칙 기반 우선순위로 로봇을 선택한다. KEV 실패 시에도 사용한다.
     def _select_robot_by_algorithm(self, row, candidates, blocked_by_earlier_pickup):
@@ -571,6 +729,31 @@ class OrderManager:
             return
         mode = mode_manager.mode
         preemptions = []
+        # 기존 코드는 아래 _dispatch_round의 lock 블록을 tick 안에서 바로 실행했고, KEV HTTP 호출도 lock 안에서 했다.
+        # 이제 KEV가 필요하면 lock을 풀고 스레드에서 호출한 뒤, 결과를 들고 배차를 다시 시도한다.
+        kev_result = None
+        for _ in range(KEV_DISPATCH_MAX_ROUNDS):
+            kev_request, active = self._dispatch_round(mode, preemptions, kev_result)
+            if kev_request is None:
+                break
+            kev_result = await self._run_kev_dispatch(kev_request)
+        if mode == "real":
+            for order_id, robot_id in preemptions:
+                try:
+                    ros_gateway.cancel_current_work(
+                        robot_id, lambda oid=order_id, rid=robot_id: self._start_after_return_stop(oid, rid)
+                    )
+                except (ValueError, RuntimeError) as exc:
+                    self.fail(order_id, str(exc))
+            for row in active:
+                await self._tick_real(row)
+            await self._tick_real_returns()
+
+    # 대기 주문 배차를 lock 안에서 한 번 진행한다.
+    # KEV 호출이 필요한 주문을 만나면 그 주문에서 멈추고 (KEV 요청, 진행 중 주문)을 반환한다.
+    # kev_result는 직전 KEV 호출 결과이며, 같은 주문과 같은 후보일 때만 사용한다.
+    def _dispatch_round(self, mode, preemptions, kev_result):
+        kev_request = None
         with self.lock:
             busy = {
                 row["robot_id"] for row in self.orders.values() if row["status"] == "IN_PROGRESS" and row["robot_id"]
@@ -640,6 +823,8 @@ class OrderManager:
 
                 robot_id = None
                 dispatch_engine = feature_engine("dispatch", row["operation_mode"])
+                fallback_candidates = candidates
+                rule_baseline_choice = None
                 # 기존 KEV 분기. 실패해도 매 tick 다시 호출했고, 후보가 1대여도 "selected" 로그를 남겼다.
                 # if dispatch_engine == "ai":
                 #     try:
@@ -660,32 +845,83 @@ class OrderManager:
                 #             exc,
                 #         )
                 #         robot_id = None
-                if dispatch_engine == "ai" and monotonic() >= self._kev_dispatch_retry_at:
-                    try:
-                        robot_id = self._select_robot_with_kev(row, eligible_candidates, mode)
-                        if robot_id is not None:
-                            candidates.remove(robot_id)
-                    except Exception as exc:
-                        # KEV 서버 오류나 잘못된 응답은 주문 실패가 아니라 기존 배차로 복구한다.
-                        # 실패가 반복되면 tick마다 timeout을 기다리지 않도록 잠시 KEV 호출을 멈춘다.
-                        self._kev_dispatch_retry_at = monotonic() + KEV_DISPATCH_COOLDOWN_SECONDS
-                        logger.warning(
-                            "KEV dispatch failed; falling back to algorithm for %.0fs: order=%s error=%r",
-                            KEV_DISPATCH_COOLDOWN_SECONDS,
-                            row["order_id"],
-                            exc,
-                            exc_info=True,
-                        )
-                        robot_id = None
-                elif dispatch_engine == "ai":
-                    logger.info(
-                        "KEV dispatch skipped (cooldown %.1fs left): order=%s",
-                        self._kev_dispatch_retry_at - monotonic(),
-                        row["order_id"],
-                    )
+                # 기존 KEV 분기. lock 안에서 KEV HTTP를 동기로 호출해 응답을 기다리는 동안 lock과 이벤트 루프가 멈췄다.
+                # if dispatch_engine == "ai" and monotonic() >= self._kev_dispatch_retry_at:
+                #     try:
+                #         robot_id = self._select_robot_with_kev(row, eligible_candidates, mode)
+                #         if robot_id is not None:
+                #             candidates.remove(robot_id)
+                #     except Exception as exc:
+                #         # KEV 서버 오류나 잘못된 응답은 주문 실패가 아니라 기존 배차로 복구한다.
+                #         # 실패가 반복되면 tick마다 timeout을 기다리지 않도록 잠시 KEV 호출을 멈춘다.
+                #         self._kev_dispatch_retry_at = monotonic() + KEV_DISPATCH_COOLDOWN_SECONDS
+                #         logger.warning(
+                #             "KEV dispatch failed; falling back to algorithm for %.0fs: order=%s error=%r",
+                #             KEV_DISPATCH_COOLDOWN_SECONDS,
+                #             row["order_id"],
+                #             exc,
+                #             exc_info=True,
+                #         )
+                #         robot_id = None
+                # elif dispatch_engine == "ai":
+                kev_failure = None
+                if kev_result is not None and kev_result["order_id"] == row["order_id"] and "error" in kev_result:
+                    kev_failure = kev_result.pop("error")
+                if dispatch_engine == "ai":
+                    kind, value = self._prepare_kev_dispatch(row, eligible_candidates, mode)
+                    if kind == "robot":
+                        robot_id = value
+                    else:
+                        # KEV 실패·cooldown에서도 ETA 정책은 유지하기 위해 같은 후보군으로 fallback한다.
+                        fallback_candidates = [candidate for candidate in candidates if candidate in value["candidates"]]
+                        rule_baseline_choice = value["rule_baseline_choice"]
+                        if kev_failure is not None:
+                            # KEV 서버 오류나 잘못된 응답은 주문 실패가 아니라 ETA 후보군 안의 기존 배차로 복구한다.
+                            # 실패가 반복되면 tick마다 timeout을 기다리지 않도록 잠시 KEV 호출을 멈춘다.
+                            self._kev_dispatch_retry_at = monotonic() + KEV_DISPATCH_COOLDOWN_SECONDS
+                            logger.warning(
+                                "KEV dispatch failed; falling back to algorithm for %.0fs: order=%s error=%r",
+                                KEV_DISPATCH_COOLDOWN_SECONDS,
+                                row["order_id"],
+                                kev_failure,
+                                exc_info=kev_failure,
+                            )
+                        elif monotonic() >= self._kev_dispatch_retry_at:
+                            if (
+                                kev_result is not None
+                                and kev_result["order_id"] == row["order_id"]
+                                and kev_result["candidates"] == value["candidates"]
+                            ):
+                                robot_id = kev_result["choice"]
+                            else:
+                                if kev_result is not None and kev_result["order_id"] == row["order_id"]:
+                                    # KEV 응답을 기다리는 동안 후보가 바뀌었으면 결과를 버리고 다시 묻는다.
+                                    logger.info(
+                                        "KEV dispatch result discarded (candidates changed): order=%s asked=%s now=%s",
+                                        row["order_id"],
+                                        kev_result["candidates"],
+                                        value["candidates"],
+                                    )
+                                # 앞 주문이 먼저 로봇을 받도록 뒤 주문은 이번 차례에 배차하지 않는다.
+                                kev_request = value
+                                break
+                        else:
+                            logger.info(
+                                "KEV dispatch skipped (cooldown %.1fs left): order=%s",
+                                self._kev_dispatch_retry_at - monotonic(),
+                                row["order_id"],
+                            )
+                    if robot_id is not None:
+                        candidates.remove(robot_id)
 
                 if robot_id is None:
-                    robot_id = self._select_robot_by_algorithm(row, candidates, blocked_by_earlier_pickup)
+                    if rule_baseline_choice in fallback_candidates:
+                        robot_id = rule_baseline_choice
+                        fallback_candidates.remove(robot_id)
+                    else:
+                        robot_id = self._select_robot_by_algorithm(row, fallback_candidates, blocked_by_earlier_pickup)
+                    if robot_id is not None and fallback_candidates is not candidates and robot_id in candidates:
+                        candidates.remove(robot_id)
                 if robot_id is None:
                     continue
                 row["robot_id"] = robot_id
@@ -716,17 +952,19 @@ class OrderManager:
                             row["order_id"], row["items"], row["total_quantity"], row["pickup_nodes"], None
                         )
             active = [row for row in self.orders.values() if row["mode"] == mode and row["status"] == "IN_PROGRESS"]
-        if mode == "real":
-            for order_id, robot_id in preemptions:
-                try:
-                    ros_gateway.cancel_current_work(
-                        robot_id, lambda oid=order_id, rid=robot_id: self._start_after_return_stop(oid, rid)
-                    )
-                except (ValueError, RuntimeError) as exc:
-                    self.fail(order_id, str(exc))
-            for row in active:
-                await self._tick_real(row)
-            await self._tick_real_returns()
+        # 기존 코드. 실제 모드 후처리는 KEV 재시도가 끝난 뒤 한 번만 하도록 tick으로 옮겼다.
+        # if mode == "real":
+        #     for order_id, robot_id in preemptions:
+        #         try:
+        #             ros_gateway.cancel_current_work(
+        #                 robot_id, lambda oid=order_id, rid=robot_id: self._start_after_return_stop(oid, rid)
+        #             )
+        #         except (ValueError, RuntimeError) as exc:
+        #             self.fail(order_id, str(exc))
+        #     for row in active:
+        #         await self._tick_real(row)
+        #     await self._tick_real_returns()
+        return kev_request, active
 
     # 복귀 주행 정지 후 다음 주문을 시작한다.
     def _start_after_return_stop(self, order_id, robot_id):
