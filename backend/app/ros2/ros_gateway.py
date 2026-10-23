@@ -4,7 +4,9 @@ from typing import Any
 from copy import deepcopy
 from functools import wraps
 from ..services.real_navigation import RealNavigation, measured_distance
-from ..config import REAL_ARRIVAL_DISTANCE_M, ZENOH_MISSING_GRACE_S
+# 기존 코드. ArUco 자동 정렬 on/off 설정을 함께 가져오도록 바꾼다.
+# from ..config import REAL_ARRIVAL_DISTANCE_M, ZENOH_MISSING_GRACE_S
+from ..config import REAL_ARRIVAL_DISTANCE_M, REAL_ARUCO_AUTO_ALIGN, ZENOH_MISSING_GRACE_S
 from time import monotonic, strftime
 
 
@@ -621,6 +623,16 @@ class RosGateway:
 
             # 현재 목적지 Node의 ArUco Marker ID 확인
             marker_id = ARUCO_MARKER_IDS.get(robot.current_node)
+
+            # Nav2 도착 오차 측정용: 정렬 Action을 보내지 않고 도착 위치에 그대로 둔다.
+            # 주문 수행 중이면 정렬 뒤 OMX 작업이 이어져야 하므로 건너뛰지 않는다.
+            if marker_id is not None and not REAL_ARUCO_AUTO_ALIGN and robot.order_id is None:
+                print(
+                    f"[{strftime('%Y-%m-%d %H:%M:%S')}] [INFO] [ROS GATEWAY ARUCO SKIPPED] robot={robot_id} "
+                    f"node={robot.current_node} marker_id={marker_id} reason=FMS_REAL_ARUCO_AUTO_ALIGN=0",
+                    flush=True,
+                )
+                marker_id = None
 
             if marker_id is not None:
                 robot.set_state(RobotState.DOCKING)

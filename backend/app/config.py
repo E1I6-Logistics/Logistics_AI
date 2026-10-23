@@ -94,6 +94,9 @@ REAL_ROUTE_TRANSITION_DISTANCE_M = float(os.getenv("FMS_REAL_ROUTE_TRANSITION_DI
 # 실제 충전 위치가 더 멀면 값을 늘릴 수 있지만 이웃 지점과 겹치지 않아야 한다.
 REAL_DOCK_OCCUPANCY_TOLERANCE_M = float(os.getenv("FMS_REAL_DOCK_OCCUPANCY_TOLERANCE_M", "0.25"))
 
+# 0이면 마커 노드에 도착해도 ArUco 정렬 Action을 보내지 않는다. Nav2 도착 오차를 잴 때만 끈다.
+REAL_ARUCO_AUTO_ALIGN = os.getenv("FMS_REAL_ARUCO_AUTO_ALIGN", "1") != "0"
+
 # 새 로봇의 첫 위치 정보를 기다리며 담당 충전 지점을 보호하는 시간(초).
 # 시간이 지나도 위치를 모르면 안전을 위해 주행을 멈춘다.
 # 실제 첫 위치 정보가 더 늦게 올 때만 늘린다.
