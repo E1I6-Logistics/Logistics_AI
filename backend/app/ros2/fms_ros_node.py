@@ -727,7 +727,9 @@ class FmsRosNode(Node):
         robot = fleet_manager.get_robot(robot_id)
         if robot is None:
             return
-        robot.update_battery(percentage=msg.percentage)
+        # 기존 코드. 전압은 저장하지 않았다.
+        # robot.update_battery(percentage=msg.percentage)
+        robot.update_battery(percentage=msg.percentage, voltage=msg.voltage)
 
 
 # 명령행 프로그램의 실행 절차를 시작한다.

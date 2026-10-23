@@ -4,8 +4,12 @@ from __future__ import annotations
 
 from enum import Enum
 
+import math
+from collections import deque
 from threading import RLock
 from time import monotonic, strftime
+
+from ..config import BATTERY_VOLTAGE_WINDOW_S
 
 
 class RobotState(str, Enum):
@@ -93,6 +97,9 @@ class Robot:
 
         # 배터리 상태
         self.battery: float | None = None
+        # 마지막으로 받은 유효 전압(V)과 최근 전압 기록 (monotonic 시각, 전압)
+        self.battery_voltage: float | None = None
+        self._battery_voltage_samples: deque[tuple[float, float]] = deque()
 
         # 현재 동작 상태
         self.state: RobotState = RobotState.OFFLINE
@@ -256,5 +263,33 @@ class Robot:
         self.order_pickup_index = 0
 
     # 배터리를 갱신한다.
-    def update_battery(self, percentage: float) -> None:
+    # 기존 코드. 전압을 받지 않았다.
+    # def update_battery(self, percentage: float) -> None:
+    #     self.battery = float(percentage)
+    def update_battery(self, percentage: float, voltage: float | None = None, now: float | None = None) -> None:
         self.battery = float(percentage)
+        if voltage is None:
+            return
+        voltage = float(voltage)
+        # BatteryState는 측정하지 못한 값을 NaN으로 보낸다. 0 이하도 측정값으로 보지 않는다.
+        if not math.isfinite(voltage) or voltage <= 0:
+            return
+        now = monotonic() if now is None else now
+        with self._lock:
+            self.battery_voltage = voltage
+            self._battery_voltage_samples.append((now, voltage))
+            self._prune_battery_voltage(now)
+
+    # 최근 BATTERY_VOLTAGE_WINDOW_S초 동안의 최저 전압을 반환한다. 기록이 없으면 None이다.
+    def min_battery_voltage(self, now: float | None = None) -> float | None:
+        now = monotonic() if now is None else now
+        with self._lock:
+            self._prune_battery_voltage(now)
+            if not self._battery_voltage_samples:
+                return None
+            return min(voltage for _, voltage in self._battery_voltage_samples)
+
+    # 판단 시간 범위를 벗어난 전압 기록을 지운다. lock 안에서 호출한다.
+    def _prune_battery_voltage(self, now: float) -> None:
+        while self._battery_voltage_samples and now - self._battery_voltage_samples[0][0] > BATTERY_VOLTAGE_WINDOW_S:
+            self._battery_voltage_samples.popleft()

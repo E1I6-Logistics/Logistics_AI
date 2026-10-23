@@ -51,6 +51,9 @@ async def fetch_robots():
                 "pause_reason_code": robot.pause_reason_code,
                 "pause_reason": robot.pause_reason,
                 "battery": robot.battery,
+                # 마지막 전압과, 배차 하한 판단에 쓰는 최근 최저 전압(V)
+                "battery_voltage": robot.battery_voltage,
+                "battery_voltage_min": robot.min_battery_voltage(),
                 "x": robot.x,
                 "y": robot.y,
                 "yaw": robot.yaw,

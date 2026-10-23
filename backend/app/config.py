@@ -97,6 +97,16 @@ REAL_DOCK_OCCUPANCY_TOLERANCE_M = float(os.getenv("FMS_REAL_DOCK_OCCUPANCY_TOLER
 # 0이면 마커 노드에 도착해도 ArUco 정렬 Action을 보내지 않는다. Nav2 도착 오차를 잴 때만 끈다.
 REAL_ARUCO_AUTO_ALIGN = os.getenv("FMS_REAL_ARUCO_AUTO_ALIGN", "1") != "0"
 
+# 배차 후보로 허용하는 최소 배터리 전압(V). 기본값 11.2V는 실측 전 임시 기준이다.
+# 기존 정렬 실험에서 표본이 있는 전압 구간의 아랫선이며, 위험 지점을 측정한 값은 아니다.
+# 전압을 모르는 로봇도 후보에서 뺀다. 0이면 전압 검사를 하지 않는다.
+MIN_DISPATCH_BATTERY_VOLTAGE = float(os.getenv("FMS_MIN_DISPATCH_BATTERY_VOLTAGE", "11.2"))
+
+# 실제 로봇의 최근 이 시간(초) 동안 받은 전압 중 최저값으로 판단한다. 기본값 60초.
+# 정지 전압은 주행 중보다 높게 나오므로 직전 주행의 전압 강하를 반영하려는 값이다.
+# 늘리면 더 보수적이지만 배터리 교체 직후에도 그만큼 후보에서 빠진다.
+BATTERY_VOLTAGE_WINDOW_S = float(os.getenv("FMS_BATTERY_VOLTAGE_WINDOW_S", "60"))
+
 # 새 로봇의 첫 위치 정보를 기다리며 담당 충전 지점을 보호하는 시간(초).
 # 시간이 지나도 위치를 모르면 안전을 위해 주행을 멈춘다.
 # 실제 첫 위치 정보가 더 늦게 올 때만 늘린다.
