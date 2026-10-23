@@ -17,7 +17,9 @@ from ..schemas.robot import normalize_robot_id
 from .fleet_manager import fleet_manager
 from .mode_service import mode_manager, feature_engine
 from .mqtt_manager import mqtt_manager
-from .order_dispatcher import available_robots
+# 기존 코드. 배터리 전압 차단 이유도 같은 함수로 계산하도록 바꾼다.
+# from .order_dispatcher import available_robots
+from .order_dispatcher import available_robots, battery_block_reason
 from .order_route_dispatcher import dispatch_order_route
 from .route_service import plan_route
 from .scenario_service import scenario_manager
@@ -374,6 +376,9 @@ class OrderManager:
     def _simulation_block_reason(robot_id, snapshot, returning):
         if snapshot.get("connection_state") != "ONLINE":
             return "disconnected"
+        battery_reason = battery_block_reason(snapshot.get("battery_voltage"))
+        if battery_reason is not None:
+            return battery_reason
         if (
             robot_id in returning
             and snapshot.get("occupied_node") != CHARGING_STATION_NODES.get(robot_id)
@@ -399,6 +404,9 @@ class OrderManager:
             return "on_edge"
         if robot.pose_received_at is None or monotonic() - robot.pose_received_at > REAL_POSE_TIMEOUT_S:
             return "stale_pose"
+        battery_reason = battery_block_reason(robot.min_battery_voltage())
+        if battery_reason is not None:
+            return battery_reason
         if (
             robot_id in returning
             and robot.occupied_node != CHARGING_STATION_NODES.get(robot_id)

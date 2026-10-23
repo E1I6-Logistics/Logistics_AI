@@ -299,6 +299,68 @@ def test_dispatch_rule_baseline_prefers_non_returning_over_battery():
     assert order_manager._select_robot_by_dispatch_rules(profiles[:2]) == "robot1"
 
 
+# 배차 전압 하한 미만이나 전압을 모르는 로봇을 막고, 0이면 검사하지 않는지 검증한다.
+def test_battery_block_reason_uses_voltage_threshold(monkeypatch):
+    from backend.app.services import order_dispatcher
+
+    monkeypatch.setattr(order_dispatcher, "MIN_DISPATCH_BATTERY_VOLTAGE", 11.2)
+    assert order_dispatcher.battery_block_reason(12.0) is None
+    assert order_dispatcher.battery_block_reason(11.2) is None
+    assert order_dispatcher.battery_block_reason(11.19) == "low_battery"
+    assert order_dispatcher.battery_block_reason(None) == "battery_unknown"
+    assert order_dispatcher.battery_block_reason(float("nan")) == "battery_unknown"
+    assert order_dispatcher.battery_block_reason("abc") == "battery_unknown"
+
+    monkeypatch.setattr(order_dispatcher, "MIN_DISPATCH_BATTERY_VOLTAGE", 0.0)
+    assert order_dispatcher.battery_block_reason(None) is None
+    assert order_dispatcher.battery_block_reason(9.0) is None
+
+
+# 실제 로봇은 최근 판단 시간 안의 최저 전압을 쓰고, NaN 전압은 기록하지 않는지 검증한다.
+def test_robot_min_battery_voltage_uses_recent_window(monkeypatch):
+    from backend.app.models import robot as robot_model
+
+    monkeypatch.setattr(robot_model, "BATTERY_VOLTAGE_WINDOW_S", 60.0)
+    robot = robot_model.Robot("robot1")
+    assert robot.min_battery_voltage(now=0.0) is None
+
+    robot.update_battery(percentage=0.8, voltage=11.0, now=0.0)
+    robot.update_battery(percentage=0.8, voltage=11.8, now=30.0)
+    robot.update_battery(percentage=0.8, voltage=float("nan"), now=40.0)
+    assert robot.battery_voltage == 11.8
+    # 주행 중 강하한 11.0V가 판단 시간 안에 있으면 정지 후 전압이 올라도 최저값을 쓴다.
+    assert robot.min_battery_voltage(now=50.0) == 11.0
+    # 판단 시간이 지나면 오래된 기록은 빠진다.
+    assert robot.min_battery_voltage(now=70.0) == 11.8
+    assert robot.min_battery_voltage(now=100.0) is None
+    # 전압이 없는 기존 호출도 그대로 동작한다.
+    robot.update_battery(percentage=0.5)
+    assert robot.battery == 0.5
+
+
+# 시뮬레이션에서 전압 하한 미만 로봇은 배차 후보에서 빠지고 차단 이유가 표시되는지 검증한다.
+def test_low_battery_voltage_robot_is_not_dispatched(monkeypatch):
+    from backend.app.services import order_dispatcher
+
+    _reset(monkeypatch)
+    monkeypatch.setattr(order_dispatcher, "MIN_DISPATCH_BATTERY_VOLTAGE", 11.2)
+    monkeypatch.setenv("SIM_BATTERY_VOLTAGE_OVERRIDE", "robot1=11.0")
+    mock_fms.reset()
+
+    assert order_dispatcher.available_robots("simulation", set()) == ["robot2", "robot3"]
+    status = order_manager.dispatch_status("simulation")
+    assert status["robot1"]["dispatch_available"] is False
+    assert status["robot1"]["dispatch_block_reason"] == "low_battery"
+
+    async def scenario():
+        order = order_manager.create_order(items={"A": 1, "B": 0, "C": 0, "D": 0}, total_quantity=1)
+        await order_manager.tick()
+        assert order_manager.get_order(order["order_id"])["robot_id"] == "robot2"
+        await asyncio.gather(*list(simulation_order_runner.tasks.values()))
+
+    asyncio.run(scenario())
+
+
 # KEV 요청 오류도 디버그 모드에서 요청과 오류 정보를 한 줄로 기록하는지 검증한다.
 def test_kev_dispatch_debug_log_records_request_error(monkeypatch, caplog):
     _reset(monkeypatch)
@@ -787,6 +849,8 @@ def test_real_dispatch_waits_for_navigation_to_finish(monkeypatch):
     robot = Robot("robot1")
     robot.set_connected(True)
     robot.update_pose(0, 0, 0)
+    # 배차 전압 하한 검사를 통과하도록 정상 전압을 받은 상태로 둔다.
+    robot.update_battery(percentage=0.9, voltage=12.0)
     robot.occupied_node = "0"
     robot.set_state(RobotState.IDLE)
     monkeypatch.setattr(fleet_manager, "get_all_robots", lambda: [robot])
@@ -1305,6 +1369,8 @@ def test_robots_api_reports_dispatch_status_in_real_mode(monkeypatch):
         robot = Robot(robot_id)
         robot.set_connected(True)
         robot.update_pose(0, 0, 0)
+        # 배차 전압 하한 검사를 통과하도록 정상 전압을 받은 상태로 둔다.
+        robot.update_battery(percentage=0.9, voltage=12.0)
         robot.occupied_node = node
         robot.set_state(RobotState.IDLE)
         robots.append(robot)
@@ -1320,6 +1386,38 @@ def test_robots_api_reports_dispatch_status_in_real_mode(monkeypatch):
     assert rows["robot2"]["dispatch_block_reason"] == "navigating"
     assert rows["robot3"]["dispatch_block_reason"] == "disconnected"
     assert not any(row["dispatch_available"] for row in rows.values())
+
+
+# 실제 모드에서 전압이 낮거나 아직 전압을 받지 못한 로봇을 배차하지 않고 이유를 표시하는지 검증한다.
+def test_real_robot_battery_voltage_blocks_dispatch(monkeypatch):
+    _reset(monkeypatch)
+    from backend.app.models.robot import Robot, RobotState
+    from backend.app.ros2.ros_gateway import ros_gateway
+    from backend.app.routers.robots import fetch_robots
+    from backend.app.services import order_dispatcher
+    from backend.app.services.fleet_manager import fleet_manager
+
+    monkeypatch.setattr(order_dispatcher, "MIN_DISPATCH_BATTERY_VOLTAGE", 11.2)
+    robots = []
+    for robot_id, node, voltage in (("robot1", "0", 12.0), ("robot2", "1", 11.0), ("robot3", "2", None)):
+        robot = Robot(robot_id)
+        robot.set_connected(True)
+        robot.update_pose(0, 0, 0)
+        robot.update_battery(percentage=0.5, voltage=voltage)
+        robot.occupied_node = node
+        robot.set_state(RobotState.IDLE)
+        robots.append(robot)
+    monkeypatch.setattr(fleet_manager, "get_all_robots", lambda: robots)
+    monkeypatch.setattr(ros_gateway, "navigation_active", lambda _id: False)
+    monkeypatch.setattr(type(mode_manager), "mode", property(lambda _self: "real"))
+
+    assert order_dispatcher.available_robots("real", set()) == ["robot1"]
+    rows = {row["robot_id"]: row for row in asyncio.run(fetch_robots())}
+    assert rows["robot1"]["dispatch_available"] is True
+    assert rows["robot2"]["dispatch_block_reason"] == "low_battery"
+    assert rows["robot2"]["battery_voltage_min"] == 11.0
+    assert rows["robot3"]["dispatch_block_reason"] == "battery_unknown"
+    assert rows["robot3"]["battery_voltage"] is None
 
 
 # 다른 스레드가 주문 lock을 잡고 있으면 기다리지 않고 status_busy로 응답하는지 검증한다.

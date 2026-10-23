@@ -19,25 +19,56 @@ import math
 SIMULATION_SPEED_MPS = 0.2
 RESERVATION_MARGIN_S = 0.2
 
+# 기존 코드. 배차 전압 하한 검사를 위해 기본 전압을 추가한다.
+# _MOCK_ROBOT_DEFINITIONS = {
+#     "robot1": {"node_id": "0", "status": "IDLE", "battery": 92.0},
+#     "robot2": {"node_id": "1", "status": "IDLE", "battery": 78.0},
+#     "robot3": {"node_id": "2", "status": "IDLE", "battery": 64.0},
+# }
+# 시뮬레이션 전압은 주행 중에도 바뀌지 않는다. 기본 12.0V는 배차 하한(11.2V)을 넘는 값이다.
 _MOCK_ROBOT_DEFINITIONS = {
-    "robot1": {"node_id": "0", "status": "IDLE", "battery": 92.0},
-    "robot2": {"node_id": "1", "status": "IDLE", "battery": 78.0},
-    "robot3": {"node_id": "2", "status": "IDLE", "battery": 64.0},
+    "robot1": {"node_id": "0", "status": "IDLE", "battery": 92.0, "battery_voltage": 12.0},
+    "robot2": {"node_id": "1", "status": "IDLE", "battery": 78.0, "battery_voltage": 12.0},
+    "robot3": {"node_id": "2", "status": "IDLE", "battery": 64.0, "battery_voltage": 12.0},
 }
 
 # 실험용 배터리 초기값. 예: SIM_BATTERY_OVERRIDE="robot1=50,robot2=78,robot3=92"
 # 변수가 없으면 _MOCK_ROBOT_DEFINITIONS의 기본 배터리를 그대로 쓴다.
+# 기존 코드. 전압 override도 같은 형식으로 읽도록 공통 함수로 옮긴다.
+# def _battery_overrides() -> dict[str, float]:
+#     value = os.getenv("SIM_BATTERY_OVERRIDE", "").strip()
+#     if not value:
+#         return {}
+#     overrides = {}
+#     for item in value.split(","):
+#         robot_id, separator, battery = item.partition("=")
+#         robot_id = robot_id.strip()
+#         if not separator or robot_id not in _MOCK_ROBOT_DEFINITIONS:
+#             raise ValueError(f"SIM_BATTERY_OVERRIDE 형식이 잘못됐습니다: {item!r} (예: robot1=50,robot2=78)")
+#         overrides[robot_id] = float(battery)
+#     return overrides
 def _battery_overrides() -> dict[str, float]:
-    value = os.getenv("SIM_BATTERY_OVERRIDE", "").strip()
+    return _robot_value_overrides("SIM_BATTERY_OVERRIDE", "robot1=50,robot2=78")
+
+
+# 실험용 배터리 전압(V) 초기값. 예: SIM_BATTERY_VOLTAGE_OVERRIDE="robot1=11.0"
+# 변수가 없으면 _MOCK_ROBOT_DEFINITIONS의 기본 전압을 그대로 쓴다.
+def _battery_voltage_overrides() -> dict[str, float]:
+    return _robot_value_overrides("SIM_BATTERY_VOLTAGE_OVERRIDE", "robot1=11.0,robot2=12.0")
+
+
+# "robot1=값,robot2=값" 형식의 환경변수를 로봇별 숫자로 읽는다.
+def _robot_value_overrides(name: str, example: str) -> dict[str, float]:
+    value = os.getenv(name, "").strip()
     if not value:
         return {}
     overrides = {}
     for item in value.split(","):
-        robot_id, separator, battery = item.partition("=")
+        robot_id, separator, number = item.partition("=")
         robot_id = robot_id.strip()
         if not separator or robot_id not in _MOCK_ROBOT_DEFINITIONS:
-            raise ValueError(f"SIM_BATTERY_OVERRIDE 형식이 잘못됐습니다: {item!r} (예: robot1=50,robot2=78)")
-        overrides[robot_id] = float(battery)
+            raise ValueError(f"{name} 형식이 잘못됐습니다: {item!r} (예: {example})")
+        overrides[robot_id] = float(number)
     return overrides
 
 
@@ -67,6 +98,7 @@ class MockFmsStore:
             self._robots.clear()
             self._blocked_ips.clear()
             battery_overrides = _battery_overrides()
+            battery_voltage_overrides = _battery_voltage_overrides()
             for robot_id, definition in _MOCK_ROBOT_DEFINITIONS.items():
                 node = get_node(definition["node_id"])
                 self._robots[robot_id] = {
@@ -76,6 +108,7 @@ class MockFmsStore:
                     # 기존 코드. 실험용 SIM_BATTERY_OVERRIDE가 있으면 그 값을 우선한다.
                     # "battery": definition["battery"],
                     "battery": battery_overrides.get(robot_id, definition["battery"]),
+                    "battery_voltage": battery_voltage_overrides.get(robot_id, definition["battery_voltage"]),
                     "x": node["x"],
                     "y": node["y"],
                     "yaw": 0.0,
