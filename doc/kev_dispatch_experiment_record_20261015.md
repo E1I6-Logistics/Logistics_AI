@@ -454,9 +454,27 @@ source /opt/ros/jazzy/setup.bash
 - 제외는 KEV 입력 전에 코드로 처리하므로, 재시도 주문에서 직전 로봇이 다시 선택되는 일은 KEV 응답과 관계없이 일어나지 않는다. 단, 직전 로봇만 남으면 그 로봇을 배정한다.
 - 한계: HTTP 계층과 실제 로봇 경로는 거치지 않았다. 실패는 인위적으로 주입했다.
 
+### D-6. ETA 후보군 및 기준선 fallback 시나리오 (2026-10-23)
+
+ETA 우선 정책을 반영한 backend에서 시뮬레이션 S0~S4를 실행했다. 첫 픽업은 `C=1`의 N6으로 고정했고, ETA 속도는 0.2 m/s, ETA 근소 차이 범위는 2초였다. 배터리는 시작 시 `SIM_BATTERY_OVERRIDE="robot1=40,robot2=90,robot3=70"`으로 고정했다.
+
+공통 근소 ETA 배치는 robot1=N3(2.57초), robot2=N4(4.11초), robot3=N2(11.44초)였다. robot3는 robot2의 충전 노드 N1이 아닌 자신의 충전 노드 N2에 두어 복귀 경로를 막지 않았다. 세 로봇이 모두 IDLE 및 `dispatch_available=true`인 것을 확인한 후 주문을 등록했다.
+
+| 시나리오 | 조건 | 관측 결과 | 판정 |
+| --- | --- | --- | --- |
+| S0 기존 알고리즘 | 공통 배치, algorithm 모드 | ORDER-001 `ffc8ec34-686b-44b6-b172-351d9ed36cd1`이 robot1에 배정되고 COMPLETED | PASS |
+| S1 ETA 확실 우세 | robot1=N6(0초), robot2=N4(4.11초), robot3=N2(11.44초), AI 모드 | ORDER-002 `1c75e3ff-6624-4b4b-a175-d17439722836`이 robot1에 배정되고 COMPLETED. `KEV dispatch skipped (ETA winner)`, KEV POST 0→0 | PASS |
+| S2 ETA 근소 후보군 | 공통 배치, AI 모드, KEV 서버 실행 | ORDER-003 `da4437c9-0cf2-417f-a7bd-dedc2fddb226`이 robot2에 배정되고 COMPLETED. 후보 robot1·robot2, `excluded_by_eta=["robot3"]`, 기준선 robot2, KEV choice robot2, P(robot1)=0.4653/P(robot2)=0.5347, confidence=0.0695, fallback 없음 | PASS |
+| S3 KEV 오류 fallback | 공통 배치, `FMS_KEV_ENABLED=0`, cooldown=600초 | ORDER-001 `963f0fb3-9797-4351-89e3-e3f8dcf336ae`이 robot2에 배정되고 COMPLETED. 8011 연결 거부, debug JSON의 `"rule_baseline_choice":"robot2"`, fallback 경고 확인 | PASS |
+| S4 cooldown fallback | S3 오류 후 공통 배치 재구성, 동일 backend, 600초 이내 | ORDER-002 `4520aa86-4343-4c37-bbf9-7ca1f20c15f3`이 robot2에 배정되고 COMPLETED. 15:42:47 KST에 등록했고 `KEV dispatch skipped (cooldown 505.3s left)` 확인 | PASS |
+
+S3의 KEV 오류 로그 시각은 15:41:12 KST였고 S4 주문 등록은 약 95초 뒤였다. 따라서 S4는 설정한 600초 cooldown 안에서 실행됐다. S3/S4에서 `falling back to algorithm`은 기존 경고 문구지만, 실제 선택은 같은 ETA 후보군에서 계산한 임시 규칙 기준선(robot2)이었다. S2의 KEV 선택도 같은 기준선과 일치했지만, 단일 회차이므로 KEV가 기준선과 항상 같은 선택을 한다는 결론은 내리지 않는다.
+
+로그 보관 한계: S3 실행을 위해 FMS를 재시작하면서 `logs/backend.log`가 덮어써졌다. S0~S2는 본문에 기록한 API·터미널 관측값만 남아 있고, 별도 원본 backend 로그 파일은 보관하지 못했다. S3~S4는 현재 `logs/backend.log`와 재대조했다.
+
 #### 이후 개선 방향
 
-- 배터리 하한처럼 반드시 지켜야 하는 조건은 현장 정책으로 기준을 정한 뒤 `available_robots()`에서 코드로 처리한다. 예를 들어 정책상 40% 미만 로봇을 제외하기로 합의한 경우, 이를 KEV 프롬프트가 아닌 코드 필터로 보장한다.
+- 배터리 하한처럼 반드시 지켜야 하는 조건은 실제 주행 측정 후 정책값을 정한 뒤 `available_robots()`에서 코드로 처리한다. 확정된 하한 미만 로봇 제외는 KEV 프롬프트가 아닌 코드 필터로 보장한다.
 - 후보 설명에 원시 배터리뿐 아니라 `battery_rank`, 첫 픽업까지의 실제 거리, 예상 이동 시간, 예약 혼잡도를 코드로 계산해 제공한다.
 - 지시문은 `1순위 battery, 2순위 distance`처럼 우선순위를 명시한다.
 - 하드 규칙과 계산 가능한 수치는 코드가 처리하고, KEV는 남은 후보 사이의 선택만 맡는다.
@@ -486,6 +504,7 @@ source /opt/ros/jazzy/setup.bash
 | D1/D2/D3 선택 입력·확률 분석 | D1 5회 + D2 14 + D3 30 direct requests | 직접 재생 완료 | D3 정확도: V1 2/6, V2 6/6, V3 6/6; R1a criteria-only 6/6, R1b state-only 5/6 | V2/V3는 최고 배터리 선택. R1b 한 오답은 재현성 추가 확인 필요 |
 | D4 Backend 반영/A′ | Backend 변경 완료; A′ 6회 (+참고 2회) | A′ 완료 (2026-10-16) | order_id state 제거, V3 prompt, robot_id 정렬, last_robot_id 코드 제외; fallback/algorithm 모드 유지 | 30/78/92 조건에서 6/6 robot3, 매회 P(robot3)=0.5634 1위, fallback 없음 |
 | D5 재시도 직전 로봇 제외 | 1 | 통과 (5/5 판정 항목) | 첫 배정 robot3 → fail/복귀/retry → 후보 robot1·robot2, excluded_last_robot=robot3, P(robot2)=0.6034 → robot2 | `tools/retry_scenario.py` 프로세스 내 시험. HTTP 계층·실제 로봇 미포함, 실패는 인위 주입 |
+| D6 ETA 후보군·기준선 fallback | S0~S4 각 1회 | 5/5 통과 | ETA 확실 우세 시 KEV 생략, 근소 ETA 후보군에서 robot3 제외, KEV 오류·cooldown에서 robot2 기준선 선택 | 시뮬레이션 단일 회차. 실제 로봇 ETA·배터리 소모는 미검증 |
 
 ### 테스트 기준 및 D-1 계측 검증
 
