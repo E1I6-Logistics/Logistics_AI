@@ -35,7 +35,7 @@ KEV로 코드 배차 전체를 대체하지 않습니다. KEV가 판단할 수 �
 | 입력 | 의미 | 상태 |
 |---|---|---|
 | `state` | 현재 로봇 상태 | 입력됨 |
-| `battery` | 현재 배터리 값 | 입력됨. 실제 로봇의 단위(0~1 또는 0~100)는 확인 필요 |
+| `battery` | 현재 배터리 값 | 입력됨. 실제 로봇은 0~100 단위(robot1 확인, 2026-10-23) |
 | `current_node`, `occupied_node`, `goal_node` | 현재·점유·목표 노드 | 입력됨 |
 | `returning` | 이전 주문 완료 후 복귀 중인지 여부 | 입력됨 |
 | `pickup_node` | 주문의 첫 픽업 노드 | 입력됨 |
@@ -109,6 +109,8 @@ KEV로 코드 배차 전체를 대체하지 않습니다. KEV가 판단할 수 �
 **실측 전 임시 기준:** 주행 중 전압 11.2V 미만이면 배차에서 제외합니다. 기존 기록에서 표본이 있는 구간의 아랫선이며, 위험 지점을 예측한 값은 아닙니다. Pi 저전압은 전압과 별개로 `vcgencmd get_throttled`로 확인합니다. 이 기준은 구현되어 있습니다. 백엔드가 `battery_state.voltage`를 받아 최근 60초 최저 전압으로 판단하고(배터리 교체로 연결이 끊기면 기록을 지우고 새 전압으로 다시 판단), 전압을 모르는 로봇(`battery_unknown`)도 제외합니다. `/api/robots`의 `dispatch_block_reason`, `battery_voltage`, `battery_voltage_min`으로 확인할 수 있습니다. 실제 로봇이 전압을 보내지 않으면 모든 로봇이 배차되지 않으므로, 운행 전에 `battery_voltage` 값이 들어오는지 확인합니다.
 
 실측 항목: `battery_state.voltage`, `battery_state.percentage`, 주행 중 최저 전압, Pi 저전압 여부, 로봇별 전원 보드·케이블 상태
+
+**실제 로봇 확인 (2026-10-23, robot1 정지 상태):** 전압 12.26V, percentage 97.77(0~100 단위), `dispatch_available=true`. 주행 중 최저 전압과 robot2·robot3는 아직 확인하지 않았습니다. 백엔드는 FMS 화면이 `/api/connections`를 호출할 때 로봇 연결을 갱신하므로, 운행 중에는 화면을 열어 둡니다.
 
 ## 10. 다음 작업 순서
 
