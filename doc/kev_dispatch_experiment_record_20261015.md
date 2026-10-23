@@ -448,6 +448,8 @@ source /opt/ros/jazzy/setup.bash
 
 판정: 5개 항목(첫 배정 robot3, 재시도 후보 robot1·robot2, excluded_last_robot=robot3, 선택 robot2, fallback 없음) 모두 PASS.
 
+같은 조건으로 2회차를 실행했다(2026-10-16, `--allow-backend`). 확률, 후보, 선택 결과가 1회차와 같았고 5개 항목 모두 PASS였다. 원본 출력은 `logs/testD5_retry.log`에 저장했다. 이 파일은 git에서 제외된 폴더에 있어 로컬에만 있다.
+
 - 줄어든 후보(30/78)에서도 배터리가 높은 robot2를 골랐다. A′ 참고 회차 ORDER-003(같은 두 후보)의 P(robot2)=0.6184와 값이 조금 다르다. 이번 입력에는 `last_robot_id=robot3`이 state에 들어 있었으므로 입력이 같지 않다.
 - 제외는 KEV 입력 전에 코드로 처리하므로, 재시도 주문에서 직전 로봇이 다시 선택되는 일은 KEV 응답과 관계없이 일어나지 않는다. 단, 직전 로봇만 남으면 그 로봇을 배정한다.
 - 한계: HTTP 계층과 실제 로봇 경로는 거치지 않았다. 실패는 인위적으로 주입했다.
