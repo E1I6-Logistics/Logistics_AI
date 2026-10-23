@@ -338,6 +338,30 @@ def test_robot_min_battery_voltage_uses_recent_window(monkeypatch):
     assert robot.battery == 0.5
 
 
+# 연결이 끊기면(배터리 교체) 이전 배터리의 낮은 전압 기록을 지우고, 재연결 후 새 전압으로 판단하는지 검증한다.
+def test_robot_disconnect_clears_battery_voltage_history(monkeypatch):
+    from backend.app.models import robot as robot_model
+
+    monkeypatch.setattr(robot_model, "BATTERY_VOLTAGE_WINDOW_S", 60.0)
+    robot = robot_model.Robot("robot1")
+    robot.set_connected(True)
+    robot.update_battery(percentage=0.2, voltage=10.9, now=0.0)
+    assert robot.min_battery_voltage(now=10.0) == 10.9
+
+    robot.set_connected(False)
+    assert robot.battery_voltage is None
+    assert robot.min_battery_voltage(now=11.0) is None
+
+    robot.set_connected(True)
+    robot.update_battery(percentage=0.95, voltage=12.4, now=20.0)
+    # 판단 시간 60초 안이어도 교체 전 10.9V 기록은 남지 않는다.
+    assert robot.min_battery_voltage(now=21.0) == 12.4
+
+    # 이미 연결된 상태에서 다시 연결 처리돼도 기록은 유지된다.
+    robot.set_connected(True)
+    assert robot.min_battery_voltage(now=22.0) == 12.4
+
+
 # 시뮬레이션에서 전압 하한 미만 로봇은 배차 후보에서 빠지고 차단 이유가 표시되는지 검증한다.
 def test_low_battery_voltage_robot_is_not_dispatched(monkeypatch):
     from backend.app.services import order_dispatcher

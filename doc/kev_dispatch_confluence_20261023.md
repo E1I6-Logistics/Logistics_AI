@@ -106,7 +106,7 @@ KEV로 코드 배차 전체를 대체하지 않습니다. KEV가 판단할 수 �
 - robot3은 11.2V~11.7V, robot2는 12.15V에서도 Pi 저전압이 있었습니다. 배터리 잔량보다 전원 보드·케이블 문제 가능성이 큽니다.
 - OpenCR 리셋·응답 끊김 사례는 문제 시점 전압이 기록되지 않았습니다.
 
-**실측 전 임시 기준:** 주행 중 전압 11.2V 미만이면 배차에서 제외합니다. 기존 기록에서 표본이 있는 구간의 아랫선이며, 위험 지점을 예측한 값은 아닙니다. Pi 저전압은 전압과 별개로 `vcgencmd get_throttled`로 확인합니다. 이 기준은 구현되어 있습니다. 백엔드가 `battery_state.voltage`를 받아 최근 60초 최저 전압으로 판단하고, 전압을 모르는 로봇(`battery_unknown`)도 제외합니다. `/api/robots`의 `dispatch_block_reason`, `battery_voltage`, `battery_voltage_min`으로 확인할 수 있습니다. 실제 로봇이 전압을 보내지 않으면 모든 로봇이 배차되지 않으므로, 운행 전에 `battery_voltage` 값이 들어오는지 확인합니다.
+**실측 전 임시 기준:** 주행 중 전압 11.2V 미만이면 배차에서 제외합니다. 기존 기록에서 표본이 있는 구간의 아랫선이며, 위험 지점을 예측한 값은 아닙니다. Pi 저전압은 전압과 별개로 `vcgencmd get_throttled`로 확인합니다. 이 기준은 구현되어 있습니다. 백엔드가 `battery_state.voltage`를 받아 최근 60초 최저 전압으로 판단하고(배터리 교체로 연결이 끊기면 기록을 지우고 새 전압으로 다시 판단), 전압을 모르는 로봇(`battery_unknown`)도 제외합니다. `/api/robots`의 `dispatch_block_reason`, `battery_voltage`, `battery_voltage_min`으로 확인할 수 있습니다. 실제 로봇이 전압을 보내지 않으면 모든 로봇이 배차되지 않으므로, 운행 전에 `battery_voltage` 값이 들어오는지 확인합니다.
 
 실측 항목: `battery_state.voltage`, `battery_state.percentage`, 주행 중 최저 전압, Pi 저전압 여부, 로봇별 전원 보드·케이블 상태
 

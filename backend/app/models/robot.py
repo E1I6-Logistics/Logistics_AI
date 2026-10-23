@@ -152,6 +152,13 @@ class Robot:
         previous_state = self.state
         self.connected = connected
 
+        # 배터리 교체는 전원을 끄므로 연결이 끊긴다. 이전 배터리의 낮은 전압 기록이
+        # 새 배터리 판단에 남지 않도록 끊길 때 전압 기록을 지운다. 재연결 후 새 전압을 다시 받는다.
+        if was_connected and not connected:
+            with self._lock:
+                self.battery_voltage = None
+                self._battery_voltage_samples.clear()
+
         if connected:
             if self.state == RobotState.OFFLINE:
                 # 진행 중이던 이동/주문은 연결 복구만으로 IDLE 또는 자동 재출발시키지 않는다.
