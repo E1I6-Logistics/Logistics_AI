@@ -104,7 +104,9 @@ MIN_DISPATCH_BATTERY_VOLTAGE = float(os.getenv("FMS_MIN_DISPATCH_BATTERY_VOLTAGE
 
 # 실제 로봇의 최근 이 시간(초) 동안 받은 전압 중 최저값으로 판단한다. 기본값 60초.
 # 정지 전압은 주행 중보다 높게 나오므로 직전 주행의 전압 강하를 반영하려는 값이다.
-# 늘리면 더 보수적이지만 배터리 교체 직후에도 그만큼 후보에서 빠진다.
+# 기존 설명. 연결이 끊기면 전압 기록을 지우도록 바꿔 배터리 교체 후에는 해당하지 않는다.
+# # 늘리면 더 보수적이지만 배터리 교체 직후에도 그만큼 후보에서 빠진다.
+# 늘리면 더 보수적이다. 배터리 교체로 연결이 끊기면(FMS_ZENOH_MISSING_GRACE_S 초과) 기록을 지우고 새로 판단한다.
 BATTERY_VOLTAGE_WINDOW_S = float(os.getenv("FMS_BATTERY_VOLTAGE_WINDOW_S", "60"))
 
 # 새 로봇의 첫 위치 정보를 기다리며 담당 충전 지점을 보호하는 시간(초).
