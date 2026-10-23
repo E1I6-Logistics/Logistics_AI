@@ -4,7 +4,9 @@ import asyncio
 import json
 import logging
 import pytest
-from time import monotonic
+# 기존 코드. AI 경로 테스트가 워커 스레드에서 기다리도록 sleep을 추가한다.
+# from time import monotonic
+from time import monotonic, sleep
 
 from backend.app.services.mock_data import mock_fms
 from backend.app.services.mode_service import mode_manager
@@ -16,6 +18,8 @@ from backend.app.services.workstation_manager import workstation_manager
 # 테스트 사이에 공유 상태를 초기화한다.
 def _reset(monkeypatch):
     mode_manager.set_mode("simulation", "algorithm")
+    # 코드 기본값과 같은 2초를 명시해 .env 설정과 무관하게 세 후보를 비교하도록 한다.
+    monkeypatch.setenv("KEV_DISPATCH_ETA_TIE_SECONDS", "2")
     mock_fms.reset()
     order_manager.orders.clear()
     order_manager.returning.clear()
@@ -180,9 +184,20 @@ def test_kev_dispatch_debug_log_is_opt_in(monkeypatch, caplog, debug_enabled):
         "robot3",
     ]
     assert captured["instructions"] == (
-        "Among idle and non-returning robots, choose the one with the highest battery. "
-        "Use other fields only to break exact ties. Return only one candidate ID."
+        "All listed robots have passed code safety checks and are within the configured pickup ETA near-tie window. "
+        "Choose exactly one listed candidate ID. Do not re-rank candidates by pickup ETA and do not treat battery as a safety threshold. "
+        "Prefer an IDLE, non-returning robot when operational state differs. Use the current battery only as secondary context; "
+        "it is not an estimated post-task battery. Return only one candidate ID."
     )
+    assert captured["state"]["dispatch_context"] == {
+        "eta_filter_applied": True,
+        "minimum_pickup_eta_seconds": pytest.approx(6.780479020017512),
+        "eta_tie_window_seconds": 2.0,
+        "excluded_by_eta": [],
+        "post_task_battery_available": False,
+        "recent_workload_available": False,
+    }
+    assert all("pickup_distance_m" in profile and "pickup_eta_seconds" in profile for profile in captured["state"]["robots"])
 
     debug_messages = [
         record.getMessage()
@@ -200,6 +215,7 @@ def test_kev_dispatch_debug_log_is_opt_in(monkeypatch, caplog, debug_enabled):
         "order_id": order["order_id"],
         "question_id": captured["question_id"],
         "excluded_last_robot": None,
+        "rule_baseline_choice": "robot1",
         "state": captured["state"],
         "choices": captured["candidates"],
         "instructions": captured["instructions"],
@@ -210,6 +226,77 @@ def test_kev_dispatch_debug_log_is_opt_in(monkeypatch, caplog, debug_enabled):
             "choice": "robot2",
         },
     }
+
+
+# ETA 차이가 설정 범위를 넘으면 KEV에 보내지 않고 코드가 최단 ETA 로봇을 확정하는지 검증한다.
+def test_kev_dispatch_uses_code_for_clear_eta_winner(monkeypatch):
+    _reset(monkeypatch)
+    monkeypatch.setenv("KEV_DISPATCH_ETA_TIE_SECONDS", "0")
+    calls = []
+
+    class FakeKevSelector:
+        def select_choice(self, **kwargs):
+            calls.append(kwargs)
+            return {"choice": "robot1"}
+
+    async def scenario():
+        mode_manager.set_mode("simulation", "ai")
+        order_manager._kev_dispatch_selector = FakeKevSelector()
+        order = order_manager.create_order(items={"A": 1, "B": 0, "C": 0, "D": 0}, total_quantity=1)
+        await order_manager.tick()
+        assert order_manager.get_order(order["order_id"])["robot_id"] == "robot2"
+        await asyncio.gather(*list(simulation_order_runner.tasks.values()))
+
+    try:
+        asyncio.run(scenario())
+    finally:
+        mode_manager.set_mode("simulation", "algorithm")
+
+    assert calls == []
+
+
+# ETA 근소 후보군 안에서만 쓰는 임시 코드 기준선의 우선순위를 검증한다.
+def test_dispatch_rule_baseline_prefers_idle_then_battery_then_robot_id():
+    profiles = [
+        {"robot_id": "robot3", "state": "IDLE", "returning": False, "battery": None},
+        {"robot_id": "robot2", "state": "IDLE", "returning": False, "battery": 80},
+        {"robot_id": "robot1", "state": "MOVING", "returning": False, "battery": 100},
+    ]
+
+    assert order_manager._select_robot_by_dispatch_rules(profiles) == "robot2"
+
+    profiles[0]["battery"] = 80
+    profiles[0]["robot_id"] = "robot1"
+    assert order_manager._select_robot_by_dispatch_rules(profiles) == "robot1"
+
+
+# 배터리가 NaN·비수치·무한대여도 예외 없이 유효한 배터리보다 뒤로 가는지 검증한다.
+def test_dispatch_rule_baseline_puts_invalid_battery_last():
+    profiles = [
+        {"robot_id": "robot1", "state": "IDLE", "returning": False, "battery": float("nan")},
+        {"robot_id": "robot2", "state": "IDLE", "returning": False, "battery": "abc"},
+        {"robot_id": "robot3", "state": "IDLE", "returning": False, "battery": float("inf")},
+        {"robot_id": "robot4", "state": "IDLE", "returning": False, "battery": 10},
+    ]
+
+    assert order_manager._select_robot_by_dispatch_rules(profiles) == "robot4"
+
+    # 유효한 배터리가 없으면 robot_id 오름차순으로 확정한다.
+    assert order_manager._select_robot_by_dispatch_rules(profiles[:3]) == "robot1"
+
+
+# 복귀 중인 로봇은 배터리가 높아도 IDLE·비복귀 로봇보다 뒤로 가는지 검증한다.
+def test_dispatch_rule_baseline_prefers_non_returning_over_battery():
+    profiles = [
+        {"robot_id": "robot1", "state": "IDLE", "returning": True, "battery": 100},
+        {"robot_id": "robot2", "state": "MOVING", "returning": True, "battery": 90},
+        {"robot_id": "robot3", "state": "IDLE", "returning": False, "battery": 20},
+    ]
+
+    assert order_manager._select_robot_by_dispatch_rules(profiles) == "robot3"
+
+    # IDLE·비복귀 후보가 없으면 복귀 중 후보끼리 배터리로 비교한다.
+    assert order_manager._select_robot_by_dispatch_rules(profiles[:2]) == "robot1"
 
 
 # KEV 요청 오류도 디버그 모드에서 요청과 오류 정보를 한 줄로 기록하는지 검증한다.
@@ -269,6 +356,58 @@ def test_kev_dispatch_falls_back_to_algorithm(monkeypatch):
         )
         await order_manager.tick()
         assert order_manager.get_order(order["order_id"])["robot_id"] == "robot1"
+        await asyncio.gather(*list(simulation_order_runner.tasks.values()))
+
+    try:
+        asyncio.run(scenario())
+    finally:
+        mode_manager.set_mode("simulation", "algorithm")
+
+
+# KEV 오류 fallback이 기존 목록 순서가 아니라 임시 기준선 선택값을 쓰는지 검증한다.
+def test_kev_dispatch_fallback_uses_rule_baseline(monkeypatch):
+    _reset(monkeypatch)
+    # robot1 배터리를 낮춰 기존 목록 순서(robot1)와 기준선(배터리 최고 robot2)이 갈리게 한다.
+    monkeypatch.setenv("SIM_BATTERY_OVERRIDE", "robot1=40")
+    mock_fms.reset()
+
+    class FailingKevSelector:
+        def select_choice(self, **kwargs):
+            raise RuntimeError("KEV server unavailable")
+
+    async def scenario():
+        mode_manager.set_mode("simulation", "ai")
+        order_manager._kev_dispatch_selector = FailingKevSelector()
+        order = order_manager.create_order(
+            items={"A": 1, "B": 0, "C": 0, "D": 0},
+            total_quantity=1,
+        )
+        await order_manager.tick()
+        assert order_manager.get_order(order["order_id"])["robot_id"] == "robot2"
+        await asyncio.gather(*list(simulation_order_runner.tasks.values()))
+
+    try:
+        asyncio.run(scenario())
+    finally:
+        mode_manager.set_mode("simulation", "algorithm")
+
+
+# KEV 오류 또는 cooldown fallback도 ETA 후보군 밖의 로봇을 선택하지 않는지 검증한다.
+def test_kev_dispatch_fallback_stays_within_eta_tie_window(monkeypatch):
+    _reset(monkeypatch)
+    monkeypatch.setenv("KEV_DISPATCH_ETA_TIE_SECONDS", "1")
+
+    class FailingKevSelector:
+        def select_choice(self, **kwargs):
+            assert set(kwargs["candidates"]) == {"robot2", "robot3"}
+            raise RuntimeError("KEV server unavailable")
+
+    async def scenario():
+        mode_manager.set_mode("simulation", "ai")
+        order_manager._kev_dispatch_selector = FailingKevSelector()
+        order = order_manager.create_order(items={"A": 1, "B": 0, "C": 0, "D": 0}, total_quantity=1)
+        await order_manager.tick()
+        assert order_manager.get_order(order["order_id"])["robot_id"] == "robot2"
         await asyncio.gather(*list(simulation_order_runner.tasks.values()))
 
     try:
@@ -363,6 +502,65 @@ def test_kev_dispatch_failure_starts_cooldown(monkeypatch):
         assert len(calls) == 1
         assert order_manager.get_order(first["order_id"])["robot_id"] == "robot1"
         assert order_manager.get_order(second["order_id"])["robot_id"] == "robot2"
+        await asyncio.gather(*list(simulation_order_runner.tasks.values()))
+
+    try:
+        asyncio.run(scenario())
+    finally:
+        mode_manager.set_mode("simulation", "algorithm")
+
+
+# KEV 응답을 기다리는 동안 주문 lock이 풀려 있는지 검증한다.
+def test_kev_dispatch_call_runs_outside_order_lock(monkeypatch):
+    _reset(monkeypatch)
+    lock_free = []
+
+    class FakeKevSelector:
+        def select_choice(self, **kwargs):
+            # 다른 스레드에서 lock을 바로 잡을 수 있어야 한다.
+            acquired = order_manager.lock.acquire(blocking=False)
+            if acquired:
+                order_manager.lock.release()
+            lock_free.append(acquired)
+            return {"choice": "robot2"}
+
+    async def scenario():
+        mode_manager.set_mode("simulation", "ai")
+        order_manager._kev_dispatch_selector = FakeKevSelector()
+        order = order_manager.create_order(items={"A": 1, "B": 0, "C": 0, "D": 0}, total_quantity=1)
+        await order_manager.tick()
+        assert lock_free == [True]
+        assert order_manager.get_order(order["order_id"])["robot_id"] == "robot2"
+        await asyncio.gather(*list(simulation_order_runner.tasks.values()))
+
+    try:
+        asyncio.run(scenario())
+    finally:
+        mode_manager.set_mode("simulation", "algorithm")
+
+
+# KEV 응답을 기다리는 동안 후보가 바뀌면 그 결과를 버리고 바뀐 후보로 다시 묻는지 검증한다.
+def test_kev_dispatch_discards_result_when_candidates_change(monkeypatch):
+    _reset(monkeypatch)
+    seen = []
+
+    class FakeKevSelector:
+        def select_choice(self, **kwargs):
+            seen.append(sorted(kwargs["candidates"]))
+            if len(seen) == 1:
+                # 첫 응답 전에 robot2가 배차 불가 상태가 된다.
+                with mock_fms._lock:
+                    mock_fms._robots["robot2"]["status"] = "PAUSED"
+                return {"choice": "robot2"}
+            return {"choice": "robot3"}
+
+    async def scenario():
+        mode_manager.set_mode("simulation", "ai")
+        order_manager._kev_dispatch_selector = FakeKevSelector()
+        order = order_manager.create_order(items={"A": 1, "B": 0, "C": 0, "D": 0}, total_quantity=1)
+        await order_manager.tick()
+        assert seen == [["robot1", "robot2", "robot3"], ["robot1", "robot3"]]
+        assert order_manager.get_order(order["order_id"])["robot_id"] == "robot3"
         await asyncio.gather(*list(simulation_order_runner.tasks.values()))
 
     try:
@@ -864,20 +1062,37 @@ def test_pickup_status_shows_occupant_order_and_waiting_orders(monkeypatch):
 # 작업대 선택 후에만 AI 경로를 요청하는지 검증한다.
 def test_ai_route_is_requested_only_after_workstation_selection(monkeypatch):
     visits = _reset(monkeypatch)
-    from backend.app.services import route_model_catalog, order_route_dispatcher
+    # 기존 코드. order_route_dispatcher는 테스트에서 더 이상 쓰지 않는다.
+    # from backend.app.services import route_model_catalog, order_route_dispatcher
+    from backend.app.services import route_model_catalog, llm_route_preview, mode_service
 
     monkeypatch.setattr(route_model_catalog, "require_enabled_model", lambda *_: None)
+    # 운영 AI 모드는 KEV 배차만 켜고 경로는 algorithm이다. 이 테스트는 AI 경로만 따로 검증하므로
+    # 경로만 ai로 켜고 배차는 algorithm으로 둬 실제 KEV 서버를 호출하지 않게 한다.
+    monkeypatch.setitem(
+        mode_service.FEATURE_ENGINES, "ai", {"route": "ai", "dispatch": "algorithm", "workstation": "algorithm"}
+    )
 
-    # 테스트에서 경로 선택 결과를 미리 계산한다.
-    async def preview(_function, _graph, start, target, **_options):
+    # 기존 코드. 전역 asyncio.to_thread를 바꿔 KEV 배차의 to_thread까지 가로챘다.
+    # async def preview(_function, _graph, start, target, **_options):
+    #     snapshot = mock_fms.robot_snapshot("robot1", "simulation")
+    #     assert snapshot["occupied_node"] == str(start)
+    #     assert snapshot["stop_requested"] is True
+    #     assert snapshot["route"] is None
+    #     await asyncio.sleep(0.01)
+    #     return {"path": [str(start), str(target)]}
+    #
+    # monkeypatch.setattr(order_route_dispatcher.asyncio, "to_thread", preview)
+    # 테스트에서 경로 선택 결과를 미리 계산한다. 실제 asyncio.to_thread가 워커 스레드에서 호출한다.
+    def preview(_graph, start, target, **_options):
         snapshot = mock_fms.robot_snapshot("robot1", "simulation")
         assert snapshot["occupied_node"] == str(start)
         assert snapshot["stop_requested"] is True
         assert snapshot["route"] is None
-        await asyncio.sleep(0.01)
+        sleep(0.01)
         return {"path": [str(start), str(target)]}
 
-    monkeypatch.setattr(order_route_dispatcher.asyncio, "to_thread", preview)
+    monkeypatch.setattr(llm_route_preview, "preview_llm_route", preview)
     mock_fms._robots["robot2"]["occupied_node"] = "3"
     mock_fms._robots["robot3"]["occupied_node"] = "4"
 
@@ -901,17 +1116,31 @@ def test_ai_route_is_requested_only_after_workstation_selection(monkeypatch):
 # 잘못된 AI 경로는 주행하지 않고 실패 로봇을 복귀시키는지 검증한다.
 def test_invalid_ai_route_is_not_driven_and_failure_returns_robot(monkeypatch):
     visits = _reset(monkeypatch)
-    from backend.app.services import route_model_catalog, order_route_dispatcher
+    # 기존 코드. order_route_dispatcher는 테스트에서 더 이상 쓰지 않는다.
+    # from backend.app.services import route_model_catalog, order_route_dispatcher
+    from backend.app.services import route_model_catalog, llm_route_preview, mode_service
 
     monkeypatch.setattr(route_model_catalog, "require_enabled_model", lambda *_: None)
+    # 운영 AI 모드는 KEV 배차만 켜고 경로는 algorithm이다. 이 테스트는 AI 경로만 따로 검증하므로
+    # 경로만 ai로 켜고 배차는 algorithm으로 둬 실제 KEV 서버를 호출하지 않게 한다.
+    monkeypatch.setitem(
+        mode_service.FEATURE_ENGINES, "ai", {"route": "ai", "dispatch": "algorithm", "workstation": "algorithm"}
+    )
 
-    # 테스트에서 경로 선택 결과를 미리 계산한다.
-    async def preview(_function, _graph, start, target, **_options):
+    # 기존 코드. 전역 asyncio.to_thread를 바꿔 KEV 배차의 to_thread까지 가로챘다.
+    # async def preview(_function, _graph, start, target, **_options):
+    #     if str(target) == "3":
+    #         raise ValueError("순환 방지 조건을 만족하는 이동 후보가 없습니다: current=10")
+    #     return {"path": [str(start), str(target)]}
+    #
+    # monkeypatch.setattr(order_route_dispatcher.asyncio, "to_thread", preview)
+    # 테스트에서 경로 선택 결과를 미리 계산한다. 실제 asyncio.to_thread가 워커 스레드에서 호출한다.
+    def preview(_graph, start, target, **_options):
         if str(target) == "3":
             raise ValueError("순환 방지 조건을 만족하는 이동 후보가 없습니다: current=10")
         return {"path": [str(start), str(target)]}
 
-    monkeypatch.setattr(order_route_dispatcher.asyncio, "to_thread", preview)
+    monkeypatch.setattr(llm_route_preview, "preview_llm_route", preview)
 
     # 주문 흐름을 재현하는 테스트 시나리오를 실행한다.
     async def scenario():
