@@ -25,6 +25,9 @@ class MQTTManager:
         self._canceled_jobs = set()
         self._cancel_callbacks = {}
 
+        # Docking 객체 저장
+        self.dock_status = {}
+    
         # MQTT Client
         self.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION1)
 
@@ -107,6 +110,9 @@ class MQTTManager:
         client.subscribe("+/progress")
         client.subscribe("+/result")
 
+        # [DOCK] ESP32 1~3번 스테이션의 접촉 상태 구독
+        client.subscribe("dock/station/+/status")
+
         print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] [INFO] [MQTT] Waiting OMX robots...", flush=True)
 
     # =========================================================
@@ -116,6 +122,25 @@ class MQTTManager:
     # message 이벤트를 처리한다.
     def _on_message(self, client, userdata, msg):
         topic_parts = msg.topic.split("/")
+
+        
+
+        # =========================================================
+        # [DOCK] 도킹 스테이션 MQTT 메시지
+        # =========================================================
+        if (
+            len(topic_parts) == 4
+            and topic_parts[0] == "dock"
+            and topic_parts[1] == "station"
+            and topic_parts[3] == "status"
+        ):
+            
+            self._on_dock_message(client, userdata, msg)
+            return
+
+        # =========================================================
+        # [OMX] 기존 OMX MQTT 메시지
+        # =========================================================
 
         if len(topic_parts) != 2:
             return
@@ -219,6 +244,51 @@ class MQTTManager:
                     f"omx={omx_id} job_id={key[1]}",
                     flush=True,
                 )
+
+    # =========================================================
+    # [DOCK] ESP32 도킹 스테이션 MQTT 메시지 수신
+    # topic: dock/station/{1|2|3}/status
+    # payload: {"station": 1, "status": 0}  # 0: 미접촉 / 1: 접촉
+    # 기존 _on_message()의 OMX 메시지 처리와 독립적으로 동작함.
+    # =========================================================
+    def _on_dock_message(self, client, userdata, msg):
+        print(f"[DOCK RAW] {msg.topic} {msg.payload!r}", flush=True)
+
+        try:
+            parts = msg.topic.split("/")
+            if len(parts) != 4 or parts[:2] != ["dock", "station"] or parts[3] != "status":
+                return
+            if parts[2] not in ("1", "2", "3"):
+                return
+            station = int(parts[2])
+            data = json.loads(msg.payload.decode("utf-8"))
+
+            # 잘못된 JSON 형식이나 다른 스테이션의 메시지는 무시
+            if not isinstance(data, dict):
+                return
+            if type(data.get("station")) is not int or data["station"] != station:
+                return
+            status = data.get("status")
+            if type(status) is not int or status not in (0, 1):
+                return
+
+            # [DOCK] 마지막으로 수신한 접촉 상태만 저장 (로봇 IDLE 전환은 하지 않음)
+            self.dock_status[station] = status
+
+            print(
+                f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] [INFO] [DOCK] "
+                f"station={station} status={status} "
+                f"contact={'CONTACT' if status == 1 else 'RELEASED'}",
+                flush=True,
+            )
+
+        except (ValueError, UnicodeDecodeError, json.JSONDecodeError, TypeError) as exc:
+            print(
+                f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] [WARN] [DOCK] "
+                f"메시지 해석 실패 topic={msg.topic} error={exc}",
+                flush=True,
+            )
+
 
     # =========================================================
     # OMX 작업 명령
