@@ -4,13 +4,40 @@ import { createOrder, type OrderItems } from '../api/orderApi'
 import type { RouteModelDto, RouteModelGroupsDto } from '../api/fmsApi'
 import { C, MONO } from '../constants/theme'
 
+export type DispatchUnavailable = {
+  robots: { id: string; reason: string | null }[]
+}
+
 type Props = {
   operationMode: 'algorithm' | 'ai'
   disabled?: boolean
   routeModels: RouteModelGroupsDto
   routeModelError: string | null
   llmOrderReady: boolean
+  dispatchUnavailable?: DispatchUnavailable | null
 }
+
+// 백엔드 dispatch_block_reason 표시 문구
+const DISPATCH_BLOCK_LABELS: Record<string, string> = {
+  assigned_order: '주문 수행 중',
+  robot_order: '주문 수행 중',
+  recovering: '주문 취소 후 복귀 중',
+  recovery_hold: '복귀 실패로 대기',
+  returning_stopped: '복귀 중 정지',
+  navigating: '이동 중',
+  not_idle: '대기 상태 아님',
+  on_edge: '통로 위(노드 미확정)',
+  stale_pose: '위치 정보 지연',
+  disconnected: '연결 끊김',
+  low_battery: '배터리 전압 부족',
+  battery_unknown: '배터리 전압 미확인',
+  scenario_active: '시나리오 실행 중',
+  status_busy: '상태 확인 중',
+  unavailable: '배차 불가',
+}
+
+// 로봇이 주문을 끝내고 바로 다음 주문을 받는 순간처럼 잠깐 불가능한 상태는 알리지 않는다.
+const DISPATCH_NOTICE_DELAY_MS = 1500
 
 const INITIAL_ITEMS: OrderItems = {
   A: 0,
@@ -19,7 +46,11 @@ const INITIAL_ITEMS: OrderItems = {
   D: 0,
 }
 
-export default function RobotOrderForm({ operationMode, disabled = false, routeModels, routeModelError, llmOrderReady }: Props) {
+// 기존 코드. 배차 불가 안내(dispatchUnavailable)를 받도록 바꾼다.
+// export default function RobotOrderForm({ operationMode, disabled = false, routeModels, routeModelError, llmOrderReady }: Props) {
+export default function RobotOrderForm({
+  operationMode, disabled = false, routeModels, routeModelError, llmOrderReady, dispatchUnavailable = null,
+}: Props) {
   const [items, setItems] = useState<OrderItems>(INITIAL_ITEMS)
   const [orderName, setOrderName] = useState('')
   const [expanded, setExpanded] = useState(true)
@@ -54,6 +85,21 @@ export default function RobotOrderForm({ operationMode, disabled = false, routeM
     setSelectedModelKey('')
     setMessage(null)
   }, [])
+
+  const [dispatchNotice, setDispatchNotice] = useState<DispatchUnavailable | null>(null)
+  useEffect(() => {
+    if (!dispatchUnavailable) {
+      setDispatchNotice(null)
+      return
+    }
+    // 이미 표시 중이면 사유만 바로 갱신한다.
+    if (dispatchNotice) {
+      setDispatchNotice(dispatchUnavailable)
+      return
+    }
+    const timer = window.setTimeout(() => setDispatchNotice(dispatchUnavailable), DISPATCH_NOTICE_DELAY_MS)
+    return () => window.clearTimeout(timer)
+  }, [dispatchUnavailable]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const updateQuantity = (item: keyof OrderItems, rawValue: string) => {
     const parsed = Number(rawValue)
@@ -271,6 +317,33 @@ export default function RobotOrderForm({ operationMode, disabled = false, routeM
         {totalQuantity > 5 && (
           <div style={{ marginTop: 5, color: C.danger, fontSize: 8.5 }}>
             최대 적재량을 초과했습니다.
+          </div>
+        )}
+
+        {dispatchNotice && (
+          <div
+            role="status"
+            style={{
+              marginTop: 7,
+              padding: '6px 7px',
+              borderRadius: 6,
+              background: '#FFF6E8',
+              color: C.warning,
+              fontSize: 8.5,
+              lineHeight: 1.4,
+            }}
+          >
+            <div style={{ fontWeight: 800 }}>현재 배차 가능한 로봇이 없습니다.</div>
+            <div>주문은 등록되며, 로봇이 가능해지면 순서대로 배차됩니다.</div>
+            {dispatchNotice.robots.length === 0 ? (
+              <div style={{ marginTop: 3 }}>연결된 로봇이 없습니다.</div>
+            ) : (
+              <div style={{ marginTop: 3, fontFamily: MONO }}>
+                {dispatchNotice.robots
+                  .map(robot => `${robot.id} ${DISPATCH_BLOCK_LABELS[robot.reason ?? ''] ?? robot.reason ?? '사유 미확인'}`)
+                  .join(' · ')}
+              </div>
+            )}
           </div>
         )}
 
