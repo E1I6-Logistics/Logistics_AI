@@ -8,6 +8,7 @@ from ..ros2.ros_gateway import CHARGING_STATION_NODES
 from .mode_service import mode_manager
 from .mock_data import mock_fms
 from .order_route_dispatcher import dispatch_order_route
+from .pickup_queue import earlier_pickup_request
 from .workstation_manager import workstation_manager
 
 
@@ -94,27 +95,20 @@ class SimulationOrderRunner:
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
 
-    async def _wait_for_pickup_turn(self, order):
-        """Keep robots with the same pickup from blocking one another."""
+    async def _wait_for_pickup_turn(self, order, node):
+        """이번 픽업 차례와 실제 점유가 해제될 때만 기다린다. 앞 주문 완료와 무관."""
         from .order_manager import order_manager
 
         order_id = order["order_id"]
         robot_id = order["robot_id"]
-        pickups = set(order["pickup_nodes"])
         while order_manager.is_current(order_id, robot_id):
-            blocked = False
             with order_manager.lock:
-                for previous in order_manager.orders.values():
-                    if previous["order_id"] == order_id:
-                        break
-                    if (
-                        previous["mode"] == "simulation"
-                        and previous["status"] == "IN_PROGRESS"
-                        and pickups.intersection(previous["pickup_nodes"])
-                    ):
-                        blocked = True
-                        break
-            if not blocked:
+                blocked = earlier_pickup_request(order_manager.orders.values(), order, node)
+            occupied = any(
+                row["robot_id"] != robot_id and row["occupied_node"] == str(node)
+                for row in mock_fms.robot_snapshots("simulation")
+            )
+            if not blocked and not occupied:
                 return True
             order_manager.set_phase(order_id, "WAITING_PICKUP")
             await asyncio.sleep(0.1)
@@ -196,12 +190,13 @@ class SimulationOrderRunner:
         order = order_manager.orders[order_id]
         robot_id = order["robot_id"]
         try:
-            if not await self._wait_for_pickup_turn(order):
-                return
             for index, pickup in enumerate(order["pickup_nodes"]):
                 if not order_manager.is_current(order_id, robot_id):
                     return
                 order["pickup_index"] = index
+                order_manager.set_phase(order_id, "WAITING_PICKUP")
+                if not await self._wait_for_pickup_turn(order, pickup):
+                    return
                 order_manager.set_phase(order_id, "MOVING_TO_PICKUP")
                 if not await self._move(order, pickup, "MOVING_TO_PICKUP"):
                     return

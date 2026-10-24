@@ -30,6 +30,7 @@ export function getDockingStations() {
   })
 }
 export type OperationMode = 'algorithm' | 'ai'
+export type OrderTrafficPolicy = 'KEV' | 'MIN_EXPECTED_TIME' | 'KEV_STRATEGY_ORDER'
 
 export type RobotModeDto = {
   mode: RobotMode
@@ -37,6 +38,14 @@ export type RobotModeDto = {
   feature_engines: Record<string, 'algorithm' | 'ai'>
   real_available: boolean
   simulation_active: boolean
+  simulation_preview?: boolean
+  order_traffic?: {
+    enabled: boolean
+    route_source: string
+    selection_policy: OrderTrafficPolicy | null
+    available_policies?: OrderTrafficPolicy[]
+    scope: string
+  }
 }
 
 export type RouteNodeDto = {
@@ -77,6 +86,12 @@ export function getMapInfo() {
 
 export function getRobotMode() {
   return request<RobotModeDto>('/api/mode')
+}
+
+export function setOrderTrafficPolicy(selection_policy: OrderTrafficPolicy) {
+  return request<RobotModeDto>('/api/mode/order-traffic', {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ selection_policy }),
+  })
 }
 
 export async function setRobotMode(mode: RobotMode, operation_mode: OperationMode) {
@@ -284,7 +299,15 @@ export function dashboardWsUrl() {
 export function getOmxDevices() {
   return request<OmxDeviceDto[]>('/api/omx')
 }
-export type ScenarioItem = { name: string; description: string }
+export type ScenarioRouteSource = 'EXISTING_SHORTEST_PATH' | 'KEV'
+export type ScenarioItem = {
+  name: string; description: string
+  group?: string
+  test_goal?: string
+  route_source?: ScenarioRouteSource
+  route_source_options?: ScenarioRouteSource[]
+  traffic_selector?: 'kev' | 'fixed' | 'search' | 'guided'
+}
 export type ScenarioStatus = {
   state: 'idle' | 'running' | 'stopping' | 'completed' | 'failed'
   name: string | null
@@ -293,6 +316,57 @@ export type ScenarioStatus = {
   description?: string
   elapsed?: number
   message: string
+  kind?: 'order_stream'
+  route_source?: ScenarioRouteSource | 'SUPPLIED_PATHS'
+  traffic_selector?: 'kev' | 'fixed' | 'search' | 'guided'
+  coordination?: {
+    decision: { joint_action_id: string }
+    recovery_search?: {
+      status: string
+      checks: number
+      found_steps: number | null
+      elapsed_seconds: number
+      limits: { max_checks: number; max_steps: number; max_seconds: number }
+      model_calls?: number
+      motion_estimates_enabled?: boolean
+      branch_policy?: string
+      code_after_model_budget_decisions?: number
+      deferred_branches?: number
+      resumed_branches?: number
+      guidance_calls?: {
+        call: number; status: string
+        check_result?: string
+        proposed_control?: string
+        proposed_move?: {
+          robot_id: string; action: string; path: string[]; purpose?: string
+          estimated_motion?: {
+            distance_m: number; travel_seconds: number
+            mean_goal_completion_lower_bound_seconds: number | null
+          }
+        }
+      }[]
+    } | null
+    candidate_descriptions?: Record<string, string>
+    candidate_estimates?: Record<string, {
+      mean_goal_completion_seconds: number | null
+      total_distance_m: number
+      all_steps_completion_seconds: number | null
+    }>
+    actual_metrics?: {
+      outcome: string
+      mean_goal_completion_seconds: number | null
+      mean_request_to_goal_seconds: number | null
+      setup_seconds: number | null
+      selection_seconds: number | null
+      max_turn_wait_seconds: number | null
+      unfinished_robot_ids: string[]
+    }
+  }
+  order_stream?: {
+    generated: number; pending: number; in_progress: number; completed: number
+    failed: number; cancelled: number; returning: number
+    interval_seconds: number; max_pending: number
+  }
   robots: { robot_id: string; status: string; current_node: string | null; goal: string | null }[]
 }
 
@@ -304,10 +378,14 @@ export function getScenarioStatus() {
   return request<ScenarioStatus>('/api/scenarios/status')
 }
 
-export function runScenario(name: string) {
+export function runScenario(name: string, route_source?: ScenarioRouteSource) {
   return request<ScenarioStatus>('/api/scenarios/run', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name }),
+    body: JSON.stringify({ name, route_source }),
   })
+}
+
+export function stopOrderSupply() {
+  return request<ScenarioStatus>('/api/scenarios/stop', { method: 'POST' })
 }

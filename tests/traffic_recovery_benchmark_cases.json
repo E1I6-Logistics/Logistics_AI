@@ -1,0 +1,150 @@
+{
+  "schema_version": "traffic-recovery-benchmark/0.1",
+  "status": "DRAFT_FOR_OPERATIONAL_REVIEW",
+  "map": "routes/test.geojson",
+  "common_limits": {"max_checks": 128, "max_steps": 8, "max_seconds": 10.0},
+  "future_model_limits": {"max_calls": 8, "request_seconds": 2.0},
+  "operational_review": {
+    "date": "2026-10-21",
+    "pickup_yield_permission": "CONDITIONAL_USER_APPROVAL",
+    "pickup_yield_nodes": [
+      "5",
+      "6"
+    ],
+    "conditions": [
+      "해당 픽업대가 비어 있고 집기 작업 중이 아닐 것",
+      "양보 도착을 작업 목적지 완료와 구분하여 아루코·OMX 작업을 시작하지 않을 것",
+      "양보 중 노드·진입 경로 예약으로 다른 픽업 이동과 조정할 것"
+    ],
+    "yield_destination_scope": "기존 지도에서 안전하게 정차할 수 있는 허용 노드. 엣지 중간의 새 대기 지점은 이번 범위에서 제외한다.",
+    "other_wait_nodes": "N8 등 다른 위치의 실제 정차 적합성은 별도 확인 필요",
+    "real_arrival_connection": "EXISTING_INTERNAL_CONCESSION_HAS_NON_FINAL_ARRIVAL_NEW_KEV_CONNECTION_UNIMPLEMENTED",
+    "junction_stop_realism": "USER_CONSIDERS_POSSIBLE_NOT_CONFIRMED",
+    "continuous_order_observation": {
+      "run": "logs/random-order-runs/20261021-193638",
+      "orders_completed": 12,
+      "sample_count": 186,
+      "junction_idle_observed": false,
+      "stationary_junction_dwell_at_least_1s_observed": false,
+      "scope": "SIMULATION_ONLY"
+    },
+    "deliberate_cases": "정지 상태 시험을 위해 의도적으로 배치한 입력. 연속 주문에서 자연 발생한 막힘으로 표현하지 않는다.",
+    "unresolved_review": "yield_dependency에서 R2의 양보 위치를 N8로만 제한하는 실제 운영 이유는 미확정"
+  },
+  "cases": [
+    {
+      "id": "clear_next_pickup",
+      "title": "길이 비어 있는 다음 픽업 이동",
+      "group": "정상 동작 대조",
+      "origin": "NEW_INPUT",
+      "expected": "SOLVABLE",
+      "minimum_steps_control": 1,
+      "explanation": "R1이 작업대 N3에서 픽업대 N5로 이동한다. R2·R3는 각자 홈에서 대기한다.",
+      "review_question": "작업대에서 출고 후 다음 픽업대로 바로 이동하는 흐름을 대표 상황으로 볼 수 있는가?",
+      "robots": {
+        "robot1": {"start": "3", "goal": "5", "path": ["3", "11", "6", "5"]},
+        "robot2": {"start": "1", "goal": "1", "path": ["1"]},
+        "robot3": {"start": "2", "goal": "2", "path": ["2"]}
+      },
+      "wait_allowed_nodes": ["3", "1", "2"],
+      "yield_paths": {},
+      "reroute_paths": {}
+    },
+    {
+      "id": "leader_leaves",
+      "title": "앞 로봇이 먼저 빠지면 통과",
+      "group": "진행 순서",
+      "origin": "NEW_INPUT",
+      "expected": "SOLVABLE",
+      "minimum_steps_control": 2,
+      "explanation": "R1은 N3에서 N0로 돌아가야 한다. 길목 N11의 R2도 N6로 이동할 요청이 있다. R2가 먼저 자기 목적지로 가면 R1이 통과한다.",
+      "review_question": "R2가 N11에서 N6로 출발하기 직전인 정지 장면을 실제 운영에서 볼 수 있는가?",
+      "robots": {
+        "robot1": {"start": "3", "goal": "0", "path": ["3", "11", "7", "9", "10", "0"]},
+        "robot2": {"start": "11", "goal": "6", "path": ["11", "6"]},
+        "robot3": {"start": "2", "goal": "2", "path": ["2"]}
+      },
+      "wait_allowed_nodes": ["3", "11", "2"],
+      "yield_paths": {},
+      "reroute_paths": {}
+    },
+    {
+      "id": "one_yield_or_detour",
+      "title": "한 대가 비켜주기 또는 다른 길로 가기",
+      "group": "양보와 우회 선택",
+      "origin": "NEW_INPUT_USING_EXISTING_MOVE_TYPES",
+      "expected": "SOLVABLE",
+      "minimum_steps_control": 1,
+      "explanation": "R1은 N3에서 N0로 복귀한다. R2가 N7에 서 있다. R2가 N5로 비켜주거나, R1이 위쪽 N12·N8을 지나 돌아갈 수 있다.",
+      "review_question": "R2의 N7 정차와 N5를 임시 양보 위치로 사용하는 것이 허용되는가? N5에서 실제 픽업 작업 중이면 이 입력은 쓰면 안 된다.",
+      "robots": {
+        "robot1": {"start": "3", "goal": "0", "path": ["3", "11", "7", "9", "10", "0"]},
+        "robot2": {"start": "7", "goal": "7", "path": ["7"]},
+        "robot3": {"start": "2", "goal": "2", "path": ["2"]}
+      },
+      "wait_allowed_nodes": ["3", "7", "2", "5"],
+      "yield_paths": {"robot2": {"out": ["7", "5"], "resume": ["5", "7"]}},
+      "reroute_paths": {"robot1": ["3", "11", "12", "8", "10", "0"]}
+    },
+    {
+      "id": "two_yields",
+      "title": "두 대가 비켜줘야 복귀",
+      "group": "여러 로봇 양보",
+      "origin": "REUSED_PREVIOUSLY_TESTED_N3_RETURN",
+      "expected": "SOLVABLE",
+      "minimum_steps_control": 5,
+      "explanation": "R1의 N3→N0 복귀 길목에 R2=N11, R3=N10이 서 있다. R2는 N6, R3는 N8로 비켜주고 R1 통과 뒤 원래 자리로 돌아온다.",
+      "review_question": "N11·N10에 멈춘 로봇을 다른 곳으로 이동시켜도 되는가? N6·N8은 해당 순간에 비어 있는 양보 위치인가?",
+      "robots": {
+        "robot1": {"start": "3", "goal": "0", "path": ["3", "11", "7", "9", "10", "0"]},
+        "robot2": {"start": "11", "goal": "11", "path": ["11"]},
+        "robot3": {"start": "10", "goal": "10", "path": ["10"]}
+      },
+      "wait_allowed_nodes": ["3", "11", "10", "6", "8"],
+      "yield_paths": {
+        "robot2": {"out": ["11", "6"], "resume": ["6", "11"]},
+        "robot3": {"out": ["10", "8"], "resume": ["8", "10"]}
+      },
+      "reroute_paths": {}
+    },
+    {
+      "id": "yield_dependency",
+      "title": "양보할 자리부터 비워줘야 하는 경우",
+      "group": "양보 순서 의존",
+      "origin": "NEW_INPUT_REQUIRES_WAIT_NODE_REVIEW",
+      "expected": "SOLVABLE",
+      "minimum_steps_control": 5,
+      "explanation": "R1은 N3에서 N0로 복귀하고 R2는 N11을 막고 있다. 이번 입력에서 R2의 허용 양보 위치는 N8인데 R3가 그 자리에 있다. R3가 N5로 비켜준 뒤 R2가 N8로 가야 한다.",
+      "review_question": "R2의 양보 위치를 N8로 제한하는 운영 사유가 있는가? 이 제한 없이 N6로도 비킬 수 있다면 같은 어려움이 아닐 수 있다. N5·N8의 임시 대기도 확인해야 한다.",
+      "robots": {
+        "robot1": {"start": "3", "goal": "0", "path": ["3", "11", "7", "9", "10", "0"]},
+        "robot2": {"start": "11", "goal": "11", "path": ["11"]},
+        "robot3": {"start": "8", "goal": "8", "path": ["8"]}
+      },
+      "wait_allowed_nodes": ["3", "11", "8", "5"],
+      "yield_paths": {
+        "robot2": {"out": ["11", "12", "8"], "resume": ["8", "12", "11"]},
+        "robot3": {"out": ["8", "7", "5"], "resume": ["5", "7", "8"]}
+      },
+      "reroute_paths": {}
+    },
+    {
+      "id": "missing_required_yield",
+      "title": "필요한 양보 경로가 입력에 없는 경우",
+      "group": "출발 금지 대조",
+      "origin": "REUSED_MISSING_ACTION_CONTROL",
+      "expected": "UNRESOLVED_WITH_SUPPLIED_ACTIONS",
+      "minimum_steps_control": null,
+      "explanation": "두 대가 비켜줘야 하는 상황에서 R3의 양보·복귀 경로를 입력에서 뺀다. 허용한 동작만으로 완성 계획을 만들 수 없으므로 출발하면 안 된다.",
+      "review_question": "운영의 고장·교체 대기 상태를 직접 재현하는 시험은 아니다. 필요한 입력이 부족할 때 부분 계획을 실행하지 않는지 확인하는 대조 시험으로 분리한다.",
+      "robots": {
+        "robot1": {"start": "3", "goal": "0", "path": ["3", "11", "7", "9", "10", "0"]},
+        "robot2": {"start": "11", "goal": "11", "path": ["11"]},
+        "robot3": {"start": "10", "goal": "10", "path": ["10"]}
+      },
+      "wait_allowed_nodes": ["3", "11", "10", "6", "8"],
+      "yield_paths": {"robot2": {"out": ["11", "6"], "resume": ["6", "11"]}},
+      "reroute_paths": {}
+    }
+  ]
+}

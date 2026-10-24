@@ -31,6 +31,13 @@ def load_config():
             names.add(name)
             if not isinstance(scenario["description"], str):
                 raise ValueError("description은 문자열이어야 합니다.")
+            if "order_stream" in scenario:
+                from backend.simulation.order_stream_scenario import validate_options
+
+                validate_options(scenario["order_stream"])
+                if scenario.get("robots") or scenario.get("traffic_joint_action"):
+                    raise ValueError("주문 공급 시험은 초기 배치·교통조정 시험과 별도로 정의하세요.")
+                continue
             ids, starts = set(), set()
             for robot in scenario["robots"]:
                 robot["id"] = normalize_robot_id(robot["id"])
@@ -104,14 +111,35 @@ class ScenarioManager:
     def active(self):
         return self._status["state"] in ("running", "stopping")
 
+    @property
+    def blocks_order_processing(self):
+        return self.active and self._status.get("kind") != "order_stream"
+
     # 현재 상태를 반환한다.
     def status(self):
         with self.lock:
-            return deepcopy(self._status)
+            status = deepcopy(self._status)
+        if status.get("kind") == "order_stream":
+            from .order_manager import order_manager
+            from backend.simulation.order_stream_scenario import refresh_status_counts
+
+            # 공급 중지 후에도 접수 주문은 계속 처리된다. 조회 결과만 최신화하고
+            # 공급 작업·실패 원인·기존 내부 상태는 변경하지 않는다.
+            refresh_status_counts(status, order_manager.list_orders())
+            if status["state"] != "running":
+                counts = status["order_stream"]
+                status["message"] = (
+                    f"{status['message']} · 등록 {counts['generated']} · 대기 {counts['pending']} · "
+                    f"처리 중 {counts['in_progress']} · 작업 완료 {counts['completed']} · "
+                    f"복귀 중 {counts['returning']} · 실패 {counts['failed']} · 취소 {counts['cancelled']}"
+                )
+        return status
 
     # 가용을 확인하고 준비한다.
-    def ensure_available(self, robot_id=None):
+    def ensure_available(self, robot_id=None, *, allow_order_stream=False):
         with self.lock:
+            if allow_order_stream and self._status.get("kind") == "order_stream":
+                return
             if self.active and (robot_id is None or normalize_robot_id(robot_id) in self._status["robot_ids"]):
                 raise ValueError("시나리오 실행 중입니다. 완료 또는 정지 후 다시 시도하세요.")
 
@@ -127,7 +155,7 @@ class ScenarioManager:
         return guarded
 
     # 관련을 시작한다.
-    def start(self, name):
+    def start(self, name, *, route_source=None):
         with self.lock:
             self.ensure_available()
             from .order_manager import order_manager
@@ -142,7 +170,46 @@ class ScenarioManager:
             scenario = next((s for s in config["scenarios"] if s["name"] == name), None)
             if scenario is None:
                 raise ValueError(f"알 수 없는 시나리오: {name}")
+            scenario = deepcopy(scenario)
+            if route_source is not None:
+                from backend.simulation.traffic_joint_action_scenario import route_source_choices
+
+                options = scenario.get("traffic_joint_action", {})
+                if route_source not in route_source_choices(options):
+                    raise ValueError("이 시나리오에서는 요청한 경로 생성 방식을 선택할 수 없습니다.")
+                options["route_source"] = route_source
             mode = mode_manager.mode
+            if "order_stream" in scenario:
+                if mode != "simulation" or mode_manager.operation_mode != "ai":
+                    raise ValueError("자동 주문 공급은 시뮬·AI 모드에서 실행하세요.")
+                from .route_model_catalog import require_enabled_model
+                from backend.simulation.order_stream_scenario import run_order_stream
+
+                require_enabled_model("kev", scenario["order_stream"]["model"])
+                self._status = dict(
+                    state="running", kind="order_stream", run_id=uuid4().hex,
+                    name=name, description=scenario["description"], mode=mode,
+                    operation_mode="ai", robot_ids=list(robot_states(mode)), robots=[],
+                    elapsed=0, message="자동 주문 공급 시작 중",
+                    order_stream=dict(
+                        **deepcopy(scenario["order_stream"]), order_ids=[], generated=0,
+                        pending=0, in_progress=0, completed=0, failed=0, cancelled=0, returning=0,
+                    ),
+                )
+                self._task = asyncio.create_task(run_order_stream(self, deepcopy(scenario["order_stream"])))
+                return self.status()
+            if scenario.get("traffic_joint_action") and mode != "simulation":
+                raise ValueError("교통조정 테스트는 시뮬레이션 모드에서만 실행할 수 있습니다.")
+            if scenario.get("traffic_joint_action"):
+                from backend.simulation.traffic_joint_action_scenario import resolve_route_source, traffic_selector
+
+                resolved_source = resolve_route_source(scenario["traffic_joint_action"], mode_manager.operation_mode)
+                from .mock_data import mock_fms
+
+                # 초기 배치의 stop_robot이 남은 예약을 지워 입력 문제를 숨기지 않도록 한다.
+                with mock_fms._lock:
+                    if mock_fms._traffic._reservations.snapshot() or mock_fms._traffic._protected_resources:
+                        raise ValueError("활성 예약/보호 자원이 있어 교통조정 테스트를 보류합니다.")
             graph = load_route_graph()
             expected = json.loads((BASE_DIR / "routes/test.geojson").read_text())
             if graph != expected:
@@ -191,11 +258,14 @@ class ScenarioManager:
                 name=name,
                 description=scenario["description"],
                 mode=mode,
+                operation_mode=mode_manager.operation_mode,
                 robot_ids=[r["id"] for r in specs],
                 robots=[],
                 elapsed=0.0,
                 message="시작 위치 준비 및 명령 전송 중",
             )
+            if scenario.get("traffic_joint_action"):
+                self._status.update(route_source=resolved_source, traffic_selector=traffic_selector(scenario["traffic_joint_action"]))
             self._task = asyncio.create_task(
                 self._run(scenario, graph, planner.nodes, float(config["timeout_seconds"][mode]))
             )
@@ -216,11 +286,52 @@ class ScenarioManager:
 
                 touched = True
                 prepare(specs, nodes)
+            if scenario.get("traffic_joint_action"):
+                from backend.simulation.traffic_joint_action_scenario import run_joint_action_scenario
+
+                await run_joint_action_scenario(self, scenario, graph, started, timeout)
+                return
+            required_paths = {}
+            operation_mode = self._status.get("operation_mode", mode_manager.operation_mode)
+            if operation_mode == "ai":
+                from .llm_route_preview import preview_llm_route
+
+                def signature():
+                    return {
+                        rid: {key: row.get(key) for key in (
+                            "status", "occupied_node", "occupied_edge", "current_node",
+                            "navigation_id", "route", "goal_node", "connected", "fresh", "active",
+                        )}
+                        for rid, row in robot_states(mode).items()
+                    }
+
+                before_routes = signature()
+                results = {}
+                # 모든 경로를 생성·검사한 뒤 주행한다. 모델 실패를 A* 경로로 대체하지 않는다.
+                for rid, goal in goals.items():
+                    self._status["message"] = f"KEV 경로 생성 중: {rid} → N{goal}"
+                    start = before_routes[rid].get("occupied_node") or before_routes[rid]["current_node"]
+                    result = await asyncio.to_thread(
+                        preview_llm_route, graph, start, goal,
+                        selector="kev", model=scenario.get("model", "kev-08b"),
+                    )
+                    if (
+                        self._status["state"] != "running" or mode_manager.mode != mode
+                        or mode_manager.operation_mode != operation_mode or load_route_graph() != graph
+                        or before_routes != signature() or monotonic() - started >= timeout
+                    ):
+                        raise ValueError("KEV 경로 생성 중 시나리오·상태가 변경되었거나 제한 시간을 초과했습니다.")
+                    required_paths[rid] = result["path"]
+                    results[rid] = result
+                self._status["route_generation"] = dict(source="KEV", model=scenario.get("model", "kev-08b"), robots=results)
             for rid, goal in goals.items():
                 if mode_manager.mode != mode:
                     raise ValueError("운용 모드가 변경되었습니다.")
                 touched = True
-                navigate_to_node(rid, goal, mode)
+                if rid in required_paths:
+                    navigate_to_node(rid, goal, mode, required_path=required_paths[rid])
+                else:
+                    navigate_to_node(rid, goal, mode)
             self._status["message"] = "주행 및 도착 후 동작 완료 대기 중"
             while True:
                 if self._status["state"] == "stopping":
@@ -270,11 +381,41 @@ class ScenarioManager:
     # 실행 중인 시나리오를 중단한다.
     def interrupt(self, robot_id=None):
         with self.lock:
-            if self.active and (robot_id is None or normalize_robot_id(robot_id) in self._status["robot_ids"]):
+            if (self.active or self._status.get("kind") == "order_stream") and (
+                robot_id is None or normalize_robot_id(robot_id) in self._status["robot_ids"]
+            ):
+                if self._status.get("kind") == "order_stream":
+                    from .order_manager import order_manager
+
+                    self.stop_order_supply(message="비상정지 요청으로 자동 주문 공급 중지")
+                    # 이 시험의 미배정 주문만 취소해 정지 직후 자동 재배차를 방지한다.
+                    for oid in self._status["order_stream"]["order_ids"]:
+                        row = order_manager.get_order(oid)
+                        if row and row["status"] == "PENDING":
+                            order_manager.cancel_order(oid, return_to_station=False)
+                    return
                 self._status.update(state="stopping", message="정지 요청으로 시나리오 중단")
+
+    def stop_order_supply(self, *, message=None):
+        with self.lock:
+            if self._status.get("kind") != "order_stream":
+                raise ValueError("실행 중인 자동 주문 공급 시험이 없습니다.")
+            if self.active:
+                self._status.update(
+                    state="completed",
+                    message=message or "주문 공급 중지 · 이미 접수된 주문은 계속 처리됩니다.",
+                )
+                if self._task and not self._task.done():
+                    self._task.cancel()
+            return self.status()
 
     # 관련을 종료한다.
     async def shutdown(self):
+        if self._status.get("kind") == "order_stream":
+            self.stop_order_supply(message="서버 종료로 자동 주문 공급 중지")
+            if self._task:
+                await asyncio.gather(self._task, return_exceptions=True)
+            return
         if self._task and not self._task.done():
             self._task.cancel()
             try:

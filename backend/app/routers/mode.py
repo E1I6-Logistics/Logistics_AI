@@ -22,8 +22,16 @@ class ModeRequest(BaseModel):
     operation_mode: Literal["algorithm", "ai"] | None = None
 
 
+class OrderTrafficRequest(BaseModel):
+    selection_policy: Literal["KEV", "MIN_EXPECTED_TIME", "KEV_STRATEGY_ORDER"]
+
+
 # 현재 상태의 복사본을 만든다.
 def _snapshot() -> dict[str, object]:
+    from ..services.order_traffic_service import SELECTION_POLICIES, enabled, route_source, selection_policy
+
+    traffic_enabled = enabled(dict(mode=mode_manager.mode, operation_mode=mode_manager.operation_mode,
+                                   driving_mode="llm" if mode_manager.operation_mode == "ai" else "standard"))
     return {
         "mode": mode_manager.mode,
         "operation_mode": mode_manager.operation_mode,
@@ -31,12 +39,41 @@ def _snapshot() -> dict[str, object]:
         "real_available": True,
         "simulation_active": mode_manager.mode == "simulation",
         "using_mock": mode_manager.mode == "simulation",
+        "order_traffic": {"enabled": traffic_enabled,
+                          "route_source": route_source() if traffic_enabled else "MODE",
+                          "selection_policy": selection_policy() if traffic_enabled else None,
+                          "available_policies": list(SELECTION_POLICIES),
+                          "scope": "NEW_STOPPED_REQUEST_EXISTING_PLANS_FIXED"},
     }
 
 
 # 모드를 조회한다.
 @router.get("")
 async def get_mode():
+    return _snapshot()
+
+
+@router.put("/order-traffic")
+async def set_order_traffic(payload: OrderTrafficRequest):
+    from ..services.order_manager import order_manager
+    from ..services.scenario_service import scenario_manager
+    from ..services.mock_data import mock_fms
+    from ..services.order_traffic_service import enabled, set_simulation_policy
+
+    if not enabled(dict(mode=mode_manager.mode, operation_mode=mode_manager.operation_mode, driving_mode="llm")):
+        raise HTTPException(409, detail="일반 주문 교통조정이 켜진 시뮬·AI 모드에서만 변경할 수 있습니다.")
+    try:
+        scenario_manager.ensure_available()
+        if (any(row["status"] in ("PENDING", "IN_PROGRESS") for row in order_manager.list_orders())
+                or order_manager.returning or order_manager.recovering):
+            raise ValueError("주문과 복귀가 끝난 뒤 교통조정 방식을 변경하세요.")
+        with mock_fms._lock:
+            if any(row["status"] != "IDLE" or row["route"] is not None or row["goal_node"] is not None
+                   or row["occupied_edge"] is not None for row in mock_fms._robots.values()):
+                raise ValueError("모든 가상 로봇이 노드에 정지한 뒤 변경하세요.")
+            set_simulation_policy(payload.selection_policy)
+    except ValueError as exc:
+        raise HTTPException(409, detail=str(exc)) from exc
     return _snapshot()
 
 

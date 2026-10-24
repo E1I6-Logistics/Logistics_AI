@@ -143,6 +143,70 @@ class TrafficManager:
             self._validate_time(now)
             self._retry_waiting(now, graph, planner or DistanceAStar(graph))
 
+    def preview_new_route(self, robot_id, path, *, now, graph):
+        """새 정지 요청 하나만 사본에서 예약. 다른 로봇의 실행·예약은 바꾸지 않는다.
+
+        기존 주행 경로를 강제로 바꾸는 API가 아니다. 외부 추론 중에는 이 잠금을
+        유지하지 않으며, 적용할 때 같은 검사를 최신 상태로 다시 수행한다.
+        """
+        with self.lock:
+            trial = self._new_route_trial(robot_id, path, now=now, graph=graph)
+            if trial is None:
+                return None
+            return deepcopy(trial._robots[robot_id]["route"])
+
+    def _new_route_trial(self, robot_id, path, *, now, graph):
+        self._validate_time(now)
+        robot = self._robots[robot_id]
+        fixed = tuple(map(str, path))
+        planner = DistanceAStar(graph)
+        if (robot["status"] != "IDLE" or robot["route"] is not None
+                or robot["goal_node"] is not None or robot["occupied_edge"] is not None
+                or not fixed or fixed[0] != robot["occupied_node"]):
+            raise ValueError("새 교통조정 요청은 노드에서 정지한 로봇만 가능합니다.")
+        if any(n not in planner.nodes for n in fixed) or any(
+            not any(n == b for n, _ in planner.edges[a]) for a, b in zip(fixed, fixed[1:])
+        ):
+            raise ValueError("새 경로에 존재하지 않는 노드·유향 엣지가 있습니다.")
+        pairs = list(zip(fixed, fixed[1:]))
+        if len(set(pairs)) != len(pairs) or any(fixed.count(n) > 2 for n in set(fixed)):
+            raise ValueError("새 경로가 방문 제한을 위반했습니다.")
+        if self._protected_resources.get(robot_id):
+            raise ValueError("새 요청 로봇의 보호 자원이 남아 있습니다.")
+        if any(row.robot_id == robot_id for row in self._reservations.snapshot()):
+            raise ValueError("새 요청 로봇의 기존 예약이 남아 있습니다.")
+        trial = self._planning_copy()
+        incoming = trial._robots[robot_id]
+        trial.cancel_navigation_after_stop(robot_id)
+        incoming.update(stop_requested=False, goal_node=fixed[-1],
+                        navigation_id=uuid4().hex, request_order=self._request_sequence + 1)
+        trial._required_paths[robot_id] = fixed
+        trial._pending[robot_id] = None
+        if not trial._try_schedule(incoming, now, graph, planner):
+            return None
+        trial._pending.pop(robot_id, None)
+        return trial
+
+    def commit_new_route(self, robot_id, path, *, now, graph):
+        """최신 점유·예약으로 재검사 후 새 요청만 확정. 실패 시 전체 상태 유지."""
+        with self.lock:
+            trial = self._new_route_trial(robot_id, path, now=now, graph=graph)
+            if trial is None:
+                return False
+            robot = trial._robots[robot_id]
+            rows = [row for row in trial._reservations.snapshot() if row.robot_id == robot_id]
+            if rows and not self._reservations.replace_request(robot_id, robot["navigation_id"], rows):
+                return False
+            if not rows:
+                self._release_schedule(self._robots[robot_id])
+            self._robots[robot_id].update(deepcopy(robot))
+            self._required_paths.pop(robot_id, None)
+            if robot_id in trial._required_paths:
+                self._required_paths[robot_id] = trial._required_paths[robot_id]
+            self._pending.pop(robot_id, None)
+            self._request_sequence += 1
+            return True
+
     def confirm_node_arrival(self, robot_id, node_id):
         """실행기가 좌표를 갱신하고 도착을 확인한 뒤 구간 진행을 반영한다."""
         with self.lock:

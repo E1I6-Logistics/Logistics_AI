@@ -11,6 +11,7 @@ import heapq
 import json
 import math
 import os
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
@@ -98,10 +99,13 @@ def build_route_inputs(
 
 
 def plan_route(
-    start_id: str, goal_id: str, graph: dict[str, Any] | None = None, *, require_stored_weight: bool = False
+    start_id: str, goal_id: str, graph: dict[str, Any] | None = None, *, require_stored_weight: bool = False,
+    blocked_nodes=(), blocked_edges=(),
 ) -> dict[str, Any]:
     """Calculate a directed shortest path with A* and resolved edge weights."""
     graph = graph if graph is not None else load_route_graph()
+    if blocked_nodes or blocked_edges:
+        graph = constrained_route_graph(graph, start_id, goal_id, blocked_nodes, blocked_edges)
     nodes = node_lookup(graph)
     start_id, goal_id = str(start_id), str(goal_id)
 
@@ -169,6 +173,27 @@ def plan_route(
         "waypoints": [points[key] for key in path],
         "cost": distances[goal_id],
     }
+
+
+def constrained_route_graph(graph, start, goal, blocked_nodes=(), blocked_edges=()):
+    """우회 요청용 지도 사본. 물리 통로 차단은 양방향 모두 적용한다."""
+    nodes = {str(n) for n in blocked_nodes}
+    edges = {frozenset(map(str, pair)) for pair in blocked_edges}
+    known = set(node_lookup(graph))
+    if not nodes <= known or any(len(pair) != 2 or not pair <= known for pair in edges):
+        raise ValueError("회피할 노드·통로가 지도에 없습니다.")
+    if str(start) in nodes or str(goal) in nodes:
+        raise ValueError("현재 출발·목적지 노드를 차단한 우회는 만들 수 없습니다.")
+    result = deepcopy(graph)
+    result["features"] = [
+        feature for feature in result["features"]
+        if not (
+            (props := feature.get("properties", {})).get("startid") is not None
+            and (str(props["startid"]) in nodes or str(props.get("endid")) in nodes
+                 or frozenset((str(props["startid"]), str(props.get("endid")))) in edges)
+        )
+    ]
+    return result
 
 
 def _model_weight(value: int | float) -> int | float:

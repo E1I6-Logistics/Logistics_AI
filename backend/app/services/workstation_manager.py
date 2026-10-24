@@ -4,6 +4,7 @@ from threading import RLock
 from time import monotonic
 
 from ..config import REAL_POSE_TIMEOUT_S
+from .pickup_queue import requested_pickup_node
 
 
 class WorkstationManager:
@@ -101,7 +102,8 @@ class WorkstationManager:
                 if row["mode"] == mode and row["status"] == "IN_PROGRESS" and node in row["pickup_nodes"]
             ]
             occupants = [row for row in active if row["robot_id"] in robot_ids]
-            waiting = [row["order_name"] for row in active if row["phase"] == "WAITING_PICKUP"]
+            waiting = [row["order_name"] for row in active
+                       if row["phase"] == "WAITING_PICKUP" and requested_pickup_node(row) == node]
             reserved = sorted({r.robot_id for r in reservations if r.resource == node_key(node) and r.end > now})
             status = "OCCUPIED" if robot_ids else "UNKNOWN" if unknown else "FREE"
             result[node] = {

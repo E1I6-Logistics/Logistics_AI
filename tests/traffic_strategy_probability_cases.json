@@ -1,0 +1,38 @@
+{
+  "schema_version": "traffic-strategy-comparison/0.1",
+  "map": "routes/test.geojson",
+  "limits": {
+    "max_checks": 128,
+    "max_steps": 8,
+    "max_seconds": 10.0,
+    "max_route_calls": 16,
+    "max_model_calls": 8,
+    "request_seconds": 2.0
+  },
+  "cases": [
+    {
+      "id": "return_home",
+      "title": "작업 장소에서 세 로봇이 자기 홈으로 복귀",
+      "expected": "SOLVABLE",
+      "robots": {"robot1": ["3", "0"], "robot2": ["4", "1"], "robot3": ["6", "2"]}
+    },
+    {
+      "id": "return_home_reverse",
+      "title": "같은 배치에서 요청 순서만 R3부터 변경",
+      "expected": "SOLVABLE",
+      "robots": {"robot3": ["6", "2"], "robot2": ["4", "1"], "robot1": ["3", "0"]}
+    },
+    {
+      "id": "blocked_first_then_detour",
+      "title": "R1이 막혀 R2부터 보내고 R1의 경로 변경",
+      "expected": "SOLVABLE",
+      "robots": {"robot1": ["4", "5"], "robot2": ["12", "6"], "robot3": ["2", "2"]}
+    },
+    {
+      "id": "two_parked_limited_detour",
+      "title": "N5·N7에 로봇이 정차해 위쪽 우회로만 남음",
+      "expected": "SOLVABLE",
+      "robots": {"robot1": ["6", "0"], "robot2": ["7", "7"], "robot3": ["5", "5"]}
+    }
+  ]
+}

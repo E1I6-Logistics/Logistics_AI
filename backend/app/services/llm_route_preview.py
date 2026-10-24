@@ -11,6 +11,7 @@ from .route_service import (
     build_compact_adjacency_graph,
     build_route_inputs,
     compare_path_metrics,
+    constrained_route_graph,
     plan_route,
     validate_and_calculate_path_distance,
 )
@@ -46,10 +47,14 @@ def preview_llm_route(
     selector: str = "ollama",
     model: str | None = None,
     provider: Any | None = None,
+    blocked_nodes=(),
+    blocked_edges=(),
 ) -> dict[str, Any]:
     """시험과 같은 상태·후보 규칙으로 경로를 선택하고 유효성을 검사한다."""
     if model is None:
         raise ValueError("경로 모델을 선택하세요.")
+    if blocked_nodes or blocked_edges:
+        graph = constrained_route_graph(graph, start_node, target_node, blocked_nodes, blocked_edges)
     model_config = enabled_model_configuration(selector, model)
     compact = build_compact_adjacency_graph(graph, ROUTE_GRAPH_PATH.name, require_stored_weight=True)
     nodes = sorted(int(node) for node in compact["nodes"])

@@ -6,6 +6,864 @@
   },
   "scenarios": [
     {
+      "name": "continuous_ai_orders",
+      "description": "일반 주문 · 계속 주문 넣기",
+      "order_stream": {
+        "interval_seconds": 5,
+        "max_pending": 3,
+        "initial_orders": 3,
+        "seed": 42,
+        "model": "kev-08b"
+      },
+      "test_group": "일반 주문",
+      "test_goal": "실제 주문 등록 기능으로 무작위 주문을 계속 넣어요. 배차·픽업·작업대·복귀와 다음 주문 처리를 확인해요. 여러 대 양보 자동 복구는 아직 이 흐름에 연결되지 않았어요.",
+      "catalog_status": "ACTIVE"
+    },
+    {
+      "name": "kev_joint_fms_input",
+      "description": "두 대 합류 · 경로부터 연결 확인",
+      "test_goal": "주문 없이 정해진 배치에서 시험해요. A*(기본) 또는 KEV로 경로를 만든 뒤 가상 로봇 상태와 합쳐 교통조정까지 연결해요. 일반 주문 자동 복구 시험은 아니에요.",
+      "robots": [
+        {
+          "id": "robot1",
+          "start": "9",
+          "goal": "11"
+        },
+        {
+          "id": "robot2",
+          "start": "5",
+          "goal": "8"
+        },
+        {
+          "id": "robot3",
+          "start": "0",
+          "goal": null
+        }
+      ],
+      "traffic_joint_action": {
+        "model": "kev-08b",
+        "timeout_seconds": 90,
+        "route_source": "EXISTING_SHORTEST_PATH",
+        "traffic_selector": "kev",
+        "wait_allowed_nodes": [
+          "9",
+          "5",
+          "0"
+        ]
+      },
+      "test_group": "경로 연결 확인",
+      "catalog_status": "ACTIVE"
+    },
+    {
+      "name": "kev_joint_proceed_wait",
+      "description": "길목에 3대 · 통과 순서 선택",
+      "test_goal": "정해진 경로를 가진 세 로봇이 공유 통로를 지나가요. KEV가 통과 순서를 선택하고 나머지는 차례를 기다려요. 일반 주문 배차 순서를 바꾸는 시험은 아니에요.",
+      "robots": [
+        {
+          "id": "robot1",
+          "start": "0",
+          "goal": "4"
+        },
+        {
+          "id": "robot2",
+          "start": "1",
+          "goal": "3"
+        },
+        {
+          "id": "robot3",
+          "start": "2",
+          "goal": "6"
+        }
+      ],
+      "traffic_joint_action": {
+        "model": "kev-08b",
+        "timeout_seconds": 120,
+        "wait_allowed_nodes": [
+          "0",
+          "1",
+          "2"
+        ],
+        "paths": {
+          "robot1": [
+            "0",
+            "10",
+            "9",
+            "7",
+            "8",
+            "12",
+            "4"
+          ],
+          "robot2": [
+            "1",
+            "9",
+            "7",
+            "11",
+            "3"
+          ],
+          "robot3": [
+            "2",
+            "9",
+            "7",
+            "5",
+            "6"
+          ]
+        }
+      },
+      "test_group": "교통조정만 시험",
+      "catalog_status": "ACTIVE"
+    },
+    {
+      "name": "kev_joint_wait_or_reroute",
+      "description": "앞 로봇 먼저 보내기 또는 우회하기",
+      "test_group": "교통조정만 시험",
+      "test_goal": "R1은 N11, R2는 N5로 가야 해요. N7의 R2를 먼저 보내고 R1을 출발시킬지, R1을 다른 길로 보낼지 KEV가 골라요. 두 로봇 모두 원래 이동할 목적지가 있어요.",
+      "robots": [
+        {
+          "id": "robot1",
+          "start": "9",
+          "goal": "11"
+        },
+        {
+          "id": "robot2",
+          "start": "7",
+          "goal": "5"
+        },
+        {
+          "id": "robot3",
+          "start": "0",
+          "goal": null
+        }
+      ],
+      "traffic_joint_action": {
+        "model": "kev-08b",
+        "timeout_seconds": 90,
+        "wait_allowed_nodes": [
+          "9",
+          "7",
+          "0"
+        ],
+        "paths": {
+          "robot1": [
+            "9",
+            "7",
+            "11"
+          ],
+          "robot2": [
+            "7",
+            "5"
+          ]
+        },
+        "reroute_paths": {
+          "robot1": [
+            "9",
+            "10",
+            "8",
+            "12",
+            "11"
+          ]
+        },
+        "candidate_labels": {
+          "A2": "R2 이동 후 R1 출발",
+          "B_REROUTE": "R1이 다른 길로 간 뒤 R2 출발"
+        }
+      },
+      "catalog_status": "ACTIVE"
+    },
+    {
+      "name": "kev_joint_yield_or_reroute",
+      "description": "정차 로봇 비켜주기 또는 우회하기",
+      "test_group": "교통조정만 시험",
+      "test_goal": "R1은 N9에서 N11로 가야 하고 R2는 N7에 정차해 있어요. R2를 빈 N5로 비켜준 뒤 복귀시킬지, R2를 그대로 두고 R1을 우회시킬지 KEV가 골라요.",
+      "robots": [
+        {
+          "id": "robot1",
+          "start": "9",
+          "goal": "11"
+        },
+        {
+          "id": "robot2",
+          "start": "7",
+          "goal": null
+        },
+        {
+          "id": "robot3",
+          "start": "0",
+          "goal": null
+        }
+      ],
+      "traffic_joint_action": {
+        "model": "kev-08b",
+        "timeout_seconds": 90,
+        "wait_allowed_nodes": [
+          "9",
+          "7",
+          "0",
+          "5"
+        ],
+        "paths": {
+          "robot1": [
+            "9",
+            "7",
+            "11"
+          ]
+        },
+        "reroute_paths": {
+          "robot1": [
+            "9",
+            "10",
+            "8",
+            "12",
+            "11"
+          ]
+        },
+        "yield_paths": {
+          "robot2": {
+            "out": [
+              "7",
+              "5"
+            ],
+            "resume": [
+              "5",
+              "7"
+            ]
+          }
+        },
+        "candidate_labels": {
+          "B_REROUTE": "R2는 그대로, R1이 다른 길로 이동",
+          "B_YIELD_robot2": "R2가 비켜줌 → R1 통과 → R2가 제자리로"
+        }
+      },
+      "catalog_status": "ACTIVE"
+    },
+    {
+      "name": "kev_joint_hold",
+      "description": "움직일 방법이 없으면 출발하지 않기",
+      "test_goal": "R2가 길을 막고 있고 우회·양보 경로를 주지 않은 조건이에요. KEV 호출과 이동 명령 없이 정차를 유지하는지 확인해요. 나중에 길이 비면 재출발하는 시험이나 지도 전체가 해결 불가능하다는 뜻은 아니에요.",
+      "robots": [
+        {
+          "id": "robot1",
+          "start": "9",
+          "goal": "11"
+        },
+        {
+          "id": "robot2",
+          "start": "7",
+          "goal": null
+        },
+        {
+          "id": "robot3",
+          "start": "0",
+          "goal": null
+        }
+      ],
+      "traffic_joint_action": {
+        "model": "kev-08b",
+        "timeout_seconds": 90,
+        "wait_allowed_nodes": [
+          "9",
+          "7",
+          "0"
+        ],
+        "paths": {
+          "robot1": [
+            "9",
+            "7",
+            "11"
+          ]
+        }
+      },
+      "test_group": "교통조정만 시험",
+      "catalog_status": "ACTIVE"
+    },
+    {
+      "name": "dependency_code_two_robot_yield",
+      "description": "두 대 양보 · 코드만",
+      "test_group": "여러 대 양보 비교",
+      "test_goal": "같은 N3→N0 복귀 배치에서 코드 규칙만으로 양보·통과·복귀 순서를 찾아요. KEV는 호출하지 않아요. KEV 두 방식과 지도·허용 이동·검사·시간 한도가 같아요. 지도에서 계산한 거리·이동 예상 시간을 같은 기준으로 제공해요. 처음 찾은 완성 계획이며 전체 최단 시간 보장은 아니에요.",
+      "robots": [
+        {
+          "id": "robot1",
+          "start": "3",
+          "goal": "0"
+        },
+        {
+          "id": "robot2",
+          "start": "11",
+          "goal": null
+        },
+        {
+          "id": "robot3",
+          "start": "10",
+          "goal": null
+        }
+      ],
+      "traffic_joint_action": {
+        "traffic_selector": "search",
+        "timeout_seconds": 90,
+        "wait_allowed_nodes": [
+          "3",
+          "11",
+          "10",
+          "6",
+          "8",
+          "0"
+        ],
+        "paths": {
+          "robot1": [
+            "3",
+            "11",
+            "7",
+            "9",
+            "10",
+            "0"
+          ]
+        },
+        "yield_paths": {
+          "robot2": {
+            "out": [
+              "11",
+              "6"
+            ],
+            "resume": [
+              "6",
+              "11"
+            ]
+          },
+          "robot3": {
+            "out": [
+              "10",
+              "8"
+            ],
+            "resume": [
+              "8",
+              "10"
+            ]
+          }
+        },
+        "recovery_search": {
+          "max_checks": 128,
+          "max_steps": 8,
+          "max_seconds": 10.0
+        },
+        "candidate_labels": {
+          "RECOVERY_DEPENDENCY_DFS": "코드만으로 찾은 양보·통과·복귀 순서"
+        },
+        "recovery_strategy": "DEPENDENCY_DFS",
+        "model": "kev-08b",
+        "recovery_branch_policy": "DEFER",
+        "recovery_guidance_budget_policy": "STOP",
+        "recovery_motion_estimates": true
+      },
+      "catalog_status": "ACTIVE"
+    },
+    {
+      "name": "dependency_kev_two_robot_yield",
+      "description": "두 대 양보 · KEV만",
+      "test_group": "여러 대 양보 비교",
+      "test_goal": "같은 N3→N0 복귀 배치에서 KEV가 다음 검사 순서를 골라요. 미룬 순서는 보관하지만 제안 8회 한도 뒤에 코드가 선택을 이어받지는 않아요. 예약·도착 검사는 계속 코드가 해요. 완성 계획을 못 찾으면 이동하지 않아요. 지도에서 계산한 거리·이동 예상 시간을 같은 기준으로 제공해요. 처음 찾은 완성 계획이며 전체 최단 시간 보장은 아니에요.",
+      "robots": [
+        {
+          "id": "robot1",
+          "start": "3",
+          "goal": "0"
+        },
+        {
+          "id": "robot2",
+          "start": "11",
+          "goal": null
+        },
+        {
+          "id": "robot3",
+          "start": "10",
+          "goal": null
+        }
+      ],
+      "traffic_joint_action": {
+        "traffic_selector": "guided",
+        "timeout_seconds": 90,
+        "wait_allowed_nodes": [
+          "3",
+          "11",
+          "10",
+          "6",
+          "8",
+          "0"
+        ],
+        "paths": {
+          "robot1": [
+            "3",
+            "11",
+            "7",
+            "9",
+            "10",
+            "0"
+          ]
+        },
+        "yield_paths": {
+          "robot2": {
+            "out": [
+              "11",
+              "6"
+            ],
+            "resume": [
+              "6",
+              "11"
+            ]
+          },
+          "robot3": {
+            "out": [
+              "10",
+              "8"
+            ],
+            "resume": [
+              "8",
+              "10"
+            ]
+          }
+        },
+        "recovery_search": {
+          "max_checks": 128,
+          "max_steps": 8,
+          "max_seconds": 10.0
+        },
+        "candidate_labels": {
+          "RECOVERY_KEV_DEPENDENCY": "KEV 추천으로 찾은 양보·통과·복귀 순서"
+        },
+        "recovery_strategy": "KEV_DEPENDENCY",
+        "model": "kev-08b",
+        "recovery_guidance": {
+          "max_calls": 8,
+          "request_seconds": 2.0
+        },
+        "recovery_branch_policy": "DEFER",
+        "recovery_guidance_budget_policy": "STOP",
+        "recovery_motion_estimates": true
+      },
+      "catalog_status": "ACTIVE"
+    },
+    {
+      "name": "guided_deferred_two_robot_yield",
+      "description": "두 대 양보 · KEV 후 코드 보완",
+      "test_group": "여러 대 양보 비교",
+      "test_goal": "R1은 N3→N0로 가야 하고 R2=N11, R3=N10이 막고 있어요. KEV가 검사 순서를 추천하고 미룬 순서는 보관해요. 제안 8회 뒤에는 코드가 남은 순서를 검토해요. KEV 단독 성과와 구분해요. 지도에서 계산한 거리·이동 예상 시간을 같은 기준으로 제공해요. 처음 찾은 완성 계획이며 전체 최단 시간 보장은 아니에요.",
+      "robots": [
+        {
+          "id": "robot1",
+          "start": "3",
+          "goal": "0"
+        },
+        {
+          "id": "robot2",
+          "start": "11",
+          "goal": null
+        },
+        {
+          "id": "robot3",
+          "start": "10",
+          "goal": null
+        }
+      ],
+      "traffic_joint_action": {
+        "traffic_selector": "guided",
+        "timeout_seconds": 90,
+        "wait_allowed_nodes": [
+          "3",
+          "11",
+          "10",
+          "6",
+          "8",
+          "0"
+        ],
+        "paths": {
+          "robot1": [
+            "3",
+            "11",
+            "7",
+            "9",
+            "10",
+            "0"
+          ]
+        },
+        "yield_paths": {
+          "robot2": {
+            "out": [
+              "11",
+              "6"
+            ],
+            "resume": [
+              "6",
+              "11"
+            ]
+          },
+          "robot3": {
+            "out": [
+              "10",
+              "8"
+            ],
+            "resume": [
+              "8",
+              "10"
+            ]
+          }
+        },
+        "recovery_search": {
+          "max_checks": 128,
+          "max_steps": 8,
+          "max_seconds": 10.0
+        },
+        "candidate_labels": {
+          "RECOVERY_KEV_DEPENDENCY": "KEV 추천과 코드 보완으로 찾은 순서"
+        },
+        "recovery_strategy": "KEV_DEPENDENCY",
+        "model": "kev-08b",
+        "recovery_guidance": {
+          "max_calls": 8,
+          "request_seconds": 2.0
+        },
+        "recovery_branch_policy": "DEFER",
+        "recovery_guidance_budget_policy": "CODE_CONTINUE",
+        "recovery_motion_estimates": true
+      },
+      "catalog_status": "ACTIVE"
+    },
+    {
+      "name": "guided_two_robot_yield",
+      "description": "KEV 제안 · 두 대가 비켜주고 R1 통과",
+      "test_group": "개발용 보관",
+      "test_goal": "R1이 작업대 N3에서 자기 대기 위치 N0로 복귀해요. R2는 출구 N11, R3는 입구 N10을 막고 있어요. KEV가 다음에 검사할 동작을 제안하고, 코드가 실패 이유를 돌려줘요.",
+      "robots": [
+        {
+          "id": "robot1",
+          "start": "3",
+          "goal": "0"
+        },
+        {
+          "id": "robot2",
+          "start": "11",
+          "goal": null
+        },
+        {
+          "id": "robot3",
+          "start": "10",
+          "goal": null
+        }
+      ],
+      "traffic_joint_action": {
+        "traffic_selector": "guided",
+        "timeout_seconds": 90,
+        "wait_allowed_nodes": [
+          "3",
+          "11",
+          "10",
+          "6",
+          "8",
+          "0"
+        ],
+        "paths": {
+          "robot1": [
+            "3",
+            "11",
+            "7",
+            "9",
+            "10",
+            "0"
+          ]
+        },
+        "yield_paths": {
+          "robot2": {
+            "out": [
+              "11",
+              "6"
+            ],
+            "resume": [
+              "6",
+              "11"
+            ]
+          },
+          "robot3": {
+            "out": [
+              "10",
+              "8"
+            ],
+            "resume": [
+              "8",
+              "10"
+            ]
+          }
+        },
+        "recovery_search": {
+          "max_checks": 128,
+          "max_steps": 8,
+          "max_seconds": 10.0
+        },
+        "candidate_labels": {
+          "RECOVERY_KEV": "KEV 제안으로 찾은 순서"
+        },
+        "recovery_strategy": "KEV_GUIDED",
+        "model": "kev-08b",
+        "recovery_guidance": {
+          "max_calls": 8,
+          "request_seconds": 2.0
+        }
+      },
+      "catalog_status": "ARCHIVED",
+      "archive_reason": "이전 KEV_GUIDED 방식. 현재 관계 정보·분기 보관을 쓰는 KEV 비교와 조건이 달라 화면 비교에서 제외한다."
+    },
+    {
+      "name": "dfs_two_robot_yield",
+      "description": "코드 순서 · 두 대가 비켜주고 R1 통과",
+      "test_group": "개발용 보관",
+      "test_goal": "R1이 작업대 N3에서 자기 대기 위치 N0로 복귀해요. R2는 출구 N11, R3는 입구 N10을 막고 있어요. 코드가 순서대로 동작을 검토해요. KEV 제안 방식과 같은 검사·한도를 써요.",
+      "robots": [
+        {
+          "id": "robot1",
+          "start": "3",
+          "goal": "0"
+        },
+        {
+          "id": "robot2",
+          "start": "11",
+          "goal": null
+        },
+        {
+          "id": "robot3",
+          "start": "10",
+          "goal": null
+        }
+      ],
+      "traffic_joint_action": {
+        "traffic_selector": "search",
+        "timeout_seconds": 90,
+        "wait_allowed_nodes": [
+          "3",
+          "11",
+          "10",
+          "6",
+          "8",
+          "0"
+        ],
+        "paths": {
+          "robot1": [
+            "3",
+            "11",
+            "7",
+            "9",
+            "10",
+            "0"
+          ]
+        },
+        "yield_paths": {
+          "robot2": {
+            "out": [
+              "11",
+              "6"
+            ],
+            "resume": [
+              "6",
+              "11"
+            ]
+          },
+          "robot3": {
+            "out": [
+              "10",
+              "8"
+            ],
+            "resume": [
+              "8",
+              "10"
+            ]
+          }
+        },
+        "recovery_search": {
+          "max_checks": 128,
+          "max_steps": 8,
+          "max_seconds": 10.0
+        },
+        "candidate_labels": {
+          "RECOVERY_DFS": "코드 순서로 찾은 계획"
+        },
+        "recovery_strategy": "DEPTH_FIRST"
+      },
+      "catalog_status": "ARCHIVED",
+      "archive_reason": "이전 DEPTH_FIRST 방식. 현재 관계 정보를 사용하는 코드 비교로 대체한다."
+    },
+    {
+      "name": "search_two_robot_yield",
+      "description": "자동 찾기 · 두 대가 비켜주고 R1 통과",
+      "test_group": "개발용 보관",
+      "test_goal": "R1이 작업대 N3에서 자기 대기 위치 N0로 복귀해요. R2는 출구 N11, R3는 입구 N10을 막고 있어요. 양보·복귀 경로만 주고 코드가 실행 순서를 찾아요. KEV는 호출하지 않아요.",
+      "robots": [
+        {
+          "id": "robot1",
+          "start": "3",
+          "goal": "0"
+        },
+        {
+          "id": "robot2",
+          "start": "11",
+          "goal": null
+        },
+        {
+          "id": "robot3",
+          "start": "10",
+          "goal": null
+        }
+      ],
+      "traffic_joint_action": {
+        "traffic_selector": "search",
+        "timeout_seconds": 90,
+        "wait_allowed_nodes": [
+          "3",
+          "11",
+          "10",
+          "6",
+          "8",
+          "0"
+        ],
+        "paths": {
+          "robot1": [
+            "3",
+            "11",
+            "7",
+            "9",
+            "10",
+            "0"
+          ]
+        },
+        "yield_paths": {
+          "robot2": {
+            "out": [
+              "11",
+              "6"
+            ],
+            "resume": [
+              "6",
+              "11"
+            ]
+          },
+          "robot3": {
+            "out": [
+              "10",
+              "8"
+            ],
+            "resume": [
+              "8",
+              "10"
+            ]
+          }
+        },
+        "recovery_search": {
+          "max_checks": 128,
+          "max_steps": 8,
+          "max_seconds": 1.0
+        },
+        "candidate_labels": {
+          "RECOVERY_BFS": "코드가 찾은 양보·통과·복귀 순서"
+        }
+      },
+      "catalog_status": "ARCHIVED",
+      "archive_reason": "BFS 동작 확인은 검사용으로 유지한다. 화면의 여러 대 양보 비교 세 항목과 구분한다."
+    },
+    {
+      "name": "fixed_two_robot_yield",
+      "description": "두 대가 비켜주고 R1 통과",
+      "test_group": "개발용 보관",
+      "test_goal": "R1이 작업대 N3에서 자기 대기 위치 N0로 복귀해요. R2는 출구 N11, R3는 입구 N10을 막고 있어요. R2가 N6, R3가 N8로 비켜주고 R1 통과 후 복귀하는 고정 5단계예요. KEV는 호출하지 않아요.",
+      "robots": [
+        {
+          "id": "robot1",
+          "start": "3",
+          "goal": "0"
+        },
+        {
+          "id": "robot2",
+          "start": "11",
+          "goal": null
+        },
+        {
+          "id": "robot3",
+          "start": "10",
+          "goal": null
+        }
+      ],
+      "traffic_joint_action": {
+        "traffic_selector": "fixed",
+        "timeout_seconds": 90,
+        "wait_allowed_nodes": [
+          "3",
+          "11",
+          "10",
+          "6",
+          "8",
+          "0"
+        ],
+        "paths": {
+          "robot1": [
+            "3",
+            "11",
+            "7",
+            "9",
+            "10",
+            "0"
+          ]
+        },
+        "fixed_plan": {
+          "id": "TWO_YIELDS",
+          "steps": [
+            {
+              "robot_id": "robot2",
+              "action": "YIELD",
+              "path": [
+                "11",
+                "6"
+              ]
+            },
+            {
+              "robot_id": "robot3",
+              "action": "YIELD",
+              "path": [
+                "10",
+                "8"
+              ]
+            },
+            {
+              "robot_id": "robot1",
+              "action": "PROCEED",
+              "path": [
+                "3",
+                "11",
+                "7",
+                "9",
+                "10",
+                "0"
+              ]
+            },
+            {
+              "robot_id": "robot2",
+              "action": "PROCEED",
+              "path": [
+                "6",
+                "11"
+              ]
+            },
+            {
+              "robot_id": "robot3",
+              "action": "PROCEED",
+              "path": [
+                "8",
+                "10"
+              ]
+            }
+          ]
+        },
+        "candidate_labels": {
+          "TWO_YIELDS": "R2 양보 → R3 양보 → R1 통과 → R2 복귀 → R3 복귀"
+        }
+      },
+      "catalog_status": "ARCHIVED",
+      "archive_reason": "정해 둔 5단계를 재생하는 하위 동작 시험. 자동 탐색 비교와 혼동하지 않도록 보관한다."
+    },
+    {
       "name": "bottleneck",
       "description": "9→7 합류 구간의 예약 대기",
       "robots": [
@@ -24,7 +882,10 @@
           "start": "2",
           "goal": "6"
         }
-      ]
+      ],
+      "catalog_status": "ARCHIVED",
+      "test_group": "개발용 보관",
+      "archive_reason": "기존 관제 교통제어 회귀 시험. 새 KEV-MAPF와 일반 주문 시험의 결과로 혼동하지 않도록 화면에서 제외하고 기존 API·CLI·자동 검사 용도로 보관한다."
     },
     {
       "name": "head_on",
@@ -45,7 +906,10 @@
           "start": "2",
           "goal": "1"
         }
-      ]
+      ],
+      "catalog_status": "ARCHIVED",
+      "test_group": "개발용 보관",
+      "archive_reason": "기존 관제 교통제어 회귀 시험. 새 KEV-MAPF와 일반 주문 시험의 결과로 혼동하지 않도록 화면에서 제외하고 기존 API·CLI·자동 검사 용도로 보관한다."
     },
     {
       "name": "cycle",
@@ -66,7 +930,10 @@
           "start": "2",
           "goal": "0"
         }
-      ]
+      ],
+      "catalog_status": "ARCHIVED",
+      "test_group": "개발용 보관",
+      "archive_reason": "기존 관제 교통제어 회귀 시험. 새 KEV-MAPF와 일반 주문 시험의 결과로 혼동하지 않도록 화면에서 제외하고 기존 API·CLI·자동 검사 용도로 보관한다."
     },
     {
       "name": "cycle_reverse_order",
@@ -87,7 +954,10 @@
           "start": "0",
           "goal": "1"
         }
-      ]
+      ],
+      "catalog_status": "ARCHIVED",
+      "test_group": "개발용 보관",
+      "archive_reason": "기존 관제 교통제어 회귀 시험. 새 KEV-MAPF와 일반 주문 시험의 결과로 혼동하지 않도록 화면에서 제외하고 기존 API·CLI·자동 검사 용도로 보관한다."
     },
     {
       "name": "central_head_on",
@@ -108,7 +978,10 @@
           "start": "0",
           "goal": null
         }
-      ]
+      ],
+      "catalog_status": "ARCHIVED",
+      "test_group": "개발용 보관",
+      "archive_reason": "기존 관제 교통제어 회귀 시험. 새 KEV-MAPF와 일반 주문 시험의 결과로 혼동하지 않도록 화면에서 제외하고 기존 API·CLI·자동 검사 용도로 보관한다."
     },
     {
       "name": "junction_contention",
@@ -129,7 +1002,10 @@
           "start": "5",
           "goal": "9"
         }
-      ]
+      ],
+      "catalog_status": "ARCHIVED",
+      "test_group": "개발용 보관",
+      "archive_reason": "기존 관제 교통제어 회귀 시험. 새 KEV-MAPF와 일반 주문 시험의 결과로 혼동하지 않도록 화면에서 제외하고 기존 API·CLI·자동 검사 용도로 보관한다."
     },
     {
       "name": "swap_with_crossing",
@@ -150,7 +1026,10 @@
           "start": "10",
           "goal": "6"
         }
-      ]
+      ],
+      "catalog_status": "ARCHIVED",
+      "test_group": "개발용 보관",
+      "archive_reason": "기존 관제 교통제어 회귀 시험. 새 KEV-MAPF와 일반 주문 시험의 결과로 혼동하지 않도록 화면에서 제외하고 기존 API·CLI·자동 검사 용도로 보관한다."
     },
     {
       "name": "central_cycle",
@@ -171,7 +1050,122 @@
           "start": "8",
           "goal": "9"
         }
-      ]
+      ],
+      "catalog_status": "ARCHIVED",
+      "test_group": "개발용 보관",
+      "archive_reason": "기존 관제 교통제어 회귀 시험. 새 KEV-MAPF와 일반 주문 시험의 결과로 혼동하지 않도록 화면에서 제외하고 기존 API·CLI·자동 검사 용도로 보관한다."
+    },
+    {
+      "name": "kev_joint_reroute",
+      "description": "기본 확인 · 막힌 노드 우회",
+      "test_goal": "R2가 7번 노드에 정차해 있어요. 실행 가능한 우회안 하나를 적용하는 기본 시험으로, KEV 선택 요청은 생략해요.",
+      "robots": [
+        {
+          "id": "robot1",
+          "start": "9",
+          "goal": "11"
+        },
+        {
+          "id": "robot2",
+          "start": "7",
+          "goal": null
+        },
+        {
+          "id": "robot3",
+          "start": "0",
+          "goal": null
+        }
+      ],
+      "traffic_joint_action": {
+        "model": "kev-08b",
+        "timeout_seconds": 90,
+        "wait_allowed_nodes": [
+          "9",
+          "7",
+          "0"
+        ],
+        "paths": {
+          "robot1": [
+            "9",
+            "7",
+            "11"
+          ]
+        },
+        "reroute_paths": {
+          "robot1": [
+            "9",
+            "10",
+            "8",
+            "12",
+            "11"
+          ]
+        }
+      },
+      "catalog_status": "ARCHIVED",
+      "test_group": "개발용 보관",
+      "archive_reason": "우회만 가능한 기본 시험. 화면에서는 정차 로봇 양보 또는 우회 선택 시험으로 함께 확인한다."
+    },
+    {
+      "name": "kev_joint_yield",
+      "description": "기본 확인 · 비켜준 뒤 복귀",
+      "test_goal": "R2가 5번으로 비켜주고 R1이 통과하면 7번으로 돌아와요. 실행 가능한 양보안 하나를 적용하므로 KEV 선택 요청은 생략해요.",
+      "robots": [
+        {
+          "id": "robot1",
+          "start": "9",
+          "goal": "11"
+        },
+        {
+          "id": "robot2",
+          "start": "7",
+          "goal": null
+        },
+        {
+          "id": "robot3",
+          "start": "0",
+          "goal": null
+        }
+      ],
+      "traffic_joint_action": {
+        "model": "kev-08b",
+        "timeout_seconds": 90,
+        "wait_allowed_nodes": [
+          "9",
+          "7",
+          "0",
+          "5"
+        ],
+        "paths": {
+          "robot1": [
+            "9",
+            "7",
+            "11"
+          ]
+        },
+        "yield_paths": {
+          "robot2": {
+            "out": [
+              "7",
+              "5"
+            ],
+            "resume": [
+              "5",
+              "7"
+            ]
+          }
+        }
+      },
+      "catalog_status": "ARCHIVED",
+      "test_group": "개발용 보관",
+      "archive_reason": "양보만 가능한 기본 시험. 화면에서는 정차 로봇 양보 또는 우회 선택 시험으로 함께 확인한다."
     }
-  ]
+  ],
+  "catalog_review": {
+    "date": "2026-10-21",
+    "active_count": 9,
+    "archived_count": 14,
+    "archive_group": "개발용 보관",
+    "display_policy": "관제 화면은 개발용 보관 그룹을 제외한다. API·CLI 식별자와 원본 시험 정의는 보존한다.",
+    "scope_note": "일반 주문은 새 이동 요청 경로 조정만 연결돼 있다. 여러 대 양보·통과·복귀는 별도 배치 시험이다."
+  }
 }

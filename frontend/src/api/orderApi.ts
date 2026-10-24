@@ -41,6 +41,16 @@ export type OrderDto = CreateOrderResponse & {
   recovery_status?: string
   recovery_error?: string
   retry_count?: number
+  traffic_coordination?: {
+    state: 'WAITING_FOR_SAFE_ROUTE' | 'SELECTING' | 'APPLIED' | 'FAILED' | 'CANCELLED'
+    choice?: string
+    selected_by?: string
+    selection_policy?: string
+    path?: string[]
+    route_source?: string
+    kev_calls?: number
+    error?: string
+  }
 }
 
 export type PickupDto = {

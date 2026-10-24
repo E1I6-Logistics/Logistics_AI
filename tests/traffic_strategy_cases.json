@@ -1,0 +1,44 @@
+{
+  "schema_version": "traffic-strategy-comparison/0.1",
+  "map": "routes/test.geojson",
+  "limits": {
+    "max_checks": 128,
+    "max_steps": 8,
+    "max_seconds": 10.0,
+    "max_route_calls": 16,
+    "max_model_calls": 8,
+    "request_seconds": 2.0
+  },
+  "cases": [
+    {
+      "id": "clear_pickup",
+      "title": "길이 비어 있는 픽업 이동",
+      "expected": "SOLVABLE",
+      "robots": {"robot1": ["3", "5"], "robot2": ["1", "1"], "robot3": ["2", "2"]}
+    },
+    {
+      "id": "leader_leaves",
+      "title": "길목의 로봇이 먼저 떠나면 통과",
+      "expected": "SOLVABLE",
+      "robots": {"robot1": ["3", "0"], "robot2": ["11", "6"], "robot3": ["2", "2"]}
+    },
+    {
+      "id": "three_departures",
+      "title": "세 로봇이 서로 다른 작업 장소로 출발",
+      "expected": "SOLVABLE",
+      "robots": {"robot1": ["0", "5"], "robot2": ["1", "6"], "robot3": ["2", "4"]}
+    },
+    {
+      "id": "parked_blocker_detour",
+      "title": "계속 정차한 로봇을 피해 다른 길로 복귀",
+      "expected": "SOLVABLE",
+      "robots": {"robot1": ["3", "0"], "robot2": ["7", "7"], "robot3": ["2", "2"]}
+    },
+    {
+      "id": "blocked_only_exit",
+      "title": "유일한 출구가 막혀 출발 불가",
+      "expected": "UNRESOLVED_WITH_COMMON_ACTIONS",
+      "robots": {"robot1": ["0", "3"], "robot2": ["10", "10"], "robot3": ["2", "2"]}
+    }
+  ]
+}

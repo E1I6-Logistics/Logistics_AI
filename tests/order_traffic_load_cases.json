@@ -1,0 +1,10 @@
+{
+  "orders_per_case": 12,
+  "seeds": [42, 137],
+  "trial_timeout_seconds": 300,
+  "cases": [
+    {"id": "pickup_ab", "description": "A·B 주문 집중: 같은 픽업대의 대기와 후속 출발", "items": "AB", "initial_orders": 3, "interval_seconds": 5},
+    {"id": "mixed_pickups", "description": "두 픽업대를 모두 방문하는 혼합 주문: 이동·작업·복귀 겹침", "items": "ABCD", "initial_orders": 3, "interval_seconds": 5},
+    {"id": "fast_queue", "description": "혼합 주문 빠른 공급: 대기열이 쌓인 뒤 모두 처리되는지", "items": "ABCD", "initial_orders": 3, "interval_seconds": 0.5}
+  ]
+}

@@ -13,6 +13,7 @@ from .mode_service import mode_manager, feature_engine
 from .mqtt_manager import mqtt_manager
 from .order_dispatcher import available_robots
 from .order_route_dispatcher import dispatch_order_route
+from .pickup_queue import earlier_pickup_request
 from .scenario_service import scenario_manager
 from .workstation_manager import workstation_manager
 
@@ -39,7 +40,7 @@ class OrderManager:
 
     # 주문 내용을 검증하고 대기열에 등록한다.
     def create_order(self, items, total_quantity, order_name=None, driving_mode=None, selector=None, model=None):
-        scenario_manager.ensure_available()
+        scenario_manager.ensure_available(allow_order_stream=True)
         operation_mode = mode_manager.operation_mode
         if driving_mode is None:
             driving_mode = "llm" if feature_engine("route", operation_mode) == "ai" else "standard"
@@ -61,7 +62,7 @@ class OrderManager:
                 raise ValueError("AI 경로 모델을 선택하세요.")
             require_enabled_model(selector, model)
         with scenario_manager.lock, self.lock:
-            scenario_manager.ensure_available()
+            scenario_manager.ensure_available(allow_order_stream=True)
             order_id = str(uuid4())
             row = {
                 "order_id": order_id,
@@ -247,7 +248,7 @@ class OrderManager:
 
     # 대기 중인 작업을 한 주기 진행한다.
     async def tick(self):
-        if scenario_manager.active:
+        if scenario_manager.blocks_order_processing:
             return
         mode = mode_manager.mode
         preemptions = []
@@ -285,16 +286,9 @@ class OrderManager:
                     continue
                 blocked_by_earlier_pickup = False
                 if mode == "simulation":
-                    for previous in self.orders.values():
-                        if previous is row:
-                            break
-                        if (
-                            previous["mode"] == mode
-                            and previous["status"] == "IN_PROGRESS"
-                            and set(previous["pickup_nodes"]).intersection(row["pickup_nodes"])
-                        ):
-                            blocked_by_earlier_pickup = True
-                            break
+                    blocked_by_earlier_pickup = earlier_pickup_request(
+                        self.orders.values(), row, row["pickup_nodes"][0]
+                    )
                 candidate_index = None
                 def preference(item):
                     robot_id = item[1]

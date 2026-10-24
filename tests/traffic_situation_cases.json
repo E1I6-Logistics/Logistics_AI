@@ -1,0 +1,870 @@
+{
+  "notice": "테스트 전용 가상 지도·경로. 실제 routes/test.geojson의 노드/물리 대기 공간을 뜻하지 않음.",
+  "graph": {
+    "type": "FeatureCollection",
+    "features": [
+      {
+        "type": "Feature",
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            0,
+            1
+          ]
+        },
+        "properties": {
+          "id": "0"
+        }
+      },
+      {
+        "type": "Feature",
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            0,
+            0
+          ]
+        },
+        "properties": {
+          "id": "1"
+        }
+      },
+      {
+        "type": "Feature",
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            0,
+            -1
+          ]
+        },
+        "properties": {
+          "id": "2"
+        }
+      },
+      {
+        "type": "Feature",
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            1,
+            0
+          ]
+        },
+        "properties": {
+          "id": "13"
+        }
+      },
+      {
+        "type": "Feature",
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            2,
+            1
+          ]
+        },
+        "properties": {
+          "id": "3"
+        }
+      },
+      {
+        "type": "Feature",
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            2,
+            0
+          ]
+        },
+        "properties": {
+          "id": "4"
+        }
+      },
+      {
+        "type": "Feature",
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            2,
+            -1
+          ]
+        },
+        "properties": {
+          "id": "5"
+        }
+      },
+      {
+        "type": "Feature",
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            1,
+            2
+          ]
+        },
+        "properties": {
+          "id": "6"
+        }
+      },
+      {
+        "type": "Feature",
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            1,
+            -2
+          ]
+        },
+        "properties": {
+          "id": "7"
+        }
+      },
+      {
+        "type": "Feature",
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            1,
+            1.5
+          ]
+        },
+        "properties": {
+          "id": "8"
+        }
+      },
+      {
+        "type": "Feature",
+        "geometry": {
+          "type": "MultiLineString",
+          "coordinates": [
+            [
+              [
+                0,
+                1
+              ],
+              [
+                1,
+                0
+              ]
+            ]
+          ]
+        },
+        "properties": {
+          "id": "e0",
+          "startid": "0",
+          "endid": "13",
+          "weight": 1
+        }
+      },
+      {
+        "type": "Feature",
+        "geometry": {
+          "type": "MultiLineString",
+          "coordinates": [
+            [
+              [
+                0,
+                0
+              ],
+              [
+                1,
+                0
+              ]
+            ]
+          ]
+        },
+        "properties": {
+          "id": "e1",
+          "startid": "1",
+          "endid": "13",
+          "weight": 1
+        }
+      },
+      {
+        "type": "Feature",
+        "geometry": {
+          "type": "MultiLineString",
+          "coordinates": [
+            [
+              [
+                0,
+                -1
+              ],
+              [
+                1,
+                0
+              ]
+            ]
+          ]
+        },
+        "properties": {
+          "id": "e2",
+          "startid": "2",
+          "endid": "13",
+          "weight": 1
+        }
+      },
+      {
+        "type": "Feature",
+        "geometry": {
+          "type": "MultiLineString",
+          "coordinates": [
+            [
+              [
+                1,
+                0
+              ],
+              [
+                2,
+                1
+              ]
+            ]
+          ]
+        },
+        "properties": {
+          "id": "e3",
+          "startid": "13",
+          "endid": "3",
+          "weight": 1
+        }
+      },
+      {
+        "type": "Feature",
+        "geometry": {
+          "type": "MultiLineString",
+          "coordinates": [
+            [
+              [
+                1,
+                0
+              ],
+              [
+                2,
+                0
+              ]
+            ]
+          ]
+        },
+        "properties": {
+          "id": "e4",
+          "startid": "13",
+          "endid": "4",
+          "weight": 1
+        }
+      },
+      {
+        "type": "Feature",
+        "geometry": {
+          "type": "MultiLineString",
+          "coordinates": [
+            [
+              [
+                1,
+                0
+              ],
+              [
+                2,
+                -1
+              ]
+            ]
+          ]
+        },
+        "properties": {
+          "id": "e5",
+          "startid": "13",
+          "endid": "5",
+          "weight": 1
+        }
+      },
+      {
+        "type": "Feature",
+        "geometry": {
+          "type": "MultiLineString",
+          "coordinates": [
+            [
+              [
+                0,
+                1
+              ],
+              [
+                1,
+                2
+              ]
+            ]
+          ]
+        },
+        "properties": {
+          "id": "e6",
+          "startid": "0",
+          "endid": "6",
+          "weight": 1
+        }
+      },
+      {
+        "type": "Feature",
+        "geometry": {
+          "type": "MultiLineString",
+          "coordinates": [
+            [
+              [
+                1,
+                2
+              ],
+              [
+                2,
+                1
+              ]
+            ]
+          ]
+        },
+        "properties": {
+          "id": "e7",
+          "startid": "6",
+          "endid": "3",
+          "weight": 1
+        }
+      },
+      {
+        "type": "Feature",
+        "geometry": {
+          "type": "MultiLineString",
+          "coordinates": [
+            [
+              [
+                0,
+                0
+              ],
+              [
+                1,
+                -2
+              ]
+            ]
+          ]
+        },
+        "properties": {
+          "id": "e8",
+          "startid": "1",
+          "endid": "7",
+          "weight": 1
+        }
+      },
+      {
+        "type": "Feature",
+        "geometry": {
+          "type": "MultiLineString",
+          "coordinates": [
+            [
+              [
+                1,
+                -2
+              ],
+              [
+                2,
+                0
+              ]
+            ]
+          ]
+        },
+        "properties": {
+          "id": "e9",
+          "startid": "7",
+          "endid": "4",
+          "weight": 1
+        }
+      },
+      {
+        "type": "Feature",
+        "geometry": {
+          "type": "MultiLineString",
+          "coordinates": [
+            [
+              [
+                1,
+                0
+              ],
+              [
+                1,
+                1.5
+              ]
+            ]
+          ]
+        },
+        "properties": {
+          "id": "e10",
+          "startid": "13",
+          "endid": "8",
+          "weight": 1
+        }
+      },
+      {
+        "type": "Feature",
+        "geometry": {
+          "type": "MultiLineString",
+          "coordinates": [
+            [
+              [
+                1,
+                1.5
+              ],
+              [
+                1,
+                0
+              ]
+            ]
+          ]
+        },
+        "properties": {
+          "id": "e11",
+          "startid": "8",
+          "endid": "13",
+          "weight": 1
+        }
+      }
+    ]
+  },
+  "cases": {
+    "three_robot_node": {
+      "schema_version": "traffic-situation/0.1",
+      "snapshot_id": "three_robot_node",
+      "mode": "simulation",
+      "route_requests": [
+        {
+          "order": {
+            "robot_id": "robot1",
+            "selector": "kev",
+            "model": "kev-08b"
+          },
+          "current_node": "0",
+          "node": "3",
+          "result": {
+            "path": [
+              "0",
+              "13",
+              "3"
+            ]
+          },
+          "status": "IDLE",
+          "occupied_edge": null,
+          "request_order": 1,
+          "waiting_seconds": 30
+        },
+        {
+          "order": {
+            "robot_id": "robot2",
+            "selector": "kev",
+            "model": "kev-08b"
+          },
+          "current_node": "1",
+          "node": "4",
+          "result": {
+            "path": [
+              "1",
+              "13",
+              "4"
+            ]
+          },
+          "status": "IDLE",
+          "occupied_edge": null,
+          "request_order": 2,
+          "waiting_seconds": 20
+        },
+        {
+          "order": {
+            "robot_id": "robot3",
+            "selector": "kev",
+            "model": "kev-08b"
+          },
+          "current_node": "2",
+          "node": "5",
+          "result": {
+            "path": [
+              "2",
+              "13",
+              "5"
+            ]
+          },
+          "status": "IDLE",
+          "occupied_edge": null,
+          "request_order": 3,
+          "waiting_seconds": 10
+        }
+      ],
+      "config": {
+        "wait_allowed_nodes": [
+          "0",
+          "1",
+          "2",
+          "13",
+          "8"
+        ],
+        "zone_occupancy": {
+          "node:0": "robot1",
+          "node:1": "robot2",
+          "node:2": "robot3"
+        },
+        "reservations": [],
+        "blocked_nodes": [],
+        "blocked_edges": [],
+        "reroute_paths": {},
+        "yield_paths": {}
+      }
+    },
+    "reroute_occupied_node": {
+      "schema_version": "traffic-situation/0.1",
+      "snapshot_id": "reroute_occupied_node",
+      "mode": "simulation",
+      "route_requests": [
+        {
+          "order": {
+            "robot_id": "robot1",
+            "selector": "kev",
+            "model": "kev-08b"
+          },
+          "current_node": "0",
+          "node": "3",
+          "result": {
+            "path": [
+              "0",
+              "13",
+              "3"
+            ]
+          },
+          "status": "IDLE",
+          "occupied_edge": null,
+          "request_order": 1,
+          "waiting_seconds": 30
+        },
+        {
+          "order": {
+            "robot_id": "robot2",
+            "selector": "kev",
+            "model": "kev-08b"
+          },
+          "current_node": "13",
+          "node": "13",
+          "result": {
+            "path": [
+              "13"
+            ]
+          },
+          "status": "IDLE",
+          "occupied_edge": null,
+          "request_order": 2,
+          "waiting_seconds": 20
+        },
+        {
+          "order": {
+            "robot_id": "robot3",
+            "selector": "kev",
+            "model": "kev-08b"
+          },
+          "current_node": "2",
+          "node": "2",
+          "result": {
+            "path": [
+              "2"
+            ]
+          },
+          "status": "IDLE",
+          "occupied_edge": null,
+          "request_order": 3,
+          "waiting_seconds": 10
+        }
+      ],
+      "config": {
+        "wait_allowed_nodes": [
+          "0",
+          "1",
+          "2",
+          "13",
+          "8"
+        ],
+        "zone_occupancy": {
+          "node:0": "robot1",
+          "node:13": "robot2",
+          "node:2": "robot3"
+        },
+        "reservations": [],
+        "blocked_nodes": [],
+        "blocked_edges": [],
+        "reroute_paths": {
+          "robot1": [
+            "0",
+            "6",
+            "3"
+          ]
+        },
+        "yield_paths": {}
+      }
+    },
+    "yield_occupied_node": {
+      "schema_version": "traffic-situation/0.1",
+      "snapshot_id": "yield_occupied_node",
+      "mode": "simulation",
+      "route_requests": [
+        {
+          "order": {
+            "robot_id": "robot1",
+            "selector": "kev",
+            "model": "kev-08b"
+          },
+          "current_node": "0",
+          "node": "3",
+          "result": {
+            "path": [
+              "0",
+              "13",
+              "3"
+            ]
+          },
+          "status": "IDLE",
+          "occupied_edge": null,
+          "request_order": 1,
+          "waiting_seconds": 30
+        },
+        {
+          "order": {
+            "robot_id": "robot2",
+            "selector": "kev",
+            "model": "kev-08b"
+          },
+          "current_node": "13",
+          "node": "13",
+          "result": {
+            "path": [
+              "13"
+            ]
+          },
+          "status": "IDLE",
+          "occupied_edge": null,
+          "request_order": 2,
+          "waiting_seconds": 20
+        },
+        {
+          "order": {
+            "robot_id": "robot3",
+            "selector": "kev",
+            "model": "kev-08b"
+          },
+          "current_node": "2",
+          "node": "2",
+          "result": {
+            "path": [
+              "2"
+            ]
+          },
+          "status": "IDLE",
+          "occupied_edge": null,
+          "request_order": 3,
+          "waiting_seconds": 10
+        }
+      ],
+      "config": {
+        "wait_allowed_nodes": [
+          "0",
+          "1",
+          "2",
+          "13",
+          "8"
+        ],
+        "zone_occupancy": {
+          "node:0": "robot1",
+          "node:13": "robot2",
+          "node:2": "robot3"
+        },
+        "reservations": [],
+        "blocked_nodes": [],
+        "blocked_edges": [],
+        "reroute_paths": {},
+        "yield_paths": {
+          "robot2": {
+            "out": [
+              "13",
+              "8"
+            ],
+            "resume": [
+              "8",
+              "13"
+            ]
+          }
+        }
+      }
+    },
+    "all_wait": {
+      "schema_version": "traffic-situation/0.1",
+      "snapshot_id": "all_wait",
+      "mode": "simulation",
+      "route_requests": [
+        {
+          "order": {
+            "robot_id": "robot1",
+            "selector": "kev",
+            "model": "kev-08b"
+          },
+          "current_node": "0",
+          "node": "3",
+          "result": {
+            "path": [
+              "0",
+              "13",
+              "3"
+            ]
+          },
+          "status": "IDLE",
+          "occupied_edge": null,
+          "request_order": 1,
+          "waiting_seconds": 30
+        },
+        {
+          "order": {
+            "robot_id": "robot2",
+            "selector": "kev",
+            "model": "kev-08b"
+          },
+          "current_node": "13",
+          "node": "13",
+          "result": {
+            "path": [
+              "13"
+            ]
+          },
+          "status": "IDLE",
+          "occupied_edge": null,
+          "request_order": 2,
+          "waiting_seconds": 20
+        },
+        {
+          "order": {
+            "robot_id": "robot3",
+            "selector": "kev",
+            "model": "kev-08b"
+          },
+          "current_node": "2",
+          "node": "2",
+          "result": {
+            "path": [
+              "2"
+            ]
+          },
+          "status": "IDLE",
+          "occupied_edge": null,
+          "request_order": 3,
+          "waiting_seconds": 10
+        }
+      ],
+      "config": {
+        "wait_allowed_nodes": [
+          "0",
+          "1",
+          "2",
+          "13",
+          "8"
+        ],
+        "zone_occupancy": {
+          "node:0": "robot1",
+          "node:13": "robot2",
+          "node:2": "robot3"
+        },
+        "reservations": [],
+        "blocked_nodes": [],
+        "blocked_edges": [],
+        "reroute_paths": {},
+        "yield_paths": {}
+      }
+    },
+    "reroute_blocked_edge": {
+      "schema_version": "traffic-situation/0.1",
+      "snapshot_id": "reroute_blocked_edge",
+      "mode": "simulation",
+      "route_requests": [
+        {
+          "order": {
+            "robot_id": "robot1",
+            "selector": "kev",
+            "model": "kev-08b"
+          },
+          "current_node": "0",
+          "node": "3",
+          "result": {
+            "path": [
+              "0",
+              "13",
+              "3"
+            ]
+          },
+          "status": "IDLE",
+          "occupied_edge": null,
+          "request_order": 1,
+          "waiting_seconds": 30
+        },
+        {
+          "order": {
+            "robot_id": "robot2",
+            "selector": "kev",
+            "model": "kev-08b"
+          },
+          "current_node": "1",
+          "node": "1",
+          "result": {
+            "path": [
+              "1"
+            ]
+          },
+          "status": "IDLE",
+          "occupied_edge": null,
+          "request_order": 2,
+          "waiting_seconds": 20
+        },
+        {
+          "order": {
+            "robot_id": "robot3",
+            "selector": "kev",
+            "model": "kev-08b"
+          },
+          "current_node": "2",
+          "node": "2",
+          "result": {
+            "path": [
+              "2"
+            ]
+          },
+          "status": "IDLE",
+          "occupied_edge": null,
+          "request_order": 3,
+          "waiting_seconds": 10
+        }
+      ],
+      "config": {
+        "wait_allowed_nodes": [
+          "0",
+          "1",
+          "2",
+          "13",
+          "8"
+        ],
+        "zone_occupancy": {
+          "node:0": "robot1",
+          "node:1": "robot2",
+          "node:2": "robot3"
+        },
+        "reservations": [],
+        "blocked_nodes": [],
+        "blocked_edges": [
+          [
+            "13",
+            "0"
+          ]
+        ],
+        "reroute_paths": {
+          "robot1": [
+            "0",
+            "6",
+            "3"
+          ]
+        },
+        "yield_paths": {}
+      }
+    }
+  }
+}
