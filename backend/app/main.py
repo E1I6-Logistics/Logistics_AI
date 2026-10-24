@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .config import CORS_ORIGINS, REAL_NAVIGATION_INTERVAL_S
+from .config import CORS_ORIGINS, REAL_NAVIGATION_INTERVAL_S, ZENOH_CONNECTION_SYNC_INTERVAL_S
 import logging
 
 from .routers.commands import router as commands_router
@@ -36,6 +36,7 @@ from time import monotonic, strftime
 
 from .services.websocket_manager import manager
 from .services.mqtt_manager import mqtt_manager
+from .services.connection_sync_service import connection_sync_service
 
 # Uvicorn 자체 로그에도 날짜와 시각을 표시한다.
 for logger_name in ("uvicorn.error", "uvicorn.access"):
@@ -83,6 +84,8 @@ async def lifespan(app: FastAPI):
 
     navigation_task = asyncio.create_task(run_real_navigation(), name="real-navigation")
 
+    connection_sync_task = asyncio.create_task(run_real_connection_sync(), name="real-connection-sync")
+
     try:
         yield
 
@@ -94,6 +97,9 @@ async def lifespan(app: FastAPI):
         navigation_task.cancel()
         with suppress(asyncio.CancelledError):
             await navigation_task
+        connection_sync_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await connection_sync_task
         simulation_task.cancel()
 
         try:
@@ -198,3 +204,20 @@ async def run_real_navigation() -> None:
                 f"주행 상태 확인 중 오류 error_type={type(exc).__name__} detail={exc!r}",
                 flush=True,
             )
+
+
+# 화면 요청과 무관하게 실제 로봇의 Zenoh 연결을 주기적으로 동기화한다.
+async def run_real_connection_sync() -> None:
+    while True:
+        if mode_manager.mode == "real":
+            try:
+                await connection_sync_service.refresh()
+            # 기존 코드. RuntimeError 외 예외가 나면 task가 끝나 연결 갱신이 멈추므로 모든 예외를 기록하고 계속한다.
+            # except RuntimeError as exc:
+            except Exception as exc:
+                print(
+                    f"[{strftime('%Y-%m-%d %H:%M:%S')}] [ERROR] [MAIN CONNECTION SYNC ERROR] "
+                    f"연결 상태 동기화 오류 error_type={type(exc).__name__} detail={exc!r}",
+                    flush=True,
+                )
+        await asyncio.sleep(ZENOH_CONNECTION_SYNC_INTERVAL_S)
