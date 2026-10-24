@@ -234,3 +234,24 @@ S3 실행을 위해 FMS를 재시작하면서 `logs/backend.log`가 덮어써졌
 S0~S4는 모두 통과했다. ETA 차이가 명확한 경우에는 KEV를 호출하지 않고 코드가 선택했고, ETA가 근소한 경우에는 코드가 만든 후보군 안에서만 KEV 또는 기준선 fallback이 선택했다. KEV 오류와 cooldown에서도 ETA 후보군 밖의 robot3는 선택되지 않았다.
 
 이 결과는 시뮬레이션 단일 회차다. 실제 로봇의 ETA 속도와 주행 중 배터리 소모를 반영한 운영값 검증은 별도로 수행해야 한다.
+
+## 11. D-7 재실행 (2026-10-24)
+
+`goal_node` 해제(`9389c26`), 전압 하한 필터, 백엔드 연결 주기 갱신, 배차 불가 안내(`f4568d8`)가 들어간 코드(`05fc34a`)로 S0~S4를 다시 실행했다. 조건은 3절과 같고, `.env`의 실제 로봇용 값 대신 `KEV_DISPATCH_ETA_SPEED_MPS=0.2`를 실행 시 지정했다. 배치·주문·대기는 API 스크립트로 자동 실행했다.
+
+| 시나리오 | 후보 | 제외 후보 | 기준선 | KEV choice | confidence | fallback/cooldown | 최종 배정 | 주문 완료 | 비고 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| S0 | robot1·2·3 | 없음 | 해당 없음 | 해당 없음 | 해당 없음 | 없음 | robot1 | COMPLETED | algorithm 모드 |
+| S1 | robot1 | robot2·3 | 해당 없음 | 호출 없음 | 해당 없음 | ETA winner | robot1 | COMPLETED | KEV `/v1/systemone` 요청 0건 |
+| S2 | robot1·2 | robot3 | robot2 | robot2 | 0.0695 | 없음 | robot2 | COMPLETED | P(robot1)=0.4653, P(robot2)=0.5347. D-6과 같음 |
+| S3 | robot1·2 | robot3 | robot2 | 오류 | 해당 없음 | fallback | robot2 | COMPLETED | 8011 연결 거부, cooldown=600초 |
+| S4 | robot1·2 | robot3 | robot2 | 호출 없음 | 해당 없음 | cooldown fallback | robot2 | COMPLETED | 오류 후 약 42초, 558.2초 남음 |
+
+S0~S4 모두 D-6과 같은 결과로 통과했다. 원본 로그는 `logs/testD7_S0_backend.log`, `logs/testD7_S0-S2_backend.log`, `logs/testD7_S0-S2_kev.log`, `logs/testD7_S3-S4_backend.log`에 보관했다(git 제외).
+
+### 시뮬레이션과 실제 로봇 ETA의 차이
+
+- ETA는 거리 ÷ 고정 속도이므로 후보 순위는 속도와 관계없이 거리 순서와 같다. 실제 로봇에서도 N1→N5(1.356 m, 21.1초)가 N2→N5(1.502 m, 25.9초)보다 빨라 순서가 맞았다. 거리 차이가 큰 S1 같은 경우는 실제에서도 같은 선택이 예상된다.
+- 2초 범위가 담는 거리는 시뮬레이션(0.2 m/s) 0.4 m, 실제 설정(0.06 m/s) 0.12 m다. S2 배치(N6까지 0.513 m와 0.822 m)는 시뮬레이션에서는 KEV 후보군이 되지만 실제 설정에서는 robot1이 ETA winner가 된다.
+- 시뮬레이션 이동(`mock_data.py`)은 구간을 일정 속도로 이동하고 회전은 yaw만 즉시 바꾼다. 실제 로봇은 회전에서 시간을 많이 쓴다(N7→N5 0.377 m, 약 105° 회전, 평균 10.7초). 거리는 비슷하고 회전 수가 다른 후보는 실제에서 순서가 뒤집힐 수 있으나, 실측은 같은 모양의 경로뿐이라 아직 확인하지 않았다.
+- 실제 로봇은 같은 경로에서도 회차마다 약 4초(robot2 18.7~22.6초) 흔들려, 거리 차이가 작은 동률 상황의 실제 도착 순서는 보장되지 않는다.
