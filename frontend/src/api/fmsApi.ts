@@ -241,6 +241,10 @@ export type RobotStateDto = {
   pixel_y?: number | null
   map_pose_received: boolean
   connection_state: string
+  // /api/robots 응답에만 있다. 웹소켓 telemetry에는 없다.
+  assigned_order_id?: string | null
+  dispatch_available?: boolean | null
+  dispatch_block_reason?: string | null
 }
 
 export type OmxDeviceDto = {

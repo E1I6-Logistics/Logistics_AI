@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import WarehouseMap from './WarehouseMap'
-import RobotOrderForm from './components/RobotOrderForm'
+import RobotOrderForm, { type DispatchUnavailable } from './components/RobotOrderForm'
 import { cancelOrder, getOrders, retryOrder, type OrderDto, type WorkstationDto, type PickupDto } from './api/orderApi'
 import ScenarioControls from './components/ScenarioControls'
 import {
@@ -230,6 +230,11 @@ export default function FmsControlApp() {
 
   const selectedLiveRobot = managedRobots.find(robot => robot.id === selectedRobot)
   const connectedRobotCount = managedRobots.filter(robot => robot.connected).length
+  // 배차 가능한 로봇이 한 대도 없으면 주문 폼에 알린다. 가능 여부를 모르는 로봇이 있으면 알리지 않는다.
+  const dispatchUnavailable = useMemo<DispatchUnavailable | null>(() => {
+    if (managedRobots.some(robot => robot.dispatchAvailable !== false)) return null
+    return { robots: managedRobots.map(robot => ({ id: robot.id, reason: robot.dispatchBlockReason })) }
+  }, [managedRobots])
   const connected = Boolean(selectedLiveRobot?.connected)
   const emergencyStopped = selectedLiveRobot?.status === 'EMERGENCY_STOP'
 
@@ -649,8 +654,12 @@ export default function FmsControlApp() {
           <section style={{ position: 'relative', display: 'flex', flex: 1, minWidth: 0, background: C.surface }} aria-label="FMS 실시간 지도">
             <ScenarioControls modeSwitching={modeSwitching} onActiveChange={setScenarioActive} />
             <div style={{ position: 'absolute', top: 14, right: 14, zIndex: 20, width: 300, maxWidth: 'calc(100% - 28px)' }}>
+              {/* 기존 코드. 배차 불가 안내를 넘기도록 바꾼다.
               <RobotOrderForm operationMode={operationMode} disabled={scenarioActive || modeSwitching}
-                routeModels={routeModels} routeModelError={routeModelError} llmOrderReady={LLM_ORDER_READY} />
+                routeModels={routeModels} routeModelError={routeModelError} llmOrderReady={LLM_ORDER_READY} /> */}
+              <RobotOrderForm operationMode={operationMode} disabled={scenarioActive || modeSwitching}
+                routeModels={routeModels} routeModelError={routeModelError} llmOrderReady={LLM_ORDER_READY}
+                dispatchUnavailable={dispatchUnavailable} />
             </div>
             <WarehouseMap
               nodes={nodes}

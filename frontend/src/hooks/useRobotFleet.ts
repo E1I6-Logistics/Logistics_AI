@@ -35,6 +35,9 @@ export type ManagedRobot = {
   updatedAt?: string | null
   mode: 'real' | 'simulation'
   route: RobotRoute | null
+  // null이면 배차 가능 여부를 아직 모른다(응답 전 또는 서버 status_busy).
+  dispatchAvailable: boolean | null
+  dispatchBlockReason: string | null
 }
 
 function backendToUiId(value: string): RobotId | null {
@@ -140,7 +143,17 @@ export function useRobotFleet() {
           setRobotStates(prev => {
             const current = prev[data.robot_id]
             if (current?.updated_at && data.updated_at && Date.parse(data.updated_at) < Date.parse(current.updated_at)) return prev
-            return { ...prev, [data.robot_id]: data }
+            // 기존 코드. telemetry에는 배차 필드가 없어 /api/robots에서 받은 값을 지웠다.
+            // return { ...prev, [data.robot_id]: data }
+            return {
+              ...prev,
+              [data.robot_id]: {
+                ...data,
+                assigned_order_id: data.assigned_order_id ?? current?.assigned_order_id,
+                dispatch_available: data.dispatch_available ?? current?.dispatch_available,
+                dispatch_block_reason: data.dispatch_block_reason ?? current?.dispatch_block_reason,
+              },
+            }
           })
         } catch (e) {
           console.warn('dashboard telemetry parse failed:', e)
@@ -230,6 +243,8 @@ export function useRobotFleet() {
         connectionState: mode === 'real'
           ? (connectionSnapshotAvailable ? (device?.state ?? 'OFFLINE') : 'UNKNOWN')
           : (state?.connection_state ?? 'OFFLINE'),
+        dispatchAvailable: typeof state?.dispatch_available === 'boolean' ? state.dispatch_available : null,
+        dispatchBlockReason: state?.dispatch_block_reason ?? null,
       }
     })
   }, [connectionSnapshotAvailable, devices, mode, robotIds, robotStates])
