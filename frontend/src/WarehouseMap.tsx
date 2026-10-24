@@ -5,6 +5,7 @@ import {
   MAP_IMAGE_URL,
   type MapInfoDto,
   type OmxDeviceDto,
+  type DockingStationDto,
 } from './api/fmsApi'
 
 import type { MapEdge, MapPoint } from './hooks/useRouteGraph'
@@ -29,6 +30,7 @@ type Props = {
   visibleRobotIds?: RobotId[]
   robotStates?: ManagedRobot[]
   omxDevices?: OmxDeviceDto[]
+  dockingStations?: DockingStationDto[]
 }
 
 const ROBOT_COLORS: Record<RobotId, string> = {
@@ -51,6 +53,7 @@ export default function WarehouseMap({
   visibleRobotIds = [],
   robotStates = [],
   omxDevices = [],
+  dockingStations,
 }: Props) {
   const host = useRef<HTMLDivElement>(null)
   const drag = useRef<{ id: number; x: number; y: number; pan: Point } | null>(null)
@@ -289,7 +292,29 @@ export default function WarehouseMap({
           </g>
         )}
 
-        {/* 로봇 위치는 아직 demo. 다음 단계에서 /api/robots + /ws/dashboard로 교체 */}
+        {/* 충전 스테이션 왼쪽 빈 공간에 고정한다. 로봇이 이동해도 표시등은 따라가지 않는다. */}
+        {!raw && layers.station && dockingStations && (
+          <g data-testid="docking-station-lights" pointerEvents="none">
+            {[1, 2, 3].map(stationId => {
+              const node = nodes[String(stationId - 1)]
+              if (!node) return null
+              const contact = dockingStations.find(station => station.station === stationId)?.contact ?? 'UNKNOWN'
+              const color = contact === 'CONTACT' ? '#22C55E' : contact === 'RELEASED' ? '#EF4444' : '#94A3B8'
+              const label = contact === 'CONTACT' ? '접촉 · 충전 표시' : contact === 'RELEASED' ? '미접촉' : '확인 불가'
+              return (
+                <g key={stationId} transform={`translate(${node.x - 12} ${node.y})`}
+                  role="img" aria-label={`충전 스테이션 ${stationId}: ${label}`}
+                  data-docking-station={stationId} data-contact={contact}>
+                  <title>{`충전 스테이션 ${stationId}: ${label}`}</title>
+                  <circle r={1.5} fill="#FFFFFF" stroke="#CBD5E1" strokeWidth={0.2} />
+                  <circle r={1.1} fill={color} />
+                </g>
+              )
+            })}
+          </g>
+        )}
+
+        {/* 실제 로봇 위치 */}
         {!raw && layers.robotId && (
           <g data-testid="robot-markers">
             {robotsForMap.map(robot => {

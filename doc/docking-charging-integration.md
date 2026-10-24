@@ -35,7 +35,9 @@ IDLE 다음 배차 후보가 된다. 별도의 최소 배터리 잔량 정책은
 기존 복귀 중 재배차 정책은 유지하며, 그 경우 이전 복귀가 새 작업으로 대체된다.
 
 `GET /api/robots/docking-stations`로 Station 1~3의 접촉·수신 시각·연동 로봇·도킹 완료 여부를 전달한다.
-기존 로봇 API와 WebSocket의 상태 전송을 재사용한다. Station API는 Real 화면에서 1초 간격으로 조회하며,
+기존 로봇 API와 WebSocket의 상태 전송을 재사용한다. Station API는 Real 화면에서 1초 간격으로 조회한다.
+충전 노드 N0·N1·N2 왼쪽 빈 공간의 표시등 세 개가 미접촉은 빨강, 접촉은 초록,
+UNKNOWN은 회색으로 표시된다. 별도의 센서 텍스트 패널은 표시하지 않는다.
 요청 실패 또는 3초 제한 시간 초과 시 UNKNOWN으로 표시한다. Simulation 응답에는 실제 센서 목록을 넣지 않는다.
 
 ## 변경 파일과 영향
@@ -54,7 +56,7 @@ IDLE 다음 배차 후보가 된다. 별도의 최소 배터리 잔량 정책은
 | `backend/app/routers/robots.py`, `websocket.py` | 센서 API와 기존 점유 정보 전달 | 기존 로봇 응답 형태 유지 |
 | `backend/app/routers/commands.py` | CHARGING에서 AI 경로 미리보기 허용 | 실제 출발은 기존 실행 경로에서 검사 |
 | `frontend/src/api/fmsApi.ts`, `hooks/useRobotFleet.ts` | 센서 조회 및 확인 불가 처리 | 기존 로봇 통신 재사용 |
-| `frontend/src/FmsControlApp.tsx` | CHARGING 구분, Station 패널 | 기존 관제 배치와 제어 유지 |
+| `frontend/src/FmsControlApp.tsx`, `frontend/src/WarehouseMap.tsx` | CHARGING 구분, 스테이션 왼쪽 표시등 세 개 | 텍스트 패널 제거, 기존 관제 제어 유지 |
 | `start_fms.sh` | 실제 설정 브로커 연결 검사, 외부 브로커일 때 로컬 MQTT 시작 생략 | Zenoh 시작 흐름 유지; 실행하지 않고 구문 검사만 수행 |
 | `tests/test_dock_mqtt.py`, `tests/test_charging_docking.py` | 새 센서·상태·배차·예약 테스트 | ROS 전송·센서만 모의 처리 |
 | `tests/test_order_flow.py` | 실제 취소 후 복귀 완료를 CHARGING으로 검증 | Simulation 테스트 유지 |
@@ -94,7 +96,8 @@ HEAD의 수정 전 `commands.py`를 메모리에서 실행한 상태에서도 �
 6. 주문 완료 → 자동 복귀 → 정밀 도킹 → CHARGING까지 확인한다.
 7. IDLE과 CHARGING 로봇이 함께 있을 때 IDLE이 먼저 선택되고, 모두 배정되면 CHARGING이 선택되는지 확인한다.
 8. CHARGING 출발 시 기존 Nav2 경로 예약이 유지되고 스위치가 해제되는지 확인한다. 300ms 안정화와 각 제한 시간을 실측에 맞게 조정한다.
-9. 실제 브라우저에서 Real/Simulation 전환, Station 수신 시각, 연결 해제 표시를 확인한다. 브라우저 시각 검증은 이번 작업에서 실행하지 않았다.
+9. 실제 연결 환경에서 Real/Simulation 전환과 센서 연결 해제 표시를 확인한다.
+   격리된 지도 미리보기에서는 스테이션 왼쪽 표시등 세 개의 배치와 모의 접촉 상태에 따른 빨강·초록 전환을 브라우저에서 확인했다.
 
 센서 payload에는 장치 시각·메시지 일련번호·heartbeat가 없다. 따라서 재발행이 없는 동안
 ESP32 자체의 생존 여부와 네트워크에서 지연된 개별 메시지의 원래 생성 시각까지 증명할 수는 없다.
