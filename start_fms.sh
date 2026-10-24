@@ -282,8 +282,6 @@ wait_for_stable_process "$BRIDGE_PID" 2 || {
 }
 
 log "Starting FastAPI backend on the host"
-# 새 교통조정은 시뮬·AI의 새 이동 요청에만 적용. 0으로 기존 흐름 복원 가능.
-export FMS_ORDER_TRAFFIC_ENABLED="${FMS_ORDER_TRAFFIC_ENABLED:-1}"
 cd "$PROJECT_DIR"
 nohup "$PYTHON_BIN" -m uvicorn backend.app.main:app \
     --host 0.0.0.0 \
