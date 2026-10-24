@@ -139,6 +139,23 @@ function OrderStatus({ orders, workstations, pickups }: {
       <button onClick={() => setSelectedId(null)} aria-label="주문 상세 닫기" style={{ float: 'right', border: 0, background: 'transparent', cursor: 'pointer' }}>닫기 ×</button>
       <strong>{selected.order_name}</strong><div>{itemText(selected)}</div>
       <div>등록 모드: {selected.operation_mode === 'ai' ? 'AI' : '알고리즘'}</div>
+      {selected.traffic_coordination && <div style={{ marginTop: 8, padding: 8, background: '#F1F5FB' }}>
+        <strong>교통조정</strong>
+        <div>{selected.traffic_coordination.state === 'SELECTING' && selected.traffic_coordination.selection_policy === 'KEV_STRATEGY_ORDER'
+          ? 'KEV가 먼저 검토할 경로 전략을 제안하는 중'
+          : ({ WAITING_FOR_SAFE_ROUTE: '지나갈 수 있는 경로를 기다리는 중', SELECTING: 'KEV가 이동 방법을 선택하는 중',
+          APPLIED: '선택한 경로로 이동 요청 완료', FAILED: '교통조정 실패', CANCELLED: '교통조정 중단' })[selected.traffic_coordination.state]}</div>
+        {selected.traffic_coordination.choice && <div>
+          {selected.traffic_coordination.choice === 'KEEP_PATH' ? '기존 경로 유지' : '우회 경로 사용'}
+          {' · '}{selected.traffic_coordination.selected_by === 'KEV' ? 'KEV가 선택'
+            : selected.traffic_coordination.selected_by === 'KEV_STRATEGY_ORDER_CODE_MIN_TIME' ? 'KEV 전략 제안 → 코드가 경로 검사·선택'
+            : selected.traffic_coordination.selected_by === 'MIN_EXPECTED_TIME' ? '코드가 예상 시간이 가장 짧은 경로를 선택'
+            : '실행 가능한 경로가 하나여서 적용'}
+        </div>}
+        {selected.traffic_coordination.path && <div>경로: {selected.traffic_coordination.path.join(' → ')}</div>}
+        {selected.traffic_coordination.kev_calls != null && <div>이번 이동의 KEV 요청: {selected.traffic_coordination.kev_calls}회</div>}
+        {selected.traffic_coordination.error && <div style={{ color: C.danger }}>{selected.traffic_coordination.error}</div>}
+      </div>}
       {selected.error && <div style={{ color: C.danger }}>
         실패 단계: {PHASE_TEXT[selected.failed_phase ?? ''] ?? selected.failed_phase}<br />
         원인: {selected.error}
@@ -617,7 +634,7 @@ export default function FmsControlApp() {
 
         <div className="fms-operation-strip" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '6px 16px', borderBottom: `1px solid ${C.line}`, flexWrap: 'wrap' }}>
           <span style={{ fontSize: 11, color: C.muted }}>
-            {operationMode === 'ai' ? 'AI 운영 · 경로 생성 AI / 배차·작업대 선택 알고리즘' : '알고리즘 운영 · 경로 생성·배차·작업대 선택 알고리즘'}
+            {operationMode === 'ai' ? 'AI 운영 · 배차·작업대: 알고리즘 / 경로·교통조정: 개별 설정' : '알고리즘 운영 · 경로 생성·배차·작업대 선택 알고리즘'}
           </span>
           <button
             aria-expanded={ordersPanelOpen}
@@ -652,27 +669,6 @@ export default function FmsControlApp() {
           />
 
           <section style={{ position: 'relative', display: 'flex', flex: 1, minWidth: 0, background: C.surface }} aria-label="FMS 실시간 지도">
-            {robotMode === 'real' && <div aria-label="도킹 스테이션 접촉 상태" style={{
-              position: 'absolute', bottom: 14, left: 14, zIndex: 20,
-              background: C.surface, border: `1px solid ${C.line}`, borderRadius: 9,
-              padding: '10px 12px', fontSize: 11, maxWidth: 'calc(100% - 28px)',
-            }}>
-              <strong>도킹 스테이션</strong>
-              {dockingStations.length === 0 && <div style={{ marginTop: 6 }}>센서 상태 확인 불가</div>}
-              {dockingStations.map(station => <div key={station.station} style={{ marginTop: 6 }}>
-                <span style={{ color: station.contact === 'CONTACT' ? C.primary : C.muted }}>
-                  Station {station.station} · {{ CONTACT: '접촉', RELEASED: '미접촉', UNKNOWN: '확인 불가' }[station.contact]}
-                </span>
-                {' · '}{station.robot_id ?? '로봇 매핑 미확인'}
-                {station.docking_complete ? ' · 도킹 완료' : ''}
-                <div style={{ color: C.muted, fontSize: 10 }}>
-                  마지막 수신 {station.received_at_unix === null ? '없음'
-                    : new Date(station.received_at_unix * 1000).toLocaleTimeString('ko-KR')}
-                  {station.freshness_policy === 'event' ? ' · 이벤트 기준' : ' · 주기 수신 기준'}
-                </div>
-              </div>)}
-              <div style={{ marginTop: 6, color: C.muted, fontSize: 10 }}>충전 상태는 관제 표시용이며 실제 충전은 하지 않습니다.</div>
-            </div>}
             <ScenarioControls modeSwitching={modeSwitching} onActiveChange={setScenarioActive} />
             <div style={{ position: 'absolute', top: 14, right: 14, zIndex: 20, width: 300, maxWidth: 'calc(100% - 28px)' }}>
               <RobotOrderForm operationMode={operationMode} disabled={scenarioActive || modeSwitching}
@@ -692,6 +688,7 @@ export default function FmsControlApp() {
               visibleRobotIds={mapRobotIds as RobotId[]}
               robotStates={managedRobots}
               omxDevices={omxDevices}
+              dockingStations={robotMode === 'real' ? dockingStations : undefined}
             />
             <button
               onClick={emergencyStopAll}
