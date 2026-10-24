@@ -580,7 +580,11 @@ class RosGateway:
 
             # 가장 가까운 노드 복귀 완료
             if robot.navigation_type == NavigationType.RETURN:
-                robot.current_node = robot.goal_node
+                # 기존 코드. goal_node를 남겨 IDLE이어도 배차에서 navigating으로 차단됐다.
+                # robot.current_node = robot.goal_node
+                arrived_node = robot.goal_node
+                robot.current_node = arrived_node
+                robot.goal_node = None
                 robot.navigation_type = None
                 robot.route = None
                 robot.set_state(RobotState.IDLE)
@@ -617,7 +621,12 @@ class RosGateway:
                 flush=True,
             )
 
-            robot.current_node = robot.goal_node
+            # 기존 코드. goal_node를 남겨 일반 goal-node 완료 후에도 새 배차를 막았다.
+            # robot.current_node = robot.goal_node
+            arrived_node = robot.goal_node
+            robot.current_node = arrived_node
+            # 이후 ArUco/OMX 처리는 current_node와 order_id로 관리한다. 완료한 Nav2 목적지는 남기지 않는다.
+            robot.goal_node = None
             robot.navigation_type = None
             robot.route = None
 
@@ -723,7 +732,11 @@ class RosGateway:
             return
 
         if status == GoalStatus.STATUS_SUCCEEDED:
-            robot.current_node = robot.goal_node
+            # 기존 코드. 도킹 성공 후 goal_node가 남아 IDLE 배차를 막았다.
+            # robot.current_node = robot.goal_node
+            arrived_node = robot.goal_node
+            robot.current_node = arrived_node
+            robot.goal_node = None
             robot.set_state(RobotState.IDLE)
             robot.navigation_type = None
             robot.route = None
