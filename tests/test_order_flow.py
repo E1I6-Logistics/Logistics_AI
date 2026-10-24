@@ -20,6 +20,8 @@ def _reset(monkeypatch):
     mode_manager.set_mode("simulation", "algorithm")
     # 코드 기본값과 같은 2초를 명시해 .env 설정과 무관하게 세 후보를 비교하도록 한다.
     monkeypatch.setenv("KEV_DISPATCH_ETA_TIE_SECONDS", "2")
+    # 시뮬레이션 이동 속도와 같은 0.2 m/s를 명시한다. .env에는 실제 로봇용 0.06이 있다.
+    monkeypatch.setenv("KEV_DISPATCH_ETA_SPEED_MPS", "0.2")
     mock_fms.reset()
     order_manager.orders.clear()
     order_manager.returning.clear()
