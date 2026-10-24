@@ -18,6 +18,7 @@ class RobotState(str, Enum):
     WAITING = "WAITING"
     PAUSED = "PAUSED"
     DOCKING = "DOCKING"
+    CHARGING = "CHARGING"
     EMERGENCY_STOP = "EMERGENCY_STOP"
 
 
@@ -28,6 +29,12 @@ class NavigationType(str, Enum):
 
 
 PAUSE_REASON_MESSAGES = {
+    "dock_station_unverified": "물리 도킹 스테이션 대응이 확인되지 않았습니다.",
+    "dock_contact_timeout": "정밀 도킹 성공 후 제한 시간 안에 안정된 접촉을 확인하지 못했습니다.",
+    "dock_action_timeout": "정밀 도킹 Action이 제한 시간 안에 종료되지 않았습니다.",
+    "dock_sensor_unavailable": "도킹 센서 연결 또는 접촉 상태를 신뢰할 수 없습니다.",
+    "dock_contact_lost": "충전 위치의 접촉이 해제되었습니다. 로봇 상태를 확인하세요.",
+    "dock_release_timeout": "출발 후 도킹 접촉 해제를 확인하지 못했습니다.",
     "reconnected_with_active_work": "연결이 복구됐지만 이전 작업이 남아 있어 자동 재개하지 않았습니다.",
     "after_stop_failed": "정지 확인 후 다음 작업을 시작하지 못했습니다.",
     "cancel_send_failed": "Nav2 취소 요청을 전송하지 못했습니다.",
@@ -96,6 +103,8 @@ class Robot:
 
         # 현재 동작 상태
         self.state: RobotState = RobotState.OFFLINE
+        # 연결 복구만으로 도킹 로봇을 일반 대기로 바꾸지 않는다.
+        self.docked_station: int | None = None
         # 프로그램 및 테스트에서 비교하는 고정 코드
         self.pause_reason_code: str | None = None
         # 사용자 화면에 표시하는 한글 설명
@@ -148,7 +157,8 @@ class Robot:
         if connected:
             if self.state == RobotState.OFFLINE:
                 # 진행 중이던 이동/주문은 연결 복구만으로 IDLE 또는 자동 재출발시키지 않는다.
-                active = self.route is not None or self.navigation_type is not None or self.order_id is not None
+                active = (self.route is not None or self.navigation_type is not None
+                          or self.order_id is not None or self.docked_station is not None)
                 if active:
                     self.pause("reconnected_with_active_work")
                 elif self.pose_received_at is None:

@@ -58,7 +58,11 @@ function itemText(order: OrderDto): string {
 }
 
 function displayRobotStatus(robot: LiveRobot, orders: OrderDto[]): string {
-  if (!robot.connected || robot.status !== 'IDLE') return robot.status
+  const labels: Record<string, string> = {
+    NAVIGATING: '주행 중', DOCKING: '도킹 중', CHARGING: '충전 위치 도킹 완료',
+    IDLE: '대기 중', PAUSED: '일시정지',
+  }
+  if (!robot.connected || robot.status !== 'IDLE') return labels[robot.status] ?? robot.status
   const activeOrder = orders.find(order =>
     order.robot_id === robot.backendId && order.status === 'IN_PROGRESS')
   if (activeOrder) return PHASE_TEXT[activeOrder.phase] ?? '주문 수행 중'
@@ -66,7 +70,7 @@ function displayRobotStatus(robot: LiveRobot, orders: OrderDto[]): string {
     && ['PENDING', 'RETURNING'].includes(order.recovery_status ?? ''))
   if (recovery) return RECOVERY_TEXT[recovery.recovery_status!]
   if (robot.occupiedEdge) return '경로 정지 · 노드 확인 필요'
-  return robot.status
+  return labels[robot.status] ?? robot.status
 }
 
 function OrderStatus({ orders, workstations, pickups }: {
@@ -217,6 +221,7 @@ export default function FmsControlApp() {
     managedIds,
     mapRobotIds,
     managedRobots,
+    dockingStations,
     mode: robotMode,
     operationMode,
     modeSwitching,
@@ -647,6 +652,27 @@ export default function FmsControlApp() {
           />
 
           <section style={{ position: 'relative', display: 'flex', flex: 1, minWidth: 0, background: C.surface }} aria-label="FMS 실시간 지도">
+            {robotMode === 'real' && <div aria-label="도킹 스테이션 접촉 상태" style={{
+              position: 'absolute', bottom: 14, left: 14, zIndex: 20,
+              background: C.surface, border: `1px solid ${C.line}`, borderRadius: 9,
+              padding: '10px 12px', fontSize: 11, maxWidth: 'calc(100% - 28px)',
+            }}>
+              <strong>도킹 스테이션</strong>
+              {dockingStations.length === 0 && <div style={{ marginTop: 6 }}>센서 상태 확인 불가</div>}
+              {dockingStations.map(station => <div key={station.station} style={{ marginTop: 6 }}>
+                <span style={{ color: station.contact === 'CONTACT' ? C.primary : C.muted }}>
+                  Station {station.station} · {{ CONTACT: '접촉', RELEASED: '미접촉', UNKNOWN: '확인 불가' }[station.contact]}
+                </span>
+                {' · '}{station.robot_id ?? '로봇 매핑 미확인'}
+                {station.docking_complete ? ' · 도킹 완료' : ''}
+                <div style={{ color: C.muted, fontSize: 10 }}>
+                  마지막 수신 {station.received_at_unix === null ? '없음'
+                    : new Date(station.received_at_unix * 1000).toLocaleTimeString('ko-KR')}
+                  {station.freshness_policy === 'event' ? ' · 이벤트 기준' : ' · 주기 수신 기준'}
+                </div>
+              </div>)}
+              <div style={{ marginTop: 6, color: C.muted, fontSize: 10 }}>충전 상태는 관제 표시용이며 실제 충전은 하지 않습니다.</div>
+            </div>}
             <ScenarioControls modeSwitching={modeSwitching} onActiveChange={setScenarioActive} />
             <div style={{ position: 'absolute', top: 14, right: 14, zIndex: 20, width: 300, maxWidth: 'calc(100% - 28px)' }}>
               <RobotOrderForm operationMode={operationMode} disabled={scenarioActive || modeSwitching}
@@ -768,7 +794,8 @@ function RobotRail({ robotIds, selectedRobot, getStatus, onSelect }: {
       {robotIds.map(id => {
         const selected = id === selectedRobot
         const status = getStatus(id)
-        const color = /연결 끊김|OFFLINE/i.test(status) ? C.danger : /이동|작업|RUN|MOV/i.test(status) ? C.success : C.warning
+        const color = /연결 끊김|OFFLINE/i.test(status) ? C.danger : status === '충전 위치 도킹 완료' ? C.primary
+          : /이동|주행|작업|RUN|MOV/i.test(status) ? C.success : C.warning
         return (
           <button key={id} onClick={() => onSelect(id)} title={`${id} · ${status}`} aria-pressed={selected}
             style={{ width: 40, height: 40, borderRadius: '50%', border: `2.5px solid ${selected ? C.primary : color}`, background: selected ? '#EDF6FF' : '#F8FAFC', color: selected ? C.primary : C.text, fontSize: 10, fontWeight: 900, cursor: 'pointer', boxShadow: selected ? '0 0 0 3px rgba(37,137,245,.15)' : 'none' }}>
@@ -867,7 +894,8 @@ function RobotPanel({ scenarioActive, robotId, orders, liveRobot, targetNode, dr
   const battery = liveRobot?.battery ?? fallback.battery
   const connected = Boolean(liveRobot?.connected)
   const status = !connected ? '연결 끊김' : liveRobot ? displayRobotStatus(liveRobot, orders) : fallback.status
-  const statusColor = !connected ? C.danger : /MOV|RUN|이동|작업/i.test(status) ? C.success : C.warning
+  const statusColor = !connected ? C.danger : liveRobot?.status === 'CHARGING' ? C.primary
+    : /MOV|RUN|이동|주행|작업/i.test(status) ? C.success : C.warning
   const batteryColor = battery < 30 ? C.danger : battery < 50 ? C.warning : C.success
   const route = liveRobot?.route?.node_ids?.length ? liveRobot.route.node_ids.map(id => `N${id}`).join(' → ') : '—'
   const controlsEnabled = connected && !emergencyStopped && !scenarioActive && remoteStatus === 'ready'
@@ -901,7 +929,7 @@ function RobotPanel({ scenarioActive, robotId, orders, liveRobot, targetNode, dr
             color={liveRobot?.connectionState === 'UNKNOWN' ? C.warning : connected ? C.success : C.danger} />
         </div>
 
-        {status === 'PAUSED' && liveRobot?.pauseReason && (
+        {liveRobot?.status === 'PAUSED' && liveRobot.pauseReason && (
           <div role="status" style={{ marginTop: 8, padding: '8px 10px', borderRadius: 8, background: '#FFF4E5', color: C.warning, fontSize: 11, overflowWrap: 'anywhere' }}>
             일시정지 사유: {liveRobot.pauseReason}
           </div>

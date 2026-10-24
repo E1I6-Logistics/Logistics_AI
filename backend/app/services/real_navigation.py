@@ -840,9 +840,25 @@ class RealNavigation:
 
                 return
 
-            self._traffic.request_navigation_after_stop(
-                robot_id, str(node_id), now=self._clock(), graph=graph, required_path=required_path
-            )
+            state = self._robots[robot_id]
+            previous_status = state["status"]
+            if (
+                required_path is not None
+                and robot.state in (RobotState.IDLE, RobotState.CHARGING, RobotState.TASK_ASSIGNED, RobotState.WAITING)
+                and state["goal_node"] is None and state["route"] is None
+                and robot_id not in self._requests and robot_id not in self._executing
+                and robot_id not in self._stopping and robot_id not in self._arrivals
+            ):
+                # FMS의 정지 확인 후 상태(WAITING/도킹 완료)와 계획기의 IDLE은 별개다.
+                # 위치 동기화와 실행 종료를 확인한 계획용 상태만 정규화한다. Robot 상태는 보존한다.
+                state["status"] = "IDLE"
+            try:
+                self._traffic.request_navigation_after_stop(
+                    robot_id, str(node_id), now=self._clock(), graph=graph, required_path=required_path
+                )
+            except (ValueError, RuntimeError):
+                state["status"] = previous_status
+                raise
 
             robot.goal_node = str(node_id)
             robot.navigation_type = navigation_type

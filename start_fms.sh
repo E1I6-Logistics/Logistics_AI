@@ -30,6 +30,12 @@ KEV_PORT="${FMS_KEV_PORT:-8011}"
 export KEV_HOST="${KEV_HOST:-http://127.0.0.1:$KEV_PORT}"
 ZENOH_PORT="${FMS_ZENOH_PORT:-7447}"
 MQTT_PORT="${FMS_MQTT_PORT:-1883}"
+MQTT_BROKER_HOST="${FMS_MQTT_BROKER_IP:-127.0.0.1}"
+MQTT_BROKER_PORT="${FMS_MQTT_BROKER_PORT:-1883}"
+LOCAL_MQTT=0
+case "$MQTT_BROKER_HOST" in
+    127.0.0.1|localhost|::1) LOCAL_MQTT=1 ;;
+esac
 
 VENV_DIR="${FMS_VENV_DIR:-$HOME/venv/robot}"
 PYTHON_BIN="${FMS_PYTHON:-$VENV_DIR/bin/python}"
@@ -236,11 +242,12 @@ if [ "${FMS_KEV_ENABLED:-1}" = "1" ]; then
 fi
 CLEANUP_ON_EXIT=1
 
-log "Starting Zenoh Router and MQTT Broker with Docker Compose"
-
-"${DOCKER[@]}" compose -f "$COMPOSE_FILE" up -d \
-    zenoh-router \
-    mqtt-broker
+log "Starting Zenoh Router with Docker Compose; MQTT target=$MQTT_BROKER_HOST:$MQTT_BROKER_PORT"
+COMPOSE_SERVICES=(zenoh-router)
+if [ "$LOCAL_MQTT" = "1" ]; then
+    COMPOSE_SERVICES+=(mqtt-broker)
+fi
+"${DOCKER[@]}" compose -f "$COMPOSE_FILE" up -d "${COMPOSE_SERVICES[@]}"
 
 # Zenoh Router 연결 확인
 wait_for_tcp "127.0.0.1" "$ZENOH_PORT" 30 || {
@@ -249,9 +256,11 @@ wait_for_tcp "127.0.0.1" "$ZENOH_PORT" 30 || {
 }
 
 # MQTT Broker 연결 확인
-wait_for_tcp "127.0.0.1" "$MQTT_PORT" 30 || {
-    "${DOCKER[@]}" compose -f "$COMPOSE_FILE" logs --tail 100 mqtt-broker || true
-    fail "MQTT Broker did not open port $MQTT_PORT"
+wait_for_tcp "$MQTT_BROKER_HOST" "$MQTT_BROKER_PORT" 30 || {
+    if [ "$LOCAL_MQTT" = "1" ]; then
+        "${DOCKER[@]}" compose -f "$COMPOSE_FILE" logs --tail 100 mqtt-broker || true
+    fi
+    fail "MQTT Broker did not open $MQTT_BROKER_HOST:$MQTT_BROKER_PORT"
 }
 
 if command -v ros2 >/dev/null 2>&1; then
@@ -273,6 +282,8 @@ wait_for_stable_process "$BRIDGE_PID" 2 || {
 }
 
 log "Starting FastAPI backend on the host"
+# 새 교통조정은 시뮬·AI의 새 이동 요청에만 적용. 0으로 기존 흐름 복원 가능.
+export FMS_ORDER_TRAFFIC_ENABLED="${FMS_ORDER_TRAFFIC_ENABLED:-1}"
 cd "$PROJECT_DIR"
 nohup "$PYTHON_BIN" -m uvicorn backend.app.main:app \
     --host 0.0.0.0 \
@@ -330,7 +341,7 @@ cat <<EOF
 Frontend     : http://127.0.0.1:$FRONTEND_PORT
 Backend      : http://127.0.0.1:$BACKEND_PORT
 Zenoh Router : $ZENOH_CONNECT_ENDPOINT
-MQTT Broker  : mqtt://127.0.0.1:$MQTT_PORT
+MQTT Broker  : mqtt://$MQTT_BROKER_HOST:$MQTT_BROKER_PORT
 Kev         : $([ "${FMS_KEV_ENABLED:-1}" = "1" ] && printf 'http://127.0.0.1:%s' "$KEV_PORT" || printf 'disabled')
 
 Logs:

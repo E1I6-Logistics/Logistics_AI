@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+import json
+import math
 
 from pathlib import Path
 
@@ -50,6 +52,26 @@ MQTT_BROKER_IP = os.getenv("FMS_MQTT_BROKER_IP", "127.0.0.1")
 
 # MQTT 서버 포트
 MQTT_BROKER_PORT = int(os.getenv("FMS_MQTT_BROKER_PORT", "1883"))
+
+# 사용자 확인: robot1/2/3 ↔ 물리 Station 1/2/3. 충전 노드 번호와 별개다.
+DOCK_STATION_MAP = json.loads(os.getenv("FMS_DOCK_STATION_MAP", '{"robot1":1,"robot2":2,"robot3":3}'))
+if (
+    not isinstance(DOCK_STATION_MAP, dict)
+    or any(robot not in {"robot1", "robot2", "robot3"} or type(station) is not int or station not in (1, 2, 3)
+           for robot, station in DOCK_STATION_MAP.items())
+    or len(set(DOCK_STATION_MAP.values())) != len(DOCK_STATION_MAP)
+):
+    raise ValueError("FMS_DOCK_STATION_MAP must map robot1~3 to unique integer stations 1~3")
+
+DOCK_DEBOUNCE_S = float(os.getenv("FMS_DOCK_DEBOUNCE_S", "0.3"))
+DOCK_CONTACT_TIMEOUT_S = float(os.getenv("FMS_DOCK_CONTACT_TIMEOUT_S", "10"))
+DOCK_ACTION_TIMEOUT_S = float(os.getenv("FMS_DOCK_ACTION_TIMEOUT_S", "60"))
+# 0: 이벤트 기반. 주기 발행이 확인됐을 때만 최대 수신 간격을 설정한다.
+DOCK_SENSOR_MAX_AGE_S = float(os.getenv("FMS_DOCK_SENSOR_MAX_AGE_S", "0"))
+if any(not math.isfinite(value) or value < 0 for value in (DOCK_DEBOUNCE_S, DOCK_SENSOR_MAX_AGE_S)):
+    raise ValueError("Dock debounce and sensor maximum age must be finite and nonnegative")
+if any(not math.isfinite(value) or value <= 0 for value in (DOCK_CONTACT_TIMEOUT_S, DOCK_ACTION_TIMEOUT_S)):
+    raise ValueError("Dock timeouts must be finite and positive")
 
 # ============================================================
 # 실제 로봇 내비게이션 (services/real_navigation.py에서 사용)

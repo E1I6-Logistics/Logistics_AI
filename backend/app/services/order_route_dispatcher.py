@@ -7,7 +7,7 @@ from .route_graph import load_route_graph
 
 
 # 주문 경로를 배차한다.
-async def dispatch_order_route(order, node, current_node, valid=None):
+async def dispatch_order_route(order, node, current_node, valid=None, *, charging_return=False):
     mode = order["mode"]
     if mode_manager.mode != mode:
         raise ValueError("운용 모드가 변경되었습니다.")
@@ -57,4 +57,7 @@ async def dispatch_order_route(order, node, current_node, valid=None):
     robot = fleet_manager.get_robot(order["robot_id"])
     if robot is None or not robot.connected or robot.occupied_node != str(current_node):
         raise ValueError("경로 생성 중 실제 로봇의 현재 위치가 변경되었습니다.")
-    return ros_gateway.navigate_to_node(order["robot_id"], node, _order_step=True, required_path=required_path)
+    kwargs = {"_order_step": True, "required_path": required_path}
+    if charging_return:
+        kwargs["_charging_return"] = True
+    return ros_gateway.navigate_to_node(order["robot_id"], node, **kwargs)

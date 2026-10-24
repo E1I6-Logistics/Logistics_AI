@@ -9,6 +9,15 @@ from ..services.map_service import world_to_pixel
 router = APIRouter(prefix="/api/robots", tags=["robots"])
 
 
+@router.get("/docking-stations")
+async def fetch_docking_stations():
+    if mode_manager.mode != "real":
+        return {"mode": mode_manager.mode, "stations": []}
+    from ..ros2.ros_gateway import ros_gateway
+
+    return {"mode": "real", "stations": ros_gateway.docking_station_snapshots()}
+
+
 # 로봇을 가져온다.
 @router.get("")
 async def fetch_robots():
@@ -40,6 +49,8 @@ async def fetch_robots():
                 "y": robot.y,
                 "yaw": robot.yaw,
                 "current_node": robot.current_node,
+                "occupied_node": robot.occupied_node,
+                "occupied_edge": robot.occupied_edge,
                 "route": robot.route,
                 "pixel_x": pixel_x,
                 "pixel_y": pixel_y,

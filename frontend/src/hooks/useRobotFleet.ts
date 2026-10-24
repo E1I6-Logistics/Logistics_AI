@@ -4,6 +4,8 @@ import {
   getConnections,
   getRobotMode,
   getRobots,
+  getDockingStations,
+  type DockingStationDto,
   setRobotMode,
   type ConnectionDeviceDto,
   type RobotMode,
@@ -53,6 +55,7 @@ export function useRobotFleet() {
   const [devices, setDevices] = useState<ConnectionDeviceDto[]>([])
   const [connectionSnapshotAvailable, setConnectionSnapshotAvailable] = useState(true)
   const [robotStates, setRobotStates] = useState<Record<string, RobotStateDto>>({})
+  const [dockingStations, setDockingStations] = useState<DockingStationDto[]>([])
   const [mode, setModeState] = useState<RobotMode>('simulation')
   const [operationMode, setOperationMode] = useState<OperationMode>('algorithm')
   const [modeSwitching, setModeSwitching] = useState(false)
@@ -92,6 +95,30 @@ export function useRobotFleet() {
       console.warn('robot state refresh failed:', e)
     }
   }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    let refreshing = false
+    setDockingStations([])
+    if (mode !== 'real') return
+    const refresh = async () => {
+      if (refreshing) return
+      refreshing = true
+      try {
+        const result = await getDockingStations()
+        if (!cancelled) setDockingStations(result.mode === 'real' ? result.stations : [])
+      } catch {
+        if (!cancelled) setDockingStations(previous => previous.map(station => ({
+          ...station, contact: 'UNKNOWN', stable: false, docking_complete: false, broker_connected: false,
+        })))
+      } finally {
+        refreshing = false
+      }
+    }
+    void refresh()
+    const timer = window.setInterval(refresh, 1000)
+    return () => { cancelled = true; window.clearInterval(timer) }
+  }, [mode])
 
   useEffect(() => {
     let cancelled = false
@@ -245,6 +272,7 @@ export function useRobotFleet() {
   [managedRobots, mode, robotIds])
 
   return {
+    dockingStations,
     managedIds,
     mapRobotIds,
     managedRobots,

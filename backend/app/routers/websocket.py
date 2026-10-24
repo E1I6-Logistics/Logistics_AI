@@ -65,6 +65,8 @@ async def dashboard_websocket(websocket: WebSocket):
                     "y": robot.y,
                     "yaw": robot.yaw,
                     "current_node": robot.current_node,
+                    "occupied_node": robot.occupied_node,
+                    "occupied_edge": robot.occupied_edge,
                     "route": robot.route,
                     "connected": robot.connected,
                     "pixel_x": pixel_x,

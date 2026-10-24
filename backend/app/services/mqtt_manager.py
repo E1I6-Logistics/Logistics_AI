@@ -5,7 +5,7 @@ import time
 import paho.mqtt.client as mqtt
 
 from ..models.omx import OMX
-from ..config import MQTT_BROKER_IP, MQTT_BROKER_PORT
+from ..config import MQTT_BROKER_IP, MQTT_BROKER_PORT, DOCK_DEBOUNCE_S, DOCK_SENSOR_MAX_AGE_S
 
 
 class MQTTManager:
@@ -27,12 +27,17 @@ class MQTTManager:
 
         # Docking 객체 저장
         self.dock_status = {}
+        self._dock_lock = threading.Lock()
+        self._dock_samples = {}
+        self._dock_connected = False
+        self._dock_generation = 0
     
         # MQTT Client
         self.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION1)
 
         self.client.on_connect = self._on_connect
         self.client.on_message = self._on_message
+        self.client.on_disconnect = self._on_disconnect
 
         self.running = False
         self.connection_thread = None
@@ -78,6 +83,7 @@ class MQTTManager:
             return
         self.running = False
 
+        self._invalidate_dock_connection(False)
         self.client.loop_stop()
         self.client.disconnect()
 
@@ -92,6 +98,7 @@ class MQTTManager:
 
     # 연결 이벤트를 처리한다.
     def _on_connect(self, client, userdata, flags, rc):
+        self._invalidate_dock_connection(rc == 0)
         if rc != 0:
             print(
                 f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] [ERROR] [MQTT] "
@@ -115,6 +122,54 @@ class MQTTManager:
 
         print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] [INFO] [MQTT] Waiting OMX robots...", flush=True)
 
+    def _invalidate_dock_connection(self, connected):
+        with self._dock_lock:
+            self._dock_connected = connected
+            self._dock_generation += 1
+            self._dock_samples.clear()
+            self.dock_status.clear()
+
+    def _on_disconnect(self, client, userdata, rc):
+        self._invalidate_dock_connection(False)
+
+    def dock_generation(self):
+        with self._dock_lock:
+            return self._dock_generation
+
+    def get_dock_snapshot(self, station, *, now=None):
+        """수신 스레드 밖에서 읽는 사본. 이벤트 방식은 무수신만으로 만료시키지 않는다."""
+        now = time.monotonic() if now is None else now
+        with self._dock_lock:
+            sample = dict(self._dock_samples.get(station, {}))
+            connected = self._dock_connected
+            generation = self._dock_generation
+        received = sample.get("received_at")
+        age = None if received is None else max(0.0, now - received)
+        trusted = connected and bool(sample) and not sample.get("retained", False)
+        if DOCK_SENSOR_MAX_AGE_S > 0 and age is not None and age > DOCK_SENSOR_MAX_AGE_S:
+            trusted = False
+        contact_since = sample.get("contact_since")
+        return {
+            **sample,
+            "station": station,
+            "generation": generation,
+            "broker_connected": connected,
+            "contact": ("CONTACT" if sample.get("status") == 1 else "RELEASED") if trusted else "UNKNOWN",
+            "trusted": trusted,
+            "age_s": age,
+            "stable": bool(trusted and contact_since is not None and now - contact_since >= DOCK_DEBOUNCE_S),
+            "freshness_policy": "heartbeat" if DOCK_SENSOR_MAX_AGE_S > 0 else "event",
+        }
+
+    def dock_contact_valid(self, station, *, started_at, generation, now=None):
+        sample = self.get_dock_snapshot(station, now=now)
+        return bool(
+            sample["generation"] == generation
+            and sample["stable"]
+            and sample.get("status") == 1
+            and sample.get("contact_since", -1) >= started_at
+        )
+
     # =========================================================
     # 메시지 수신
     # =========================================================
@@ -128,12 +183,7 @@ class MQTTManager:
         # =========================================================
         # [DOCK] 도킹 스테이션 MQTT 메시지
         # =========================================================
-        if (
-            len(topic_parts) == 4
-            and topic_parts[0] == "dock"
-            and topic_parts[1] == "station"
-            and topic_parts[3] == "status"
-        ):
+        if topic_parts[0] == "dock":
             
             self._on_dock_message(client, userdata, msg)
             return
@@ -252,28 +302,48 @@ class MQTTManager:
     # 기존 _on_message()의 OMX 메시지 처리와 독립적으로 동작함.
     # =========================================================
     def _on_dock_message(self, client, userdata, msg):
-        print(f"[DOCK RAW] {msg.topic} {msg.payload!r}", flush=True)
-
         try:
             parts = msg.topic.split("/")
             if len(parts) != 4 or parts[:2] != ["dock", "station"] or parts[3] != "status":
-                return
+                raise ValueError("invalid dock topic")
             if parts[2] not in ("1", "2", "3"):
-                return
+                raise ValueError("invalid station in topic")
             station = int(parts[2])
             data = json.loads(msg.payload.decode("utf-8"))
 
             # 잘못된 JSON 형식이나 다른 스테이션의 메시지는 무시
             if not isinstance(data, dict):
-                return
+                raise ValueError("payload must be an object")
             if type(data.get("station")) is not int or data["station"] != station:
-                return
+                raise ValueError("station must match topic and be an integer")
             status = data.get("status")
             if type(status) is not int or status not in (0, 1):
-                return
+                raise ValueError("status must be integer 0 or 1")
 
-            # [DOCK] 마지막으로 수신한 접촉 상태만 저장 (로봇 IDLE 전환은 하지 않음)
-            self.dock_status[station] = status
+            now = time.monotonic()
+            retained = bool(getattr(msg, "retain", False))
+            with self._dock_lock:
+                if not self._dock_connected:
+                    return
+                previous = self._dock_samples.get(station, {})
+                # 재전송으로 과거 접촉을 이번 시도의 새 접촉으로 만들지 않는다.
+                if getattr(msg, "dup", False):
+                    return
+                contact_since = None
+                if status == 1 and not retained:
+                    contact_since = (
+                        previous.get("contact_since")
+                        if previous.get("status") == 1
+                        else now
+                    )
+                self.dock_status[station] = status
+                self._dock_samples[station] = {
+                    "status": status,
+                    "received_at": now,
+                    "received_at_unix": time.time(),
+                    "contact_since": contact_since,
+                    "retained": retained,
+                }
 
             print(
                 f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] [INFO] [DOCK] "

@@ -12,6 +12,23 @@ function wsBaseFromHttp(base: string) {
 export const WS_BASE = (import.meta.env.VITE_FMS_WS_BASE ?? wsBaseFromHttp(API_BASE)).replace(/\/$/, '')
 
 export type RobotMode = 'real' | 'simulation'
+export type DockingStationDto = {
+  station: number
+  contact: 'CONTACT' | 'RELEASED' | 'UNKNOWN'
+  received_at_unix: number | null
+  age_s: number | null
+  stable: boolean
+  broker_connected: boolean
+  freshness_policy: 'event' | 'heartbeat'
+  robot_id: string | null
+  docking_complete: boolean
+}
+
+export function getDockingStations() {
+  return request<{ mode: RobotMode; stations: DockingStationDto[] }>('/api/robots/docking-stations', {
+    signal: AbortSignal.timeout(3000),
+  })
+}
 export type OperationMode = 'algorithm' | 'ai'
 
 export type RobotModeDto = {

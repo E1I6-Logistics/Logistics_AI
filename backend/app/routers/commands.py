@@ -47,7 +47,7 @@ def _preview_start_node(robot_id: str, mode: str) -> str:
         if robot is None or not robot.connected:
             raise ValueError(f"연결된 로봇을 찾을 수 없습니다: {robot_id}")
         with robot._lock:
-            if robot.state != RobotState.IDLE or robot.route is not None or ros_gateway.navigation_active(resolved_id):
+            if robot.state not in (RobotState.IDLE, RobotState.CHARGING) or robot.route is not None or ros_gateway.navigation_active(resolved_id):
                 raise ValueError("로봇이 주행 중이거나 대기 중입니다. 정지 후 다시 시도하세요.")
             start = robot.occupied_node
     if start is None:

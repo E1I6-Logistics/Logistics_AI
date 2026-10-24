@@ -590,7 +590,10 @@ class FmsRosNode(Node):
             flush=True,
         )
 
-        self._finish_auxiliary(robot_id, entry, result.status, self.precision_dock_result_callback)
+        status = result.status
+        if status == GoalStatus.STATUS_SUCCEEDED and not result.result.success:
+            status = GoalStatus.STATUS_ABORTED
+        self._finish_auxiliary(robot_id, entry, status, self.precision_dock_result_callback)
 
     # ArUco 정렬을 전송한다.
     @_navigation_locked

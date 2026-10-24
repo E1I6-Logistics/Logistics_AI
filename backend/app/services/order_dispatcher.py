@@ -65,14 +65,15 @@ def available_robots(mode, busy_ids, returning_ids=(), operation_mode="algorithm
         ):
             continue
         if (
-            robot.state == RobotState.IDLE
+            (robot.state == RobotState.IDLE or ros_gateway.charging_dispatch_ready(robot.robot_id))
             and robot.goal_node is None
             and robot.route is None
             and not ros_gateway.navigation_active(robot.robot_id)
         ):
-            candidates.append((0, robot.robot_id))
+            # 일반 대기 로봇을 먼저, 관제상 충전 위치에 있는 로봇을 다음으로 선택한다.
+            candidates.append((1 if robot.state == RobotState.CHARGING else 0, robot.robot_id))
         elif (
             robot.robot_id in returning_ids and robot.occupied_node is not None and robot.state == RobotState.NAVIGATING
         ):
-            candidates.append((1, robot.robot_id))
+            candidates.append((2, robot.robot_id))
     return [robot_id for _, robot_id in sorted(candidates)]
