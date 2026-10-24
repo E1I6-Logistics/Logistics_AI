@@ -103,12 +103,16 @@ KEV에 거리, ETA, 작업 후 배터리를 넣으려면 아래 계산 기준이
 | 날짜 | 로봇 | 상태 | `voltage` | `percentage` | `/api/robots` | 비고 |
 |---|---|---|---:|---:|---|---|
 | 2026-10-23 | robot1 | 정지, 충전된 배터리 장착 직후 | 12.28V(토픽), 12.26V(API), 최근 60초 최저 12.24V | 98.88 → 97.77 | `dispatch_available=true`, 차단 이유 없음 | bringup + Zenoh 브리지만 실행, 192.168.0.x 네트워크 |
+| 2026-10-24 | robot3 | 정지, 공유 배터리 | 10.99V, 최근 60초 최저 10.97V | 27.22 | `dispatch_available=false`, `low_battery` | 직후 배터리 저전압 경보음, 교체 |
+| 2026-10-24 | robot3 | 교체 직후 정지 → 측정 4회·복귀 주행 후 | 12.17V → 11.36V, 주행 중 최저 11.36V | 92.77 → 47.77 | 측정 내내 `low_battery` 없음 | `get_throttled=0x0`. `real_robot_battery_eta_measurement_record_20261024.md` 7절 |
 
 - `percentage`는 **0~100 단위**입니다. 프론트엔드의 `%` 표시와 KEV 입력의 `battery` 값이 가정한 범위와 같습니다.
 - `voltage`는 `nan`이 아닌 값으로 들어오며, 백엔드의 전압 하한 판단(`battery_voltage_min`)에 반영됩니다.
 - robot1의 bringup·브리지를 끄자 약 6초 뒤 `OFFLINE`으로 처리되고 `battery_voltage`, `battery_voltage_min`이 `None`으로 지워졌습니다(`dispatch_block_reason=disconnected`). 배터리 교체 시 전압 기록 초기화가 실제 로봇에서도 동작함을 확인했습니다. 퍼센트 값은 화면 표시용이라 남습니다.
-- 주행 중 최저 전압과 Pi 저전압 여부는 아직 측정하지 않았습니다. robot2·robot3의 전압 수신도 아직 확인하지 않았습니다.
-- 확인 당시에는 프론트엔드가 `/api/connections`를 호출할 때만 로봇 연결이 갱신되어, 브라우저를 열지 않으면 `/api/robots`가 빈 목록이었습니다. 이후 백엔드가 real 모드에서 2초(`FMS_ZENOH_CONNECTION_SYNC_INTERVAL_S`)마다 직접 갱신하도록 바꿔, 화면을 열지 않아도 로봇 등록과 연결 끊김 시 전압 기록 초기화가 일어납니다. 화면 없이 갱신되는지는 실제 로봇에서 아직 확인하지 않았습니다.
+- 기존 내용. robot3 측정 후 아래로 바꿉니다.
+  - 주행 중 최저 전압과 Pi 저전압 여부는 아직 측정하지 않았습니다. robot2·robot3의 전압 수신도 아직 확인하지 않았습니다.
+- robot3 전압 수신과 주행 중 최저 전압(11.36V까지), Pi 저전압 없음(`0x0`)을 확인했습니다. 10.99V 배터리는 경보음보다 먼저 `low_battery`로 차단됐습니다. robot2는 아직 확인하지 않았고, 11.2V 근처와 그 아래의 주행 기록은 아직 없습니다.
+- 확인 당시에는 프론트엔드가 `/api/connections`를 호출할 때만 로봇 연결이 갱신되어, 브라우저를 열지 않으면 `/api/robots`가 빈 목록이었습니다. 이후 백엔드가 real 모드에서 2초(`FMS_ZENOH_CONNECTION_SYNC_INTERVAL_S`)마다 직접 갱신하도록 바꿔, 화면을 열지 않아도 로봇 등록과 연결 끊김 시 전압 기록 초기화가 일어납니다. 2026-10-24 robot3에서 브라우저 없이 등록·OFFLINE 판정·전압 기록 초기화를 확인했습니다.
 - 로봇 Zenoh 브리지의 접속 주소는 현재 네트워크의 FMS PC 주소여야 합니다(이번에는 `tcp/192.168.0.21:7447`). `ros2-zenoh-guide.md`의 `10.10.141.15` 예시를 그대로 쓰면 연결되지 않습니다.
 
 ## 3. 코드 규칙과 KEV 판단 조건 분리
