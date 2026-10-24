@@ -58,6 +58,10 @@ MQTT_BROKER_PORT = int(os.getenv("FMS_MQTT_BROKER_PORT", "1883"))
 # 정상 응답에서 로봇이 잠시 누락되어도 OFFLINE으로 확정하지 않는 시간.
 ZENOH_MISSING_GRACE_S = float(os.getenv("FMS_ZENOH_MISSING_GRACE_S", "5.0"))
 
+# Real 모드에서 Zenoh 연결 목록을 백엔드가 갱신하는 간격(초).
+# 화면의 /api/connections 요청 여부와 관계없이 로봇 등록·OFFLINE 판정을 유지한다.
+ZENOH_CONNECTION_SYNC_INTERVAL_S = float(os.getenv("FMS_ZENOH_CONNECTION_SYNC_INTERVAL_S", "2.0"))
+
 # 실제 로봇이 움직일 것으로 예상하는 속도(m/s). 예약 시간을 계산할 때 쓴다.
 # 기본값은 0.10이며 Nav2 주행 속도를 직접 변경하지 않는다.
 # 실측 평균속도보다 낮추면 예약이 길어지고, 높이면 예약 충돌 위험이 커진다.
@@ -137,6 +141,7 @@ import math
 
 for _name in (
     "ZENOH_MISSING_GRACE_S",
+    "ZENOH_CONNECTION_SYNC_INTERVAL_S",
     "REAL_NAVIGATION_SPEED_MPS",
     "REAL_RESERVATION_MARGIN_S",
     "REAL_RESERVATION_CLEARANCE_M",
