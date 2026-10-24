@@ -58,6 +58,12 @@ route graph나 ETA 속도를 바꾸면 이 표를 다시 계산한다.
 | 2 | 2026-10-24 16:49 | robot3 | 11.65 | N2 | N5 | 7.51 | 16:49:53.615 | 16:50:19.385 | 25.8 | +18.3 | 37 | 11.62 | 11.60 | 0x0 | 없음 | `goal-node` 이동. N5 첫 진입 뒤 N7 쪽으로 두 번 물러났다가 재진입, Nav2 도착 확정 +71초 |
 | 3 | 2026-10-24 16:57 | robot3 | 11.52 | N2 | N5 | 7.51 | 16:57:31.708 | 16:57:57.431 | 25.7 | +18.2 | 29 | 11.49 | 11.49 | 0x0 | 없음 | `goal-node` 이동. 정상, Nav2 도착 확정 +28초 |
 | 4 | 2026-10-24 17:05 | robot3 | 11.40 | N2 | N6 | 11.44 | 17:05:40.783 | 17:06:17.241 | 36.5 | +25.0 | 40 | 11.36 | 11.40 | 0x0 | 없음 | `goal-node` 이동(재시도). N9 +7.0, N7 +12.9, N5 +24.1초 통과 |
+| 5 | 2026-10-24 17:32 | robot2 | 11.76 | N1 | N5 | 6.78 | 17:32:18.458 | 17:32:41.051 | 22.6 | +15.8 | 40 | 11.74 | 11.76 | 0x0 | 없음 | `goal-node` 이동. 출발 위치가 N1에서 -x 쪽 0.11m. N9 +4.8, N7 +11.3초 |
+| 6 | 2026-10-24 17:41 | robot2 | 11.67 | N1 | N5 | 6.78 | 17:41:05.696 | 17:41:24.411 | 18.7 | +11.9 | 26 | 11.62 | 11.65 | 0x0 | 없음 | `goal-node` 이동. 출발 위치 N1에서 0.043m. N9 +3.8, N7 +8.6초 |
+| 7 | 2026-10-24 17:42 | robot2 | 11.60 | N1 | N5 | 6.78 | 17:42:40.221 | 17:43:02.072 | 21.9 | +15.1 | 36 | 11.58 | 11.58 | 0x0 | 없음 | `goal-node` 이동. 출발 위치 N1에서 0.013m. N9 +4.3, N7 +9.6초 |
+
+- Nav2 코드: 사용자 확인 기준 robot2·robot3 모두 dev 브랜치. robot2에는 `ugie-nav2` 브랜치도 받아져 있으나 측정 당시 dev로 설정되어 있었다. 설치 빌드(`install/.../burger.yaml`의 BT·`desired_linear_vel`)는 확인하지 못했다.
+- 5~7회차 사이 robot2 복귀(N5→N1, 코드 ETA 6.78초) 첫 진입: 26.8초, 31.5초, 29.3초.
 
 실패한 시도는 위 표에서 뺐다.
 
@@ -81,8 +87,9 @@ route graph나 ETA 속도를 바꾸면 이 표를 다시 계산한다.
 | --- | --- | ---: | ---: | --- | ---: | --- |
 | robot3 | N2 → N5 | 3 | +18.4 | +18.2 ~ +18.7 | 11.49 | 없음(`0x0`) |
 | robot3 | N2 → N6 | 1 | +25.0 | – | 11.36 | 없음(`0x0`) |
+| robot2 | N1 → N5 | 3 | +14.3 | +11.9 ~ +15.8 | 11.58 | 없음(`0x0`) |
 
-N2→N6은 1회뿐이라 최소 반복 수를 채우지 못했다. robot1·robot2와 다른 출발 노드는 아직 측정하지 않았다.
+N2→N6은 1회뿐이라 최소 반복 수를 채우지 못했다. robot1과 N0·N3·N4 출발은 아직 측정하지 않았다.
 
 ## 6. 판단 기준
 
@@ -131,7 +138,42 @@ FMS real 모드, 로봇은 robot3 한 대만 연결, 브라우저 없이 진행�
 
 | 문제 | 관찰 | 추정 원인 | 상태 |
 | --- | --- | --- | --- |
-| IDLE인데 배차 차단 `navigating` | 주문 취소 후 자동 복귀, `goal-node` 이동 뒤 IDLE이어도 계속 `dispatch_block_reason=navigating` | `ros_gateway.on_navigation_result`의 일반 목적지·RETURN 완료가 `route`·`navigation_type`만 지우고 `goal_node`를 남김 → `_real_block_reason`의 `goal_node is not None` | 코드 수정: 일반 목적지·RETURN·도킹 완료 시 `goal_node` 해제. 실제 로봇 재검증 필요 |
+| IDLE인데 배차 차단 `navigating` | 주문 취소 후 자동 복귀, `goal-node` 이동 뒤 IDLE이어도 계속 `dispatch_block_reason=navigating` | `ros_gateway.on_navigation_result`의 일반 목적지·RETURN 완료가 `route`·`navigation_type`만 지우고 `goal_node`를 남김 → `_real_block_reason`의 `goal_node is not None` | 코드 수정(`9389c26`): 일반 목적지·RETURN·도킹 완료 시 `goal_node` 해제. **실제 로봇 확인:** robot2 `goal-node` 이동·정렬 뒤 `dispatch_available=true`, `dispatch_block_reason=null` (2026-10-24 17:33, 17:44). RETURN·도킹 완료는 실제 로봇에서 아직 확인하지 않음 |
 | 재연결 시 PAUSED | 브리지 재시작 후 `reconnected_with_active_work`로 PAUSED | **미확인, 유력 후보:** `Robot.set_connected()`는 `route`·`navigation_type`·`order_id`만 보고 활성 작업을 판단한다. Nav2 306 실패 뒤 `navigation_type`이 남은 상태에서 해제했다면 설명 가능하며(`real_navigation.py`의 `navigation_result_failed` 처리와 `ros_gateway.emergency_release`는 `navigation_type`을 지우지 않음), `goal_node`만으로는 설명되지 않는다. | 실행 당시 `route`·`navigation_type`·`order_id` 값을 기록하지 못함. 재현 시 API 상태와 함께 확인 |
 | N5에서 N7 쪽으로 물러남 | N5 진입 뒤 N7 쪽으로 0.2m 이상 물러남. 6번 통과 중 2번(2회차, N6 첫 시도) | robot3 Nav2의 N5 도착·회전 동작. FMS 로그에 대기·정지 없음 | 로봇 쪽 Nav2 로그 미확인 |
 | 노드 0.15~0.2m 위치에서 경로 이탈 판정 | N7에서 약 0.16m, 5→7 통로 위에서 `7→9→2` 복귀를 보내자 4초 만에 `route_mismatch_protected` | 출발 노드는 N7로 잡혔지만 이탈 검사는 5→7 통로로 판단 | `goal-node` 5로 빠져나옴. 미수정 |
+
+## 8. 2026-10-24 robot2 측정 결과와 robot3 비교
+
+FMS를 `goal_node` 수정(`9389c26`) 이후 코드로 재시작한 뒤 robot2 한 대만 연결해 진행했다. 원자료는 `logs/robot_status_20261024_robot2.csv`(1회차), `logs/robot_status_20261024_robot2b.csv`(2·3회차), `logs/backend_20261024_robot2.log`이다.
+
+### 8.1 연결·준비 중 있었던 일
+
+- 처음 bringup이 `KeyError: 'LDS_MODEL'`로 종료됐다. 그 터미널에 `LDS_MODEL`이 없었다(팀 설정 `bashrc_robot.conf`는 `LDS-01`).
+- 처음 연결한 배터리는 11.16V(최근 최저 11.10V, 36.7%)로 하한 아래였다. 위치가 없어 차단 사유는 `on_edge`로 먼저 표시됐다. 배터리를 교체했다(교체 후 11.84V, 74.4%).
+- 위치(`logitle_pose`)가 오지 않는 동안 `/initialpose`를 보내도 변화가 없었다. FMS PC에서 `/robot2/battery_state`는 받히지만 `/robot2/logitle_pose`는 메시지가 없었다.
+- 로봇 Zenoh 브리지가 FMS 재시작 중(라우터 17:28:47 재시작)에 시작되어 `exit code 255`로 종료됐다. FMS를 먼저 켜고 라우터가 뜬 뒤 로봇 브리지를 켠다.
+
+### 8.2 ETA
+
+| 로봇 | 경로 | 거리 | 회차 | 실제 주행 평균 (범위) | 오차 평균 | 실제 평균 속도 |
+| --- | --- | ---: | ---: | --- | ---: | ---: |
+| robot3 | N2→N5 | 1.502 m | 3 | 25.9초 (25.7~26.2) | +18.4초 | 0.058 m/s |
+| robot2 | N1→N5 | 1.356 m | 3 | 21.1초 (18.7~22.6) | +14.3초 | 0.064 m/s |
+
+- 0.2 m/s ETA로는 두 경로의 차이가 0.73초(7.51 − 6.78)지만 실제 평균 차이는 4.8초다. 현재 ETA로는 2초 범위 안의 순위가 실제 도착 순서를 보장하지 못한다.
+- 속도를 robot3 실측 0.058 m/s로 맞춰도 robot2 예측은 23.4초로 실제 평균보다 2.3초 길다. 로봇 사이 평균 속도 차이(약 10%)가 남는다.
+- robot2는 회차 사이 편차가 3.9초(18.7~22.6초)로 robot3(0.5초)보다 크다. 1회차는 출발 위치가 N1에서 0.11m 뒤였고, 2·3회차는 0.013~0.043m였다. 편차는 주로 N7→N5 구간(10.2~12.2초)과 출발 위치 차이에서 나왔다.
+- 따라서 같은 Nav2 코드(dev)에서도 실제 도착 시간 차이가 회차마다 수 초씩 흔들린다. 2초 범위를 확정하려면 ETA 속도 보정 뒤에도 남는 로봇·회차 편차를 더 모아야 한다. CSV 0.5초 간격이라 각 시각에는 ±0.5초 오차가 있다.
+- robot2는 3회 모두 N5에서 N7 쪽으로 물러나지 않았다(robot3은 6번 통과 중 2번).
+- ArUco 정렬은 26~40초로 robot3(29~40초)과 비슷했다.
+
+### 8.3 전압
+
+- 교체 배터리 11.84V에서 약 15분 동안 측정 3회와 복귀 주행 뒤 11.60V(61.1%)였다. 주행 중 최저 11.58V, `low_battery` 차단 없음.
+- 측정 후 robot2의 `vcgencmd get_throttled`는 `0x0`이었다. 이번 범위(11.56V 이상)에서는 Pi 저전압 이력이 없었다.
+
+### 8.4 Nav2 브랜치
+
+- `Logistics_AMR`의 `ugie-nav2`는 dev와 분기점(`586d6a6`) 이후 3커밋 다르다. 경유지 BT를 `graph_turn_aware.xml`로 바꾸고 경유지 확인 3Hz → 20Hz, StraightFirst 플래너 추가, `desired_linear_vel` 0.10 → 0.09, `xy_goal_tolerance` 0.05 → 0.03, AMCL 강화 등이 들어 있다. README는 실험 코드라고 적고 있다.
+- 주행 시간과 N5 물러남에 영향을 줄 수 있으므로, 운영 Nav2 코드를 정한 뒤 같은 경로를 다시 측정해 ETA 속도와 2초 범위를 정한다.
