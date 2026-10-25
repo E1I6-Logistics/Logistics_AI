@@ -206,6 +206,59 @@ class FixedReservationTests(unittest.TestCase):
             nav._send("robot1", "3", 0, DistanceAStar(graph()))
         self.assertEqual([xy[:2] for xy in sent[0]["waypoints"]], [(0.0, 1.0), (2.0, 0.0)])
 
+    def test_turtlebot3_footprint_constants(self):
+        """TurtleBot3 Burger 표준 풋프린트 반경(0.105m) 상수가 정의되어 있는지 검증."""
+        from backend.app.services.traffic_manager import TURTLEBOT3_BURGER_RADIUS_M, TURTLEBOT3_CLEARANCE_DIAMETER_M
+        self.assertEqual(TURTLEBOT3_BURGER_RADIUS_M, 0.105)
+        self.assertEqual(TURTLEBOT3_CLEARANCE_DIAMETER_M, 0.21)
+        tm = TrafficManager({"robot1": robot()}, speed_mps=1, safety_margin=0.2)
+        self.assertEqual(tm.robot_radius_m, 0.105)
+
+    def test_required_paths_mutual_vacating_resolves_deadlock(self):
+        """[AI/MAPF] 두 로봇이 상대방의 현재 노드를 목적지로 하는 상호 대면/우회 경로일 때 교착 없이 완주하는지 검증."""
+        from backend.app.services.route_graph import load_route_graph
+        from backend.simulation.scenarios import prepare
+        from backend.app.services.mock_data import MockFmsStore
+
+        warehouse = load_route_graph()
+        nodes = DistanceAStar(warehouse).nodes
+
+        store = MockFmsStore(ReservationTable())
+        store.reset()
+        specs = [
+            {"id": "robot1", "start": "9", "goal": "7"},
+            {"id": "robot2", "start": "7", "goal": "9"},
+            {"id": "robot3", "start": "0", "goal": None},
+        ]
+        with patch("backend.app.services.mock_data.load_route_graph", return_value=warehouse):
+            # 시작 위치 배치
+            store._robots["robot1"].update(x=nodes["9"][0], y=nodes["9"][1], current_node="9", occupied_node="9", occupied_edge=None, status="IDLE", goal_node=None, route=None)
+            store._robots["robot2"].update(x=nodes["7"][0], y=nodes["7"][1], current_node="7", occupied_node="7", occupied_edge=None, status="IDLE", goal_node=None, route=None)
+            store._robots["robot3"].update(x=nodes["0"][0], y=nodes["0"][1], current_node="0", occupied_node="0", occupied_edge=None, status="IDLE", goal_node=None, route=None)
+            start_time = 100.0
+            with patch("backend.app.services.mock_data.monotonic", return_value=start_time):
+                store._last_tick = start_time - 0.1
+                res1 = store.navigate_to_node("robot1", "7", required_path=["9", "7"])
+                res2 = store.navigate_to_node("robot2", "9", required_path=["7", "8", "10", "9"])
+
+            # 초기 예약 단계에서 두 로봇이 상호 비우기(cycle)를 감지하여 시간표를 확정해야 함
+            self.assertIsNotNone(store._robots["robot1"]["route"])
+            self.assertIsNotNone(store._robots["robot2"]["route"])
+
+            # 시뮬레이션 진행
+            for i in range(1, 300):
+                store.advance_simulation(0.1, now=start_time + i * 0.1)
+                r1_done = store._robots["robot1"]["status"] == "IDLE" and store._robots["robot1"]["occupied_node"] == "7"
+                r2_done = store._robots["robot2"]["status"] == "IDLE" and store._robots["robot2"]["occupied_node"] == "9"
+                if r1_done and r2_done:
+                    break
+
+            self.assertEqual(store._robots["robot1"]["status"], "IDLE")
+            self.assertEqual(store._robots["robot1"]["occupied_node"], "7")
+            self.assertEqual(store._robots["robot2"]["status"], "IDLE")
+            self.assertEqual(store._robots["robot2"]["occupied_node"], "9")
+
 
 if __name__ == "__main__":
     unittest.main()
+

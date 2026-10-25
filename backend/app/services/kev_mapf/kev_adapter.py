@@ -25,6 +25,8 @@ def mapf_robot_from_route_result(
     *,
     status: str = "IDLE",
     task_priority: int = 0,
+    footprint_radius_m: float = 0.105,
+    robot_type: str = "turtlebot3_burger",
 ) -> dict[str, Any]:
     """dispatcher의 실제 `result['path']`를 한 로봇의 MAPF 입력 딕셔너리로 변환한다."""
     if not isinstance(result, dict) or not isinstance(result.get("path"), list):
@@ -36,6 +38,8 @@ def mapf_robot_from_route_result(
         "path": [_node(n) for n in result["path"]],
         "status": status,
         "task_priority": int(task_priority),
+        "robot_type": robot_type,
+        "footprint_radius_m": float(footprint_radius_m),
     }
 
 
@@ -90,6 +94,8 @@ def parse_robot_state(data: dict, graph: Graph, live: Any) -> dict[str, dict]:
             "task_priority": int(raw.get("task_priority", 0)),
             "selector": raw.get("selector", "kev"),
             "model": raw.get("model"),
+            "robot_type": str(raw.get("robot_type", "turtlebot3_burger")),
+            "footprint_radius_m": float(raw.get("footprint_radius_m", 0.105)),
         }
     if not robots:
         raise ValueError("MAPF needs at least one robot")

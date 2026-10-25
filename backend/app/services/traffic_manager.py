@@ -22,6 +22,11 @@ from .reservation import ReservationTable, build_schedule, node_key, edge_key
 from .route_graph import find_edge_ids
 
 
+# TurtleBot3 Burger 규격 풋프린트: 반경 0.105m (지름 0.21m)
+TURTLEBOT3_BURGER_RADIUS_M = 0.105
+TURTLEBOT3_CLEARANCE_DIAMETER_M = 0.21
+
+
 @dataclass(frozen=True)
 class SegmentPermission:
     decision: Literal["allowed", "waiting", "replan"]
@@ -37,6 +42,7 @@ class TrafficManager:
         self._reservations = reservations if reservations is not None else ReservationTable()
         self.speed_mps = speed_mps
         self.safety_margin = safety_margin
+        self.robot_radius_m = TURTLEBOT3_BURGER_RADIUS_M
         self.lock = RLock()
         self._pending: dict[str, None] = {}
         self._concession: dict[str, dict] = {}
@@ -555,3 +561,129 @@ class TrafficManager:
             elif self._try_schedule(robot, now, graph, planner):
                 self._pending.pop(robot_id, None)
         self._resolve_deadlock(now, graph, planner)
+        self._resolve_required_path_cycles(now, graph, planner)
+
+    # AI 고정 경로(required_path) 로봇들이 서로의 초기 점유 노드를 목적지로 하여 맞물린 교착을 해소한다.
+    def _resolve_required_path_cycles(self, now, graph, planner):
+        pending_reqs = [
+            rid
+            for rid in self._pending
+            if rid in self._required_paths
+            and self._robots[rid]["goal_node"] is not None
+            and self._robots[rid]["route"] is None
+        ]
+        if len(pending_reqs) < 2:
+            return
+
+        for starter_id in sorted(pending_reqs, key=lambda r: self._robots[r]["request_order"] or 0):
+            trial = self._planning_copy()
+            vacating_nodes = {}
+            for rid in pending_reqs:
+                if rid == starter_id:
+                    continue
+                req = self._required_paths.get(rid)
+                occ = self._robots[rid]["occupied_node"]
+                if req and len(req) > 1 and req[0] == occ:
+                    vacating_nodes[occ] = now
+
+            starter = trial._robots[starter_id]
+            others = [row for row in trial._reservations.snapshot() if row.robot_id != starter_id]
+            blocked = {}
+            for row in others:
+                blocked.setdefault(row.resource, []).append((row.start, row.end))
+            for owner, resources in trial._protected_resources.items():
+                if owner != starter_id:
+                    for resource in resources:
+                        blocked.setdefault(resource, []).append((now, math.inf))
+            for other in trial._robots.values():
+                if other is starter:
+                    continue
+                resource = occupied_resource(other, graph)
+                route = other["route"]
+                scheduled = route is not None and route.get("departure_at") is not None
+                if not scheduled and resource[0] == "node" and resource[1] in vacating_nodes:
+                    until = vacating_nodes[resource[1]]
+                else:
+                    until = (
+                        max(
+                            (
+                                row.end
+                                for row in others
+                                if row.robot_id == other["robot_id"] and row.resource == resource and row.start <= now < row.end
+                            ),
+                            default=math.inf,
+                        )
+                        if scheduled
+                        else math.inf
+                    )
+                blocked.setdefault(resource, []).append((max(0.0, now - trial.safety_margin), until))
+
+            res_resource = occupied_resource(starter, graph)
+            plan = planner.plan_timed(
+                starter["goal_node"],
+                (starter["x"], starter["y"]),
+                starter["occupied_node"],
+                res_resource[1:] if res_resource[0] == "edge" else None,
+                blocked=blocked,
+                now=now,
+                speed_mps=trial.speed_mps,
+                safety_margin=trial.safety_margin,
+                required_path=trial._required_paths.get(starter_id),
+            )
+            if plan is None:
+                continue
+
+            node_ids, departures = plan["node_ids"], plan["segment_departures"]
+            edge_ids = find_edge_ids(graph, node_ids)
+            waypoint_yaws = [float(starter["yaw"])]
+            for s_node, e_node in zip(node_ids, node_ids[1:]):
+                ax, ay = planner.nodes[s_node]
+                bx, by = planner.nodes[e_node]
+                waypoint_yaws.append(
+                    math.atan2(by - ay, bx - ax) if math.hypot(bx - ax, by - ay) > 1e-9 else waypoint_yaws[-1]
+                )
+            departure = departures[0] if departures else now
+            batch = build_schedule(
+                starter_id,
+                starter["navigation_id"],
+                node_ids,
+                planner.nodes,
+                (starter["x"], starter["y"]),
+                starter["occupied_node"],
+                now=now,
+                departure_at=departure,
+                speed_mps=trial.speed_mps,
+                safety_margin=trial.safety_margin,
+                segment_departures=departures,
+            )
+            if not trial._reservations.replace_request(starter_id, starter["navigation_id"], batch):
+                continue
+            starter["route"] = {
+                "node_ids": node_ids,
+                "edge_ids": edge_ids,
+                "waypoint_yaws": waypoint_yaws,
+                "segment_index": 0,
+                "phase": "ready",
+                "departure_at": departure,
+                "segment_departures": departures,
+                "route_source": "llm",
+            }
+            starter["status"] = "WAITING" if departure > now else "NAVIGATING"
+            trial._pending.pop(starter_id, None)
+
+            remaining = [rid for rid in pending_reqs if rid != starter_id]
+            all_ok = True
+            for rid in remaining:
+                if not trial._try_schedule(trial._robots[rid], now, graph, planner):
+                    all_ok = False
+                    break
+                trial._pending.pop(rid, None)
+
+            if all_ok:
+                for rid in pending_reqs:
+                    self._robots[rid].update(trial._robots[rid])
+                    batch_rows = [r for r in trial._reservations.snapshot() if r.robot_id == rid]
+                    self._reservations.replace_request(rid, self._robots[rid]["navigation_id"], batch_rows)
+                    self._pending.pop(rid, None)
+                return
+

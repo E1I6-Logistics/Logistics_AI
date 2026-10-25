@@ -84,6 +84,10 @@ export default function WarehouseMap({
   const mapWidth = mapInfo?.width ?? 97
   const mapHeight = mapInfo?.height ?? 47
 
+  // TurtleBot3 Burger 물리적 풋프린트 반경 (0.105m) -> 맵 좌표 픽셀 변환
+  const mapResolution = mapInfo?.resolution ?? 0.05
+  const tb3RadiusPx = 0.105 / mapResolution
+
   const viewWidth = (mapWidth + 16) / zoom
   const viewHeight = (mapHeight + 16) / zoom
 
@@ -319,6 +323,17 @@ export default function WarehouseMap({
                   }}
                 >
                   {selected && <circle cx={position.x} cy={position.y} r={px(21)} fill="#2589F5" opacity="0.12" />}
+                  {/* TurtleBot3 실제 물리적 풋프린트 반경 (0.105m, 지름 0.21m) */}
+                  <circle
+                    cx={position.x}
+                    cy={position.y}
+                    r={tb3RadiusPx}
+                    fill={robot.stale ? '#C7CDD4' : robot.color}
+                    fillOpacity="0.16"
+                    stroke={selected ? '#2589F5' : robot.stale ? '#9AA4B0' : robot.color}
+                    strokeWidth={px(1.2)}
+                    strokeDasharray={`${px(2.5)} ${px(1.5)}`}
+                  />
                   <circle cx={position.x} cy={position.y + px(2)} r={px(13)} fill="#263545" opacity="0.12" />
                   <circle
                     cx={position.x}
