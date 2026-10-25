@@ -4,10 +4,13 @@ import asyncio
 from copy import deepcopy
 from functools import wraps
 import json
+import logging
 import math
 from threading import RLock
 from time import monotonic
 from uuid import uuid4
+
+logger = logging.getLogger(__name__)
 
 from ..config import BASE_DIR, REAL_OCCUPANCY_TOLERANCE_M, REAL_POSE_TIMEOUT_S
 from ..schemas.robot import normalize_robot_id
@@ -222,58 +225,71 @@ class ScenarioManager:
             if is_ai:
                 from .kev_mapf import plan_mapf_from_route_results
 
-                route_planner = DistanceAStar(graph)
-                route_results = []
-                for spec in specs:
-                    if spec.get("goal") is None:
-                        continue
-                    rid, start, goal = spec["id"], str(spec["start"]), str(spec["goal"])
-                    path: list[str] | None = None
-                    try:
-                        from .llm_route_preview import preview_llm_route
+                def _compute_ai_and_mapf():
+                    route_planner = DistanceAStar(graph)
+                    route_results = []
+                    for spec in specs:
+                        if spec.get("goal") is None:
+                            continue
+                        rid, start, goal = spec["id"], str(spec["start"]), str(spec["goal"])
+                        path: list[str] | None = None
+                        try:
+                            from .llm_route_preview import preview_llm_route
 
-                        res = preview_llm_route(
-                            graph,
-                            start,
-                            goal,
-                            selector=spec.get("selector", "kev"),
-                            model=spec.get("model", "kev-08b"),
+                            res = preview_llm_route(
+                                graph,
+                                start,
+                                goal,
+                                selector=spec.get("selector", "kev"),
+                                model=spec.get("model", "kev-08b"),
+                            )
+                            if isinstance(res, dict) and isinstance(res.get("path"), list):
+                                path = [str(n) for n in res["path"]]
+                        except Exception as exc:
+                            logger.warning(f"AI route preview fallback for {rid} ({start}->{goal}): {exc}")
+
+                        if not path:
+                            plan_res = route_planner.plan(start, goal)
+                            path = [str(n) for n in getattr(plan_res, "route", getattr(plan_res, "node_ids", []))]
+
+                        route_results.append(
+                            {
+                                "order": {
+                                    "robot_id": rid,
+                                    "selector": spec.get("selector", "kev"),
+                                    "model": spec.get("model", "kev-08b"),
+                                },
+                                "current_node": start,
+                                "node": goal,
+                                "result": {"path": path},
+                                "task_priority": int(spec.get("task_priority", 0)),
+                            }
                         )
-                        if isinstance(res, dict) and isinstance(res.get("path"), list):
-                            path = [str(n) for n in res["path"]]
-                    except Exception:
-                        pass
 
-                    if not path:
-                        plan_res = route_planner.plan(start, goal)
-                        path = [str(n) for n in getattr(plan_res, "route", getattr(plan_res, "node_ids", []))]
-
-                    route_results.append(
-                        {
-                            "order": {
-                                "robot_id": rid,
-                                "selector": spec.get("selector", "kev"),
-                                "model": spec.get("model", "kev-08b"),
-                            },
-                            "current_node": start,
-                            "node": goal,
-                            "result": {"path": path},
-                            "task_priority": int(spec.get("task_priority", 0)),
-                        }
+                    return plan_mapf_from_route_results(
+                        graph,
+                        route_results,
+                        config={
+                            "wait_allowed_nodes": scenario.get("wait_allowed_nodes", ["0", "10", "7", "8"]),
+                            "priority_mode": "score",
+                        },
                     )
 
-                advisory = plan_mapf_from_route_results(
-                    graph,
-                    route_results,
-                    config={
-                        "wait_allowed_nodes": scenario.get("wait_allowed_nodes", ["0", "10", "7", "8"]),
-                        "priority_mode": "score",
-                    },
+                advisory = await asyncio.to_thread(_compute_ai_and_mapf)
+                mapf_success = advisory.get("status") in (
+                    "PROPOSED",
+                    "RESOLVED",
+                    "SUCCESS",
+                    "REVIEW_REQUIRED",
+                ) and not any(d.get("action") == "HOLD" for d in advisory.get("decisions", []))
+                assigned_paths = (
+                    {
+                        rid: [str(n) for n in p]
+                        for rid, p in advisory.get("paths", {}).items()
+                    }
+                    if mapf_success
+                    else {}
                 )
-                assigned_paths = {
-                    rid: [str(n) for n in p]
-                    for rid, p in advisory.get("paths", {}).items()
-                }
                 for rid, goal in goals.items():
                     if mode_manager.mode != mode:
                         raise ValueError("운용 모드가 변경되었습니다.")
@@ -289,6 +305,7 @@ class ScenarioManager:
                     touched = True
                     navigate_to_node(rid, goal, mode)
 
+            started = monotonic()
             self._status["message"] = "주행 및 도착 후 동작 완료 대기 중"
             while True:
                 if self._status["state"] == "stopping":

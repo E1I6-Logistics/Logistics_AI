@@ -142,7 +142,7 @@
       "name": "bottleneck_ai",
       "description": "[AI/MAPF] 9→7 합류 구간의 KEV 우선순위 예약 대기",
       "operation_mode": "ai",
-      "wait_allowed_nodes": ["0", "10", "8", "5"],
+      "wait_allowed_nodes": ["0", "10", "8", "5", "1", "2"],
       "robots": [
         {
           "id": "robot1",

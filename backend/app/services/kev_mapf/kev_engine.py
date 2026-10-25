@@ -167,19 +167,28 @@ class KevMAPF:
         forbid_nodes = set(self.blocked_nodes)
         forbid_edges: set[tuple[int, int]] = set()
 
+        curr = robot["current_node"]
+        goal = robot["goal_node"]
+
         if info["kind"] == "node":
-            forbid_nodes.add(info["node"])
+            if info["node"] not in (curr, goal):
+                forbid_nodes.add(info["node"])
+            else:
+                return (
+                    None,
+                    "reroute cannot exclude current/goal node; use HOLD or change a task",
+                )
         elif info["kind"] == "edge":
             a, b = info["edge"]
             forbid_edges.update({(a, b), (b, a)})
         elif info["kind"] == "group":
-            forbid_nodes.update(info["nodes"])
+            forbid_nodes.update(set(info["nodes"]) - {curr, goal})
             for a, b in info["edges"]:
                 forbid_edges.update({(a, b), (b, a)})
         else:
             raise ValueError(f"Unknown zone kind: {info['kind']}")
 
-        if robot["current_node"] in forbid_nodes or robot["goal_node"] in forbid_nodes:
+        if curr in forbid_nodes or goal in forbid_nodes:
             return (
                 None,
                 "reroute cannot exclude current/goal node; use HOLD or change a task",
@@ -213,7 +222,11 @@ class KevMAPF:
                 raise ValueError("generated path entered forbidden node")
             if any((a, b) in forbid_edges for a, b in zip(candidate, candidate[1:])):
                 raise ValueError("generated path entered forbidden edge")
-            if any(a in candidate and b in candidate for a, b in forbid_edges):
+            if any(
+                a in candidate and b in candidate
+                for a, b in forbid_edges
+                if a not in (curr, goal) and b not in (curr, goal)
+            ):
                 raise ValueError("generated path still traverses both endpoints of forbidden edge")
             return candidate, None
         except Exception as exc:
@@ -383,6 +396,26 @@ class KevMAPF:
                 status = "REVIEW_REQUIRED"
         return status
 
+    def _is_vacating_pair(self, node: int, a: str, b: str) -> bool:
+        """한 로봇이 해당 노드를 출발하여 즉시 비워주고(t=0), 다른 로봇이 이후 단계(t>=1)에 도착하는 무충돌 통과인지 판정한다."""
+        rA, rB = self.robots.get(a), self.robots.get(b)
+        if not rA or not rB:
+            return False
+        pathA, pathB = rA.get("path"), rB.get("path")
+        if not pathA or not pathB:
+            return False
+        if pathA[0] == node and len(pathA) > 1 and pathB[0] != node:
+            edgeA = (pathA[0], pathA[1])
+            if len(pathB) > 1 and (pathB[0], pathB[1]) == (edgeA[1], edgeA[0]):
+                return False
+            return True
+        if pathB[0] == node and len(pathB) > 1 and pathA[0] != node:
+            edgeB = (pathB[0], pathB[1])
+            if len(pathA) > 1 and (pathA[0], pathA[1]) == (edgeB[1], edgeB[0]):
+                return False
+            return True
+        return False
+
     def resolve(self) -> dict:
         """최대 `self.rounds` 동안 공유 구간 충돌을 탐색하고 Kev 4단계 질의로 조정 계획을 수립한다."""
         start = time.perf_counter()
@@ -396,6 +429,9 @@ class KevMAPF:
             for zid, info in potential_conflict_zones.items():
                 pair = self._pair_for(zid, info)
                 if pair is not None:
+                    if info.get("kind") == "node" and self._is_vacating_pair(info["node"], pair[0], pair[1]):
+                        self.processed.add((zid, pair[0], pair[1]))
+                        continue
                     zone_pairs[zid] = pair
                     available_zones[zid] = info
 
@@ -522,7 +558,7 @@ class KevMAPF:
                 result.update(action="HOLD", reason="KEV_SELECTED_HOLD")
                 status = "BLOCKED"
 
-            if result["action"] in ("WAIT", "REROUTE"):
+            if result["action"] == "WAIT":
                 if not would_cycle(self.priorities, high, low):
                     self.priorities.add((high, low))
                 else:

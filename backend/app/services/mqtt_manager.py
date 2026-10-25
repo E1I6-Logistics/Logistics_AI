@@ -2,7 +2,10 @@ import json
 import threading
 import time
 
-import paho.mqtt.client as mqtt
+try:
+    import paho.mqtt.client as mqtt
+except ImportError:
+    mqtt = None
 
 from ..models.omx import OMX
 from ..config import MQTT_BROKER_IP, MQTT_BROKER_PORT
@@ -26,10 +29,12 @@ class MQTTManager:
         self._cancel_callbacks = {}
 
         # MQTT Client
-        self.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION1)
-
-        self.client.on_connect = self._on_connect
-        self.client.on_message = self._on_message
+        if mqtt is not None:
+            self.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION1)
+            self.client.on_connect = self._on_connect
+            self.client.on_message = self._on_message
+        else:
+            self.client = None
 
         self.running = False
         self.connection_thread = None

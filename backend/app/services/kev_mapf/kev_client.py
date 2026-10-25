@@ -203,17 +203,28 @@ class LiveKEV:
             }
             if traffic is not None:
                 kwargs["traffic"] = traffic
-            result = self.preview_llm_route(
-                graph_data,
-                str(start),
-                str(goal),
-                **kwargs,
-            )
-            if not isinstance(result, dict) or not isinstance(result.get("path"), list):
-                raise ValueError("preview_llm_route() must return a dict with a path list")
-            path = [_node(n) for n in result["path"]]
-            Graph(graph_data).check_path(path, start=start, goal=goal)
-            self.calls += int(result.get("calls", 0))
-            return path
+            try:
+                result = self.preview_llm_route(
+                    graph_data,
+                    str(start),
+                    str(goal),
+                    **kwargs,
+                )
+                if not isinstance(result, dict) or not isinstance(result.get("path"), list):
+                    raise ValueError("preview_llm_route() must return a dict with a path list")
+                path = [_node(n) for n in result["path"]]
+                Graph(graph_data).check_path(path, start=start, goal=goal)
+                self.calls += int(result.get("calls", 0))
+                return path
+            except FileNotFoundError:
+                raise
+            except Exception as exc:
+                self.warnings.append(f"KEV route fallback to A*: {exc}")
+                from backend.app.services.pathfinding import DistanceAStar
+
+                plan_res = DistanceAStar(graph_data).plan(str(start), str(goal))
+                path = [_node(n) for n in getattr(plan_res, "route", getattr(plan_res, "node_ids", []))]
+                Graph(graph_data).check_path(path, start=start, goal=goal)
+                return path
         finally:
             self.model_seconds += time.perf_counter() - started

@@ -15,7 +15,10 @@ from ..services.fleet_manager import fleet_manager
 from ..services.pathfinding import DistanceAStar
 from ..services.route_graph import get_node, load_route_graph, find_edge_ids, locate_current_node, find_nearest_node
 
-from action_msgs.msg import GoalStatus
+try:
+    from action_msgs.msg import GoalStatus
+except ImportError:
+    GoalStatus = None
 import math
 from typing import TYPE_CHECKING
 
