@@ -11,9 +11,10 @@
 
 ## 2. 코드 ETA 기준
 
-코드 ETA는 route graph(`test.geojson`) 최단 거리 ÷ `KEV_DISPATCH_ETA_SPEED_MPS`(0.2 m/s)이다.
+코드 ETA는 주문 픽업 노드 중 route graph(`test.geojson`) 최단 거리 ÷ `KEV_DISPATCH_ETA_SPEED_MPS`(0.2 m/s)이다.
 
 - ArUco 정렬, 예약 대기, 출발 지연은 포함하지 않는다.
+- 픽업 노드가 여러 개인 주문에서는 실제 방문 순서와 ETA 기준 노드가 다를 수 있다. 이 기록표의 단일 픽업 주문 측정에는 영향이 없다.
 - **ArUco 정렬은 기존 측정값을 근거로 ETA에서 뺀다.** 10/9~10/11 성공 71회 평균 47.3초, 중앙값 43초, 범위 18~101초(`Logistics_AMR/docs/aruco_alignment_team_guide_20261015.md`, 원자료 `aruco_align_runs_*.csv`의 `duration_s`). 픽업 ETA(2.6~12.2초)보다 훨씬 길고 같은 로봇·노드에서도 수십 초씩 흔들려, 더해도 2초 판단이 정확해지지 않는다. 후보들은 같은 픽업 노드에서 똑같이 정렬하므로 ETA는 픽업 노드 도착까지만 비교한다.
 - 기존 측정은 여러 코드 버전이 섞였고 10/11 이후 N3·N4 벽이 옮겨졌다. 정렬 시간을 주문 처리 시간이나 예약 시간 같은 운영값으로 쓸 때는 다시 측정한다.
 - 예약 계산용 `FMS_REAL_NAVIGATION_SPEED_MPS`(0.15 m/s)와는 별개 값이다.
