@@ -28,7 +28,7 @@ class OrderTrafficRequest(BaseModel):
 
 # 현재 상태의 복사본을 만든다.
 def _snapshot() -> dict[str, object]:
-    from ..services.order_traffic_service import SELECTION_POLICIES, enabled, route_source, selection_policy
+    from ..services.mapf.order_traffic_service import SELECTION_POLICIES, enabled, route_source, selection_policy
 
     traffic_enabled = enabled(dict(mode=mode_manager.mode, operation_mode=mode_manager.operation_mode,
                                    driving_mode="llm" if mode_manager.operation_mode == "ai" else "standard"))
@@ -58,7 +58,7 @@ async def set_order_traffic(payload: OrderTrafficRequest):
     from ..services.order_manager import order_manager
     from ..services.scenario_service import scenario_manager
     from ..services.mock_data import mock_fms
-    from ..services.order_traffic_service import enabled, set_simulation_policy
+    from ..services.mapf.order_traffic_service import enabled, set_simulation_policy
 
     if not enabled(dict(mode=mode_manager.mode, operation_mode=mode_manager.operation_mode, driving_mode="llm")):
         raise HTTPException(409, detail="일반 주문 교통조정이 켜진 시뮬·AI 모드에서만 변경할 수 있습니다.")

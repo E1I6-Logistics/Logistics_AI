@@ -24,6 +24,11 @@ POLICIES = ("MIN_EXPECTED_TIME", "KEV", "KEV_STRATEGY_ORDER")
 JHLEE_POLICY = "JHLEE_NATIVE_GATE_COMMON_ASTAR"
 LABELS = {"MIN_EXPECTED_TIME":"코드 선택", "KEV":"기존 KEV 선택", "KEV_STRATEGY_ORDER":"새 KEV 전략 순서", JHLEE_POLICY:"jhlee 원본 주문 게이트·공통 A*"}
 SOURCE_PATHS = (
+    "backend/app/services/mapf/__init__.py",
+    "backend/app/services/mapf/common.py",
+    "backend/app/services/mapf/order_traffic_service.py",
+    "backend/app/services/mapf/order_traffic_strategy.py",
+    "backend/app/services/mapf/traffic_route_provider.py",
     "tests/order_traffic_policy_comparison.py", "tests/order_traffic_strategy_smoke.py",
     "backend/simulation/order_traffic_preview.py", "backend/app/services/order_traffic_service.py",
     "backend/app/services/order_traffic_strategy.py", "backend/app/services/order_route_dispatcher.py",

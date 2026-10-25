@@ -14,7 +14,7 @@ async def dispatch_order_route(order, node, current_node, valid=None, *, chargin
 
     required_path = None
     operation_mode = order.get("operation_mode", "ai" if order["driving_mode"] == "llm" else "algorithm")
-    from .order_traffic_service import enabled, route_source
+    from .mapf.order_traffic_service import enabled, route_source
 
     use_traffic = enabled(order)
     configured_source = route_source() if use_traffic else "MODE"
@@ -23,7 +23,7 @@ async def dispatch_order_route(order, node, current_node, valid=None, *, chargin
     if configured_source != "MODE":
         source = configured_source
     if use_traffic and source == "EXISTING_SHORTEST_PATH":
-        from .traffic_route_provider import generate_traffic_route
+        from .mapf.traffic_route_provider import generate_traffic_route
 
         if current_node is None:
             raise ValueError("교통조정의 출발 노드를 확인할 수 없습니다.")
@@ -63,7 +63,7 @@ async def dispatch_order_route(order, node, current_node, valid=None, *, chargin
         elif snapshot["occupied_node"] != str(current_node):
             raise ValueError("경로 생성 중 로봇의 현재 위치가 변경되었습니다.")
         if use_traffic:
-            from .order_traffic_service import coordinate_order_route
+            from .mapf.order_traffic_service import coordinate_order_route
 
             return await coordinate_order_route(order, node, current_node, required_path,
                                                 graph=graph, source=source, valid=valid)

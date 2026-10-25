@@ -9,11 +9,11 @@ from __future__ import annotations
 from collections import Counter
 from copy import deepcopy
 from dataclasses import asdict, dataclass
-import hashlib
 import json
 import math
 from typing import Any
 
+from .mapf.common import fingerprint
 from .pathfinding import DistanceAStar
 from .reservation import edge_key
 from .traffic_manager import TrafficManager
@@ -34,12 +34,6 @@ CHOICE_INSTRUCTIONS = (
     "Estimates use constant speed and exclude inference, turns and reservation delays. "
     "Choose based on these values, not the candidate ID or its position in the list."
 )
-
-
-def fingerprint(value: Any) -> str:
-    return hashlib.sha256(
-        json.dumps(value, sort_keys=True, ensure_ascii=False, allow_nan=False).encode()
-    ).hexdigest()
 
 
 def node_id(value: Any) -> str:
