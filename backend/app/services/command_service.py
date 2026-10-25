@@ -2,12 +2,15 @@
 
 
 # 지정한 노드로 로봇 주행을 요청한다.
-def navigate_to_node(robot_id, node_id, mode, *, required_path=None):
+def navigate_to_node(robot_id, node_id, mode, *, required_path=None, task_priority: int = 0):
     if mode == "simulation":
         from .mock_data import mock_fms
 
         result = mock_fms.navigate_to_node(
-            robot_id, node_id, **({"required_path": required_path} if required_path is not None else {})
+            robot_id,
+            node_id,
+            **({"required_path": required_path} if required_path is not None else {}),
+            task_priority=task_priority,
         )
     elif mode == "real":
         from ..ros2.ros_gateway import ros_gateway

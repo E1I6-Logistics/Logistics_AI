@@ -334,30 +334,30 @@ export default function WarehouseMap({
                     strokeWidth={px(1.2)}
                     strokeDasharray={`${px(2.5)} ${px(1.5)}`}
                   />
-                  <circle cx={position.x} cy={position.y + px(2)} r={px(13)} fill="#263545" opacity="0.12" />
+                  <circle cx={position.x} cy={position.y + px(1)} r={tb3RadiusPx * 0.85} fill="#263545" opacity="0.12" />
                   <circle
                     cx={position.x}
                     cy={position.y}
-                    r={px(13)}
+                    r={tb3RadiusPx * 0.85}
                     fill={robot.stale ? '#C7CDD4' : robot.color}
                     stroke={
                       selected ? '#2589F5' : robot.stale ? '#9AA4B0' : robot.color
                     }
-                    strokeWidth={px(selected ? 3 : 2.3)}
+                    strokeWidth={px(selected ? 2.5 : 1.5)}
                   />
                   <path
-                    d={`M${position.x} ${position.y - px(9)}v${-px(8)}`}
+                    d={`M${position.x} ${position.y - tb3RadiusPx * 0.6}v${-px(6)}`}
                     transform={`rotate(${robot.heading} ${position.x} ${position.y})`}
                     stroke={robot.stale ? '#7D8792' : '#273444'}
-                    strokeWidth={px(2)}
+                    strokeWidth={px(1.8)}
                     strokeLinecap="round"
                   />
                   <text
                     x={position.x}
-                    y={position.y + px(0.5)}
+                    y={position.y + px(0.3)}
                     textAnchor="middle"
                     dominantBaseline="middle"
-                    fontSize={px(8.5)}
+                    fontSize={px(6.5)}
                     fontWeight="800"
                     fill={robot.stale ? '#69737E' : '#FFFFFF'}
                   >

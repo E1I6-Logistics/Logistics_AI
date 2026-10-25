@@ -219,7 +219,8 @@ def build_schedule(
         add(edge_key(start, end), index, occupied_from - safety_margin, arrival + safety_margin)
         last = index == len(node_ids) - 2
         leave = arrival if segment_departures is None or last else segment_departures[index + 1]
-        add(node_key(end), index, arrival - safety_margin, float("inf") if last else leave + safety_margin)
+        node_clearance = max(safety_margin, 0.12 / speed_mps)
+        add(node_key(end), index, arrival - safety_margin, float("inf") if last else leave + node_clearance)
         origin = nodes[end]
         entry = arrival
 

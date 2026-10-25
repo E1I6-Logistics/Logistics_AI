@@ -221,7 +221,7 @@ class ScenarioManager:
                 prepare(specs, nodes)
             operation_mode = scenario.get("operation_mode") or mode_manager.operation_mode
             is_ai = operation_mode == "ai" or any(r.get("driving_mode") == "llm" for r in specs)
-            wait_dependencies = {}
+            assigned_paths = {}
             if is_ai:
                 from .kev_mapf import plan_mapf_from_route_results
 
@@ -290,51 +290,21 @@ class ScenarioManager:
                     if mapf_success
                     else {}
                 )
-                starts = {r["id"]: str(r["start"]) for r in specs if r.get("goal") is not None}
-                for d in advisory.get("decisions", []):
-                    if d.get("action") == "WAIT":
-                        p_id = d.get("priority_robot")
-                        y_id = d.get("yield_robot")
-                        zone = d.get("zone")
-                        if p_id and y_id and p_id in goals and y_id in goals:
-                            if goals.get(p_id) == starts.get(y_id):
-                                wait_dependencies.setdefault(p_id, set()).add((y_id, f"node:{starts[y_id]}"))
-                            else:
-                                wait_dependencies.setdefault(y_id, set()).add((p_id, zone))
-            else:
-                assigned_paths = {}
-                planned_paths = {}
-                starts = {r["id"]: str(r["start"]) for r in specs if r.get("goal") is not None}
-                for spec in specs:
-                    if spec.get("goal") is not None:
-                        res = planner.plan(str(spec["start"]), str(spec["goal"]))
-                        planned_paths[spec["id"]] = [
-                            str(n) for n in getattr(res, "route", getattr(res, "node_ids", []))
-                        ]
-                ordered_rids = [spec["id"] for spec in specs if spec.get("goal") is not None]
-                for i, r_low in enumerate(ordered_rids):
-                    p_low = planned_paths.get(r_low, [])
-                    intermediate_nodes = set(p_low[1:-1])
-                    for r_high in ordered_rids[:i]:
-                        p_high = planned_paths.get(r_high, [])
-                        common = intermediate_nodes.intersection(p_high[1:])
-                        for c_node in common:
-                            if goals.get(r_high) == starts.get(r_low):
-                                wait_dependencies.setdefault(r_high, set()).add((r_low, f"node:{starts[r_low]}"))
-                            else:
-                                wait_dependencies.setdefault(r_low, set()).add((r_high, f"node:{c_node}"))
 
-            dispatched = set()
+            spec_by_id = {s["id"]: s for s in specs}
             for rid, goal in goals.items():
-                if rid not in wait_dependencies or not wait_dependencies[rid]:
-                    if mode_manager.mode != mode:
-                        raise ValueError("운용 모드가 변경되었습니다.")
-                    touched = True
-                    req_path = assigned_paths.get(rid)
-                    navigate_to_node(
-                        rid, goal, mode, **({"required_path": req_path} if req_path else {})
-                    )
-                    dispatched.add(rid)
+                if mode_manager.mode != mode:
+                    raise ValueError("운용 모드가 변경되었습니다.")
+                touched = True
+                req_path = assigned_paths.get(rid)
+                prio = int(spec_by_id.get(rid, {}).get("task_priority", 0))
+                navigate_to_node(
+                    rid,
+                    goal,
+                    mode,
+                    **({"required_path": req_path} if req_path else {}),
+                    task_priority=prio,
+                )
 
             started = monotonic()
             self._status["message"] = "주행 및 도착 후 동작 완료 대기 중"
@@ -344,58 +314,6 @@ class ScenarioManager:
                 if mode_manager.mode != mode or load_route_graph() != graph:
                     raise ValueError("실행 중 운용 모드 또는 그래프가 변경되었습니다.")
                 states = robot_states(mode)
-
-                if wait_dependencies:
-                    for y_id in list(wait_dependencies.keys()):
-                        if y_id in dispatched:
-                            continue
-                        deps = wait_dependencies[y_id]
-                        cleared_deps = set()
-                        for p_id, zone in deps:
-                            p_row = states.get(p_id)
-                            if p_row is None:
-                                continue
-                            p_status = p_row.get("status")
-                            p_curr = str(p_row.get("current_node"))
-                            p_goal = str(goals.get(p_id))
-                            if p_status == "IDLE" and p_curr == p_goal and not p_row.get("active"):
-                                cleared_deps.add((p_id, zone))
-                                continue
-                            if zone and zone.startswith("node:"):
-                                target_node = zone.split(":", 1)[1]
-                                p_route = p_row.get("route")
-                                if p_route and "node_ids" in p_route:
-                                    node_ids = [str(n) for n in p_route["node_ids"]]
-                                    seg_idx = p_route.get("segment_index", 0)
-                                    if target_node in node_ids:
-                                        t_idx = node_ids.index(target_node)
-                                        if seg_idx > t_idx:
-                                            tx, ty = nodes[target_node]
-                                            px, py = p_row["x"], p_row["y"]
-                                            if math.hypot(px - tx, py - ty) >= 0.15:
-                                                cleared_deps.add((p_id, zone))
-                            elif zone and zone.startswith("zone:edge:"):
-                                parts = zone.split(":")
-                                if len(parts) >= 4:
-                                    v = parts[3]
-                                    p_route = p_row.get("route")
-                                    if p_route and "node_ids" in p_route:
-                                        node_ids = [str(n) for n in p_route["node_ids"]]
-                                        seg_idx = p_route.get("segment_index", 0)
-                                        if v in node_ids and seg_idx >= node_ids.index(v):
-                                            cleared_deps.add((p_id, zone))
-                        deps -= cleared_deps
-                        if not deps:
-                            del wait_dependencies[y_id]
-                            if y_id in goals and y_id not in dispatched:
-                                if mode_manager.mode != mode:
-                                    raise ValueError("운용 모드가 변경되었습니다.")
-                                touched = True
-                                req_path = assigned_paths.get(y_id)
-                                navigate_to_node(
-                                    y_id, goals[y_id], mode, **({"required_path": req_path} if req_path else {})
-                                )
-                                dispatched.add(y_id)
 
                 rows = []
                 for spec in specs:

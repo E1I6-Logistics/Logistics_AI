@@ -125,7 +125,7 @@ class TrafficManager:
         with self.lock:
             return bool(self._concession) or any(robot["goal_node"] is not None for robot in self._robots.values())
 
-    def request_navigation_after_stop(self, robot_id, goal_node, *, now, graph, required_path=None):
+    def request_navigation_after_stop(self, robot_id, goal_node, *, now, graph, required_path=None, task_priority=0):
         """기존 실행 정지와 점유 갱신 후 새 요청을 접수하고 예약한다."""
         with self.lock:
             self._validate_time(now)
@@ -154,6 +154,7 @@ class TrafficManager:
             self.cancel_navigation_after_stop(robot_id)
             if fixed is not None:
                 self._required_paths[robot_id] = fixed
+            robot["task_priority"] = int(task_priority)
             robot["stop_requested"] = False
             self._request_sequence += 1
             robot["request_order"] = self._request_sequence
@@ -170,6 +171,7 @@ class TrafficManager:
             robot["goal_node"] = None
             robot["navigation_id"] = None
             robot["request_order"] = None
+            robot["task_priority"] = 0
             robot["stop_requested"] = True
             self._required_paths.pop(robot_id, None)
             self._concession.pop(robot_id, None)
@@ -283,6 +285,18 @@ class TrafficManager:
                 return SegmentPermission("replan", "missing_reservation")
             if now <= route["segment_departures"][index]:
                 return SegmentPermission("waiting", "departure_time")
+            curr_node = str(nodes[index])
+            target_node = str(nodes[index + 1])
+            is_at_upstream_node = (robot.get("occupied_node") == curr_node)
+
+            if self.is_resource_protected(robot_id, resource) or self.is_resource_protected(robot_id, target):
+                return SegmentPermission("replan", "offline_robot_route")
+            if (
+                expected_arrival_at + self.safety_margin > edge.end + 1e-6
+                or expected_arrival_at + self.safety_margin > destination.end + 1e-6
+            ):
+                return SegmentPermission("replan", "schedule_overrun")
+
             for other in self._robots.values():
                 if other is robot:
                     continue
@@ -295,13 +309,42 @@ class TrafficManager:
                     or other["route"].get("departure_at") is None
                 ):
                     return SegmentPermission("replan", "occupied")
-            if self.is_resource_protected(robot_id, resource) or self.is_resource_protected(robot_id, target):
-                return SegmentPermission("replan", "offline_robot_route")
-            if (
-                expected_arrival_at + self.safety_margin > edge.end + 1e-6
-                or expected_arrival_at + self.safety_margin > destination.end + 1e-6
-            ):
-                return SegmentPermission("replan", "schedule_overrun")
+
+            if is_at_upstream_node:
+                self_goal = str(robot.get("goal_node")) if robot.get("goal_node") is not None else None
+                prio_self = int(robot.get("task_priority", 0))
+                order_self = robot.get("request_order") or math.inf
+
+                for other in self._robots.values():
+                    if other is robot:
+                        continue
+                    other_goal = str(other.get("goal_node")) if other.get("goal_node") is not None else None
+                    other_occ = str(other.get("occupied_node")) if other.get("occupied_node") is not None else None
+                    o_route = other.get("route")
+                    if o_route and o_route.get("node_ids"):
+                        o_idx = o_route.get("segment_index", 0)
+                        o_nodes = [str(n) for n in o_route["node_ids"]]
+                        if o_idx + 1 < len(o_nodes) and o_nodes[o_idx + 1] == target_node:
+                            # 상대방이 내 현재 점유 노드로 이동하려는 경우 -> 내가 먼저 노드를 비워주어야 함
+                            if other_goal == curr_node:
+                                continue
+                            # 내가 상대방의 점유 노드로 가려는 경우 -> 상대방이 먼저 비울 때까지 대기
+                            if self_goal == other_occ:
+                                return SegmentPermission("waiting", "yield_to_vacating_robot")
+                            # 상대방이 이미 진입로(엣지) 주행 중인 경우 -> 상류 노드에서 대기
+                            if other_occ is None:
+                                return SegmentPermission("waiting", "other_on_approach")
+                            # 둘 다 상류 노드에서 진입 준비 중인 경우 -> 우선순위 및 접수순서 비교
+                            prio_other = int(other.get("task_priority", 0))
+                            order_other = other.get("request_order") or math.inf
+                            if (prio_other, -order_other) > (prio_self, -order_self):
+                                return SegmentPermission("waiting", "target_node_precedence")
+
+                    if other_occ == target_node:
+                        if other_goal == target_node and (other.get("route") is None or other["route"].get("departure_at") is None):
+                            return SegmentPermission("replan", "target_node_parked")
+                        if other.get("route") is None or other["route"].get("departure_at") is None or now >= destination.start:
+                            return SegmentPermission("waiting", "target_node_occupied")
             return SegmentPermission("allowed", "reserved")
 
     # 로봇의 기존 예약 일정을 해제한다.
@@ -593,14 +636,35 @@ class TrafficManager:
                     self._pending.pop(rid, None)
                 else:
                     self._wait_for_reservation(robot)
-        for robot_id in sorted(self._pending, key=lambda rid: self._robots[rid]["request_order"] or math.inf):
-            robot = self._robots[robot_id]
-            if robot["goal_node"] is None and robot_id not in self._concession:
-                self._pending.pop(robot_id, None)
-            elif robot_id in self._concession and robot["occupied_node"] == self._concession[robot_id]["node"]:
-                continue
-            elif self._try_schedule(robot, now, graph, planner):
-                self._pending.pop(robot_id, None)
+        changed = True
+        while changed and self._pending:
+            changed = False
+            pending_ids = list(
+                sorted(
+                    self._pending,
+                    key=lambda rid: (
+                        not any(
+                            str(self._robots[o].get("goal_node")) == str(self._robots[rid].get("occupied_node"))
+                            for o in self._pending
+                            if o != rid
+                        ),
+                        -int(self._robots[rid].get("task_priority", 0)),
+                        self._robots[rid].get("request_order") or math.inf,
+                    ),
+                )
+            )
+            for robot_id in pending_ids:
+                if robot_id not in self._pending:
+                    continue
+                robot = self._robots[robot_id]
+                if robot["goal_node"] is None and robot_id not in self._concession:
+                    self._pending.pop(robot_id, None)
+                    changed = True
+                elif robot_id in self._concession and robot["occupied_node"] == self._concession[robot_id]["node"]:
+                    continue
+                elif self._try_schedule(robot, now, graph, planner):
+                    self._pending.pop(robot_id, None)
+                    changed = True
         self._resolve_deadlock(now, graph, planner)
         self._resolve_required_path_cycles(now, graph, planner)
 
