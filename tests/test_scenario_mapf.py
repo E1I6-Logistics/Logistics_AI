@@ -16,39 +16,43 @@ class ScenarioMapfTests(unittest.TestCase):
         self.scenarios = {s["name"]: s for s in self.config["scenarios"]}
 
     def test_scenario_config_schema(self):
-        """traffic_scenarios.json에 알고리즘과 AI/MAPF 시나리오가 올바르게 정의되어 있는지 검증."""
-        self.assertIn("head_on", self.scenarios)
-        self.assertIn("head_on_ai", self.scenarios)
-        self.assertIn("swap_with_crossing", self.scenarios)
-        self.assertIn("swap_with_crossing_ai", self.scenarios)
+        """traffic_scenarios.json에 5쌍(총 10개)의 알고리즘과 AI/MAPF 시나리오가 올바르게 정의되어 있는지 검증."""
+        expected_pairs = [
+            ("corridor_head_on", "corridor_head_on_ai"),
+            ("junction_contention", "junction_contention_ai"),
+            ("bottleneck", "bottleneck_ai"),
+            ("deadlock_cycle", "deadlock_cycle_ai"),
+            ("priority_yield", "priority_yield_ai"),
+        ]
 
-        head_on = self.scenarios["head_on"]
-        self.assertEqual(head_on["operation_mode"], "algorithm")
-        self.assertIn("[알고리즘]", head_on["description"])
+        self.assertEqual(len(self.scenarios), 10)
+        for algo_name, ai_name in expected_pairs:
+            self.assertIn(algo_name, self.scenarios, f"{algo_name} 누락")
+            self.assertIn(ai_name, self.scenarios, f"{ai_name} 누락")
 
-        head_on_ai = self.scenarios["head_on_ai"]
-        self.assertEqual(head_on_ai["operation_mode"], "ai")
-        self.assertIn("[AI/MAPF]", head_on_ai["description"])
-        self.assertEqual(head_on_ai["wait_allowed_nodes"], ["0", "10", "7", "8"])
-        for r in head_on_ai["robots"]:
-            if r["goal"] is not None:
-                self.assertEqual(r["driving_mode"], "llm")
-                self.assertEqual(r["selector"], "kev")
+            algo = self.scenarios[algo_name]
+            self.assertEqual(algo["operation_mode"], "algorithm")
+            self.assertIn("[알고리즘]", algo["description"])
 
-        swap_ai = self.scenarios["swap_with_crossing_ai"]
-        self.assertEqual(swap_ai["operation_mode"], "ai")
-        self.assertIn("[AI/MAPF]", swap_ai["description"])
-        self.assertEqual(len(swap_ai["robots"]), 3)
+            ai = self.scenarios[ai_name]
+            self.assertEqual(ai["operation_mode"], "ai")
+            self.assertIn("[AI/MAPF]", ai["description"])
+            self.assertIsInstance(ai.get("wait_allowed_nodes"), list)
+            for r in ai["robots"]:
+                if r["goal"] is not None:
+                    self.assertEqual(r["driving_mode"], "llm")
+                    self.assertEqual(r["selector"], "kev")
+                    self.assertIn("task_priority", r)
 
-    def test_head_on_algorithm_keeps_standard_dispatch(self):
-        """[알고리즘] head_on 시나리오 실행 시 required_path 없이 표준 알고리즘 배차 호출 검증."""
+    def test_corridor_head_on_algorithm_keeps_standard_dispatch(self):
+        """[알고리즘] corridor_head_on 시나리오 실행 시 required_path 없이 표준 알고리즘 배차 호출 검증."""
         calls = []
 
         def fake_navigate(rid, goal, mode, **kwargs):
             calls.append({"rid": rid, "goal": goal, "mode": mode, **kwargs})
             return {"success": True}
 
-        scenario = self.scenarios["head_on"]
+        scenario = self.scenarios["corridor_head_on"]
         graph = load_route_graph()
         nodes = {str(n): (0.0, 0.0) for n in range(13)}
 
@@ -58,19 +62,19 @@ class ScenarioMapfTests(unittest.TestCase):
                 self._run_single_step(scenario, graph, nodes)
             )
 
-        self.assertEqual(len(calls), 2)  # robot2, robot3
+        self.assertEqual(len(calls), 2)  # robot1, robot2
         for c in calls:
             self.assertNotIn("required_path", c)
 
-    def test_head_on_ai_executes_kev_mapf_and_dispatches_required_paths(self):
-        """[AI/MAPF] head_on_ai 시나리오 실행 시 KEV-MAPF 조정을 거쳐 required_path로 배차되는지 검증."""
+    def test_corridor_head_on_ai_executes_kev_mapf(self):
+        """[AI/MAPF] corridor_head_on_ai 시나리오 실행 시 KEV-MAPF 조정을 거쳐 required_path로 배차되는지 검증."""
         calls = []
 
         def fake_navigate(rid, goal, mode, **kwargs):
             calls.append({"rid": rid, "goal": goal, "mode": mode, **kwargs})
             return {"success": True}
 
-        scenario = self.scenarios["head_on_ai"]
+        scenario = self.scenarios["corridor_head_on_ai"]
         graph = load_route_graph()
         nodes = {str(n): (0.0, 0.0) for n in range(13)}
 
@@ -80,21 +84,21 @@ class ScenarioMapfTests(unittest.TestCase):
                 self._run_single_step(scenario, graph, nodes)
             )
 
-        self.assertEqual(len(calls), 2)  # robot2, robot3
+        self.assertEqual(len(calls), 2)  # robot1, robot2
         for c in calls:
             self.assertIn("required_path", c)
             self.assertIsInstance(c["required_path"], list)
             self.assertGreater(len(c["required_path"]), 1)
 
-    def test_swap_with_crossing_ai_coordinates_three_robots(self):
-        """[AI/MAPF] swap_with_crossing_ai 3대 로봇 충돌 시 KEV-MAPF 조정 및 배차 검증."""
+    def test_junction_contention_ai_coordinates_three_robots(self):
+        """[AI/MAPF] junction_contention_ai 3대 로봇 교차로 경합 시 KEV-MAPF 조정 및 배차 검증."""
         calls = []
 
         def fake_navigate(rid, goal, mode, **kwargs):
             calls.append({"rid": rid, "goal": goal, "mode": mode, **kwargs})
             return {"success": True}
 
-        scenario = self.scenarios["swap_with_crossing_ai"]
+        scenario = self.scenarios["junction_contention_ai"]
         graph = load_route_graph()
         nodes = {str(n): (0.0, 0.0) for n in range(13)}
 
@@ -105,6 +109,75 @@ class ScenarioMapfTests(unittest.TestCase):
             )
 
         self.assertEqual(len(calls), 3)  # robot1, robot2, robot3
+        for c in calls:
+            self.assertIn("required_path", c)
+            self.assertIsInstance(c["required_path"], list)
+
+    def test_bottleneck_ai_coordinates_three_robots(self):
+        """[AI/MAPF] bottleneck_ai 3대 로봇 병목 합류 시 KEV-MAPF 조정 및 배차 검증."""
+        calls = []
+
+        def fake_navigate(rid, goal, mode, **kwargs):
+            calls.append({"rid": rid, "goal": goal, "mode": mode, **kwargs})
+            return {"success": True}
+
+        scenario = self.scenarios["bottleneck_ai"]
+        graph = load_route_graph()
+        nodes = {str(n): (0.0, 0.0) for n in range(13)}
+
+        with patch("backend.app.services.scenario_service.navigate_to_node", side_effect=fake_navigate):
+            import asyncio
+            asyncio.run(
+                self._run_single_step(scenario, graph, nodes)
+            )
+
+        self.assertEqual(len(calls), 3)  # robot1, robot2, robot3
+        for c in calls:
+            self.assertIn("required_path", c)
+            self.assertIsInstance(c["required_path"], list)
+
+    def test_deadlock_cycle_ai_coordinates_three_robots(self):
+        """[AI/MAPF] deadlock_cycle_ai 3대 로봇 순환 교착 시 KEV-MAPF 조정 및 배차 검증."""
+        calls = []
+
+        def fake_navigate(rid, goal, mode, **kwargs):
+            calls.append({"rid": rid, "goal": goal, "mode": mode, **kwargs})
+            return {"success": True}
+
+        scenario = self.scenarios["deadlock_cycle_ai"]
+        graph = load_route_graph()
+        nodes = {str(n): (0.0, 0.0) for n in range(13)}
+
+        with patch("backend.app.services.scenario_service.navigate_to_node", side_effect=fake_navigate):
+            import asyncio
+            asyncio.run(
+                self._run_single_step(scenario, graph, nodes)
+            )
+
+        self.assertEqual(len(calls), 3)
+        for c in calls:
+            self.assertIn("required_path", c)
+            self.assertIsInstance(c["required_path"], list)
+
+    def test_priority_yield_ai_coordinates_three_robots(self):
+        """[AI/MAPF] priority_yield_ai 긴급 화물 로봇과 3대 동시 대피 조정 및 배차 검증."""
+        calls = []
+
+        def fake_navigate(rid, goal, mode, **kwargs):
+            calls.append({"rid": rid, "goal": goal, "mode": mode, **kwargs})
+            return {"success": True}
+
+        scenario = self.scenarios["priority_yield_ai"]
+        graph = load_route_graph()
+        nodes = {str(n): (0.0, 0.0) for n in range(13)}
+
+        with patch("backend.app.services.scenario_service.navigate_to_node", side_effect=fake_navigate):
+            import asyncio
+            asyncio.run(
+                self._run_single_step(scenario, graph, nodes)
+            )
+
+        self.assertEqual(len(calls), 3)
         for c in calls:
             self.assertIn("required_path", c)
             self.assertIsInstance(c["required_path"], list)

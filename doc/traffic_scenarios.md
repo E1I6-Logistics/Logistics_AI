@@ -11,9 +11,9 @@
 CLI도 같은 API를 사용한다. 이름을 생략하면 사용법 오류로 종료한다.
 
 ```bash
-python3 tests/traffic_scenarios.py cycle
-python3 tests/traffic_scenarios.py head_on
-python3 tests/traffic_scenarios.py bottleneck
+python3 tests/traffic_scenarios.py corridor_head_on_ai
+python3 tests/traffic_scenarios.py junction_contention_ai
+python3 tests/traffic_scenarios.py bottleneck_ai
 ```
 
 CLI는 서버에 설정된 현재 모드를 따른다. 전체 자동 순차 실행은 제거했다.

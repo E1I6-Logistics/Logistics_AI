@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import math
+import os
 import sys
 import time
 from pathlib import Path
@@ -96,7 +97,8 @@ class LiveKEV:
         from backend.app.services.llm_route_preview import preview_llm_route
         from backend.app.services.route_selector.kev_selector import KevSelector
 
-        self.selector = KevSelector(model=model)
+        timeout = float(os.getenv("KEV_MAPF_TIMEOUT_SECONDS", "1.5"))
+        self.selector = KevSelector(model=model, timeout_seconds=timeout)
         self.model = model
         self.preview_llm_route = preview_llm_route
         self.calls = 0
@@ -106,15 +108,19 @@ class LiveKEV:
 
     def score(self, state: dict[str, Any], question_id: str) -> float:
         """단일 로봇의 우선순위 점수를 평가한다."""
-        result = self.selector.evaluate_score(
-            state, _PRIORITY_LEVELS, KEV_PRIORITY_SCORE_INSTRUCTIONS, question_id=question_id
-        )
-        score = float(result["score"])
-        if not math.isfinite(score):
-            raise ValueError("Invalid KEV priority score")
-        self.calls += 1
-        self.model_seconds += float(result.get("total_duration_seconds") or 0.0)
-        return score
+        try:
+            result = self.selector.evaluate_score(
+                state, _PRIORITY_LEVELS, KEV_PRIORITY_SCORE_INSTRUCTIONS, question_id=question_id
+            )
+            score = float(result["score"])
+            if not math.isfinite(score):
+                raise ValueError("Invalid KEV priority score")
+            self.calls += 1
+            self.model_seconds += float(result.get("total_duration_seconds") or 0.0)
+            return score
+        except Exception as exc:
+            self.warnings.append(f"KEV score offline fallback: {exc}")
+            return float(state.get("task_priority", 0.0))
 
     def score_many(self, state: dict[str, Any], robot_ids: list[str]) -> dict[str, float]:
         """여러 로봇의 우선순위를 KEV API 요청 1회로 일괄 평가한다."""
@@ -130,18 +136,26 @@ class LiveKEV:
             }
             for rid in robot_ids
         }
-        response = self.selector.decide(state, questions)
-        scores = {}
-        for rid in robot_ids:
-            answer = self.selector._answer(response, f"priority_score_{rid}", "score")
-            score = float(answer["score"])
-            if not math.isfinite(score):
-                raise ValueError(f"Invalid KEV priority score: {rid}")
-            scores[rid] = score
+        try:
+            response = self.selector.decide(state, questions)
+            scores = {}
+            for rid in robot_ids:
+                answer = self.selector._answer(response, f"priority_score_{rid}", "score")
+                score = float(answer["score"])
+                if not math.isfinite(score):
+                    raise ValueError(f"Invalid KEV priority score: {rid}")
+                scores[rid] = score
 
-        self.calls += 1
-        self.model_seconds += float(response.get("total_duration_seconds") or 0.0)
-        return scores
+            self.calls += 1
+            self.model_seconds += float(response.get("total_duration_seconds") or 0.0)
+            return scores
+        except Exception as exc:
+            self.warnings.append(f"KEV score_many offline fallback: {exc}")
+            robots_lookup = {r.get("id"): r for r in state.get("robots", []) if isinstance(r, dict)}
+            return {
+                rid: float(robots_lookup.get(rid, {}).get("task_priority", 0.0))
+                for rid in robot_ids
+            }
 
     def pick(
         self,
@@ -156,15 +170,19 @@ class LiveKEV:
         if len(candidates) == 1:
             self.forced += 1
             return next(iter(candidates))
-        res = self.selector.select_choice(
-            state, candidates, instructions, question_id=question_id
-        )
-        self.calls += 1
-        self.model_seconds += float(res.get("total_duration_seconds") or 0.0)
-        choice = str(res["choice"])
-        if choice not in candidates:
-            raise RuntimeError(f"KEV returned an invalid choice {choice!r}")
-        return choice
+        try:
+            res = self.selector.select_choice(
+                state, candidates, instructions, question_id=question_id
+            )
+            self.calls += 1
+            self.model_seconds += float(res.get("total_duration_seconds") or 0.0)
+            choice = str(res["choice"])
+            if choice not in candidates:
+                raise RuntimeError(f"KEV returned an invalid choice {choice!r}")
+            return choice
+        except Exception as exc:
+            self.warnings.append(f"KEV pick offline fallback: {exc}")
+            return next(iter(candidates))
 
     def route(
         self,

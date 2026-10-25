@@ -6,125 +6,9 @@
   },
   "scenarios": [
     {
-      "name": "bottleneck",
-      "description": "9→7 합류 구간의 예약 대기",
-      "robots": [
-        {
-          "id": "robot1",
-          "start": "0",
-          "goal": "4"
-        },
-        {
-          "id": "robot2",
-          "start": "1",
-          "goal": "3"
-        },
-        {
-          "id": "robot3",
-          "start": "2",
-          "goal": "6"
-        }
-      ]
-    },
-    {
-      "name": "head_on",
-      "description": "[알고리즘] 두 로봇의 자리 교환과 양보",
+      "name": "corridor_head_on",
+      "description": "[알고리즘] 9↔7 중앙 단일 통로의 대면 주행과 양보·우회",
       "operation_mode": "algorithm",
-      "robots": [
-        {
-          "id": "robot1",
-          "start": "0",
-          "goal": null
-        },
-        {
-          "id": "robot2",
-          "start": "1",
-          "goal": "2"
-        },
-        {
-          "id": "robot3",
-          "start": "2",
-          "goal": "1"
-        }
-      ]
-    },
-    {
-      "name": "head_on_ai",
-      "description": "[AI/MAPF] 두 로봇의 자리 교환과 KEV 우선순위 조정",
-      "operation_mode": "ai",
-      "wait_allowed_nodes": ["0", "10", "7", "8"],
-      "robots": [
-        {
-          "id": "robot1",
-          "start": "0",
-          "goal": null,
-          "driving_mode": "standard"
-        },
-        {
-          "id": "robot2",
-          "start": "1",
-          "goal": "2",
-          "driving_mode": "llm",
-          "selector": "kev",
-          "model": "kev-08b",
-          "task_priority": 10
-        },
-        {
-          "id": "robot3",
-          "start": "2",
-          "goal": "1",
-          "driving_mode": "llm",
-          "selector": "kev",
-          "model": "kev-08b",
-          "task_priority": 5
-        }
-      ]
-    },
-    {
-      "name": "cycle",
-      "description": "세 로봇의 순환 대기와 해소",
-      "robots": [
-        {
-          "id": "robot1",
-          "start": "0",
-          "goal": "1"
-        },
-        {
-          "id": "robot2",
-          "start": "1",
-          "goal": "2"
-        },
-        {
-          "id": "robot3",
-          "start": "2",
-          "goal": "0"
-        }
-      ]
-    },
-    {
-      "name": "cycle_reverse_order",
-      "description": "역순 요청(robot3→robot2→robot1)의 순환 대기와 해소",
-      "robots": [
-        {
-          "id": "robot3",
-          "start": "2",
-          "goal": "0"
-        },
-        {
-          "id": "robot2",
-          "start": "1",
-          "goal": "2"
-        },
-        {
-          "id": "robot1",
-          "start": "0",
-          "goal": "1"
-        }
-      ]
-    },
-    {
-      "name": "central_head_on",
-      "description": "9↔7 중앙 통로의 마주 오는 주행과 양보·우회",
       "robots": [
         {
           "id": "robot1",
@@ -144,8 +28,41 @@
       ]
     },
     {
+      "name": "corridor_head_on_ai",
+      "description": "[AI/MAPF] 9↔7 중앙 단일 통로의 대면 주행과 KEV 우선순위 양보·우회",
+      "operation_mode": "ai",
+      "wait_allowed_nodes": ["0", "10", "8", "5"],
+      "robots": [
+        {
+          "id": "robot1",
+          "start": "9",
+          "goal": "7",
+          "driving_mode": "llm",
+          "selector": "kev",
+          "model": "kev-08b",
+          "task_priority": 10
+        },
+        {
+          "id": "robot2",
+          "start": "7",
+          "goal": "9",
+          "driving_mode": "llm",
+          "selector": "kev",
+          "model": "kev-08b",
+          "task_priority": 5
+        },
+        {
+          "id": "robot3",
+          "start": "0",
+          "goal": null,
+          "driving_mode": "standard"
+        }
+      ]
+    },
+    {
       "name": "junction_contention",
-      "description": "7번 교차점의 세 방향 진입과 순차 통과",
+      "description": "[알고리즘] 7번 교차점의 세 방향 진입과 순차 통과",
+      "operation_mode": "algorithm",
       "robots": [
         {
           "id": "robot1",
@@ -165,37 +82,15 @@
       ]
     },
     {
-      "name": "swap_with_crossing",
-      "description": "[알고리즘] 두 로봇의 자리 교환 중 제3 로봇의 공유 구간 통과",
-      "operation_mode": "algorithm",
-      "robots": [
-        {
-          "id": "robot1",
-          "start": "1",
-          "goal": "2"
-        },
-        {
-          "id": "robot2",
-          "start": "2",
-          "goal": "1"
-        },
-        {
-          "id": "robot3",
-          "start": "10",
-          "goal": "6"
-        }
-      ]
-    },
-    {
-      "name": "swap_with_crossing_ai",
-      "description": "[AI/MAPF] 두 로봇 자리 교환 및 제3 로봇 KEV 동시 충돌 조정",
+      "name": "junction_contention_ai",
+      "description": "[AI/MAPF] 7번 교차점 3방향 진입과 KEV 우선순위 순차 통과",
       "operation_mode": "ai",
-      "wait_allowed_nodes": ["0", "10", "7", "8"],
+      "wait_allowed_nodes": ["0", "10", "8", "5", "6", "12"],
       "robots": [
         {
           "id": "robot1",
-          "start": "1",
-          "goal": "2",
+          "start": "9",
+          "goal": "11",
           "driving_mode": "llm",
           "selector": "kev",
           "model": "kev-08b",
@@ -203,27 +98,85 @@
         },
         {
           "id": "robot2",
-          "start": "2",
-          "goal": "1",
+          "start": "8",
+          "goal": "5",
           "driving_mode": "llm",
           "selector": "kev",
           "model": "kev-08b",
-          "task_priority": 5
+          "task_priority": 7
         },
         {
           "id": "robot3",
-          "start": "10",
-          "goal": "6",
+          "start": "5",
+          "goal": "9",
           "driving_mode": "llm",
           "selector": "kev",
           "model": "kev-08b",
-          "task_priority": 8
+          "task_priority": 4
         }
       ]
     },
     {
-      "name": "central_cycle",
-      "description": "중앙 세 노드의 순환 대기와 양보 후 우회 복귀",
+      "name": "bottleneck",
+      "description": "[알고리즘] 9→7 합류 구간의 예약 대기",
+      "operation_mode": "algorithm",
+      "robots": [
+        {
+          "id": "robot1",
+          "start": "0",
+          "goal": "4"
+        },
+        {
+          "id": "robot2",
+          "start": "1",
+          "goal": "3"
+        },
+        {
+          "id": "robot3",
+          "start": "2",
+          "goal": "6"
+        }
+      ]
+    },
+    {
+      "name": "bottleneck_ai",
+      "description": "[AI/MAPF] 9→7 합류 구간의 KEV 우선순위 예약 대기",
+      "operation_mode": "ai",
+      "wait_allowed_nodes": ["0", "10", "8", "5"],
+      "robots": [
+        {
+          "id": "robot1",
+          "start": "0",
+          "goal": "4",
+          "driving_mode": "llm",
+          "selector": "kev",
+          "model": "kev-08b",
+          "task_priority": 10
+        },
+        {
+          "id": "robot2",
+          "start": "1",
+          "goal": "3",
+          "driving_mode": "llm",
+          "selector": "kev",
+          "model": "kev-08b",
+          "task_priority": 8
+        },
+        {
+          "id": "robot3",
+          "start": "2",
+          "goal": "6",
+          "driving_mode": "llm",
+          "selector": "kev",
+          "model": "kev-08b",
+          "task_priority": 6
+        }
+      ]
+    },
+    {
+      "name": "deadlock_cycle",
+      "description": "[알고리즘] 중앙 세 노드의 순환 대기와 양보 후 우회 복귀",
+      "operation_mode": "algorithm",
       "robots": [
         {
           "id": "robot1",
@@ -239,6 +192,98 @@
           "id": "robot3",
           "start": "8",
           "goal": "9"
+        }
+      ]
+    },
+    {
+      "name": "deadlock_cycle_ai",
+      "description": "[AI/MAPF] 중앙 세 노드 원형 순환 교착 해소",
+      "operation_mode": "ai",
+      "wait_allowed_nodes": ["0", "10", "5", "11", "12"],
+      "robots": [
+        {
+          "id": "robot1",
+          "start": "9",
+          "goal": "7",
+          "driving_mode": "llm",
+          "selector": "kev",
+          "model": "kev-08b",
+          "task_priority": 10
+        },
+        {
+          "id": "robot2",
+          "start": "7",
+          "goal": "8",
+          "driving_mode": "llm",
+          "selector": "kev",
+          "model": "kev-08b",
+          "task_priority": 7
+        },
+        {
+          "id": "robot3",
+          "start": "8",
+          "goal": "9",
+          "driving_mode": "llm",
+          "selector": "kev",
+          "model": "kev-08b",
+          "task_priority": 4
+        }
+      ]
+    },
+    {
+      "name": "priority_yield",
+      "description": "[알고리즘] 긴급 화물 로봇과 마주침 및 일반 대기",
+      "operation_mode": "algorithm",
+      "robots": [
+        {
+          "id": "robot1",
+          "start": "1",
+          "goal": "4"
+        },
+        {
+          "id": "robot2",
+          "start": "12",
+          "goal": "1"
+        },
+        {
+          "id": "robot3",
+          "start": "8",
+          "goal": "6"
+        }
+      ]
+    },
+    {
+      "name": "priority_yield_ai",
+      "description": "[AI/MAPF] 긴급 화물 로봇을 위한 포켓 대피 양보",
+      "operation_mode": "ai",
+      "wait_allowed_nodes": ["0", "10", "5", "8"],
+      "robots": [
+        {
+          "id": "robot1",
+          "start": "1",
+          "goal": "4",
+          "driving_mode": "llm",
+          "selector": "kev",
+          "model": "kev-08b",
+          "task_priority": 15
+        },
+        {
+          "id": "robot2",
+          "start": "12",
+          "goal": "1",
+          "driving_mode": "llm",
+          "selector": "kev",
+          "model": "kev-08b",
+          "task_priority": 5
+        },
+        {
+          "id": "robot3",
+          "start": "8",
+          "goal": "6",
+          "driving_mode": "llm",
+          "selector": "kev",
+          "model": "kev-08b",
+          "task_priority": 3
         }
       ]
     }
