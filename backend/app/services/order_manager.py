@@ -55,6 +55,36 @@ def _kev_dispatch_eta_speed_mps():
     return speed_mps
 
 
+# KEV가 비교할 후보 범위. near_eta는 최단 ETA + 근소 범위 안의 후보만, all_eligible은 안전 검사를 통과한 후보 전체.
+KEV_DISPATCH_CANDIDATE_SCOPES = {"near_eta", "all_eligible"}
+
+
+def _kev_dispatch_candidate_scope():
+    """Return the configured KEV candidate scope for dispatch experiments."""
+    scope = os.getenv("KEV_DISPATCH_CANDIDATE_SCOPE", "near_eta").strip().lower()
+    if scope not in KEV_DISPATCH_CANDIDATE_SCOPES:
+        raise ValueError("KEV_DISPATCH_CANDIDATE_SCOPE는 near_eta 또는 all_eligible이어야 합니다.")
+    return scope
+
+
+def _kev_order_scheduling_enabled():
+    """대기 주문 우선순위 KEV 실험의 사용 여부를 읽는다."""
+    value = os.getenv("KEV_ORDER_SCHEDULING_ENABLED", "0").strip().lower()
+    if value in {"1", "true", "yes", "on"}:
+        return True
+    if value in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError("KEV_ORDER_SCHEDULING_ENABLED는 true 또는 false여야 합니다.")
+
+
+def _kev_order_scheduling_max_wait_seconds():
+    """주문 starvation을 막기 위해 KEV보다 FIFO를 우선할 최대 대기 시간을 읽는다."""
+    seconds = float(os.getenv("KEV_ORDER_SCHEDULING_MAX_WAIT_SECONDS", "120"))
+    if seconds < 0:
+        raise ValueError("KEV_ORDER_SCHEDULING_MAX_WAIT_SECONDS는 0 이상이어야 합니다.")
+    return seconds
+
+
 class OrderManager:
     # OrderManager의 초기 상태를 설정한다.
     def __init__(self):
@@ -66,6 +96,8 @@ class OrderManager:
         self._route_tasks = {}
         self._kev_dispatch_selector = None
         self._kev_dispatch_retry_at = 0.0
+        self._kev_order_scheduling_retry_at = 0.0
+        self._order_queue_sequence = 0
 
     # 주문 품목에 필요한 픽업대 노드를 반환한다.
     @staticmethod
@@ -124,6 +156,7 @@ class OrderManager:
         with scenario_manager.lock, self.lock:
             scenario_manager.ensure_available()
             order_id = str(uuid4())
+            self._order_queue_sequence += 1
             row = {
                 "order_id": order_id,
                 "order_name": (order_name or "").strip() or f"ORDER-{len(self.orders) + 1:03d}",
@@ -141,6 +174,9 @@ class OrderManager:
                 "selector": selector,
                 "model": model,
                 "route_started": False,
+                # API에는 노출하지 않는 큐 순서와 대기 시작 시각이다. 주문 우선순위 KEV 입력과 FIFO fallback에 쓴다.
+                "_queue_sequence": self._order_queue_sequence,
+                "_queued_at_monotonic": monotonic(),
             }
             self.orders[order_id] = row
             return self.public_order(row)
@@ -183,6 +219,7 @@ class OrderManager:
                 route_started=False,
                 _held_node=None,
             )
+            # 재시도해도 기존 dict 삽입 순서가 유지되던 동작과 같게 큐 순서·대기 시작 시각은 바꾸지 않는다.
             row["retry_count"] = row.get("retry_count", 0) + 1
             row.pop("error", None)
             row.pop("recovery_status", None)
@@ -448,6 +485,106 @@ class OrderManager:
             "returning": robot_id in self.returning,
         }
 
+    # 대기 주문을 등록 순서대로 정렬한다. KEV 주문 선택 실패와 오래 기다린 주문의 fallback에 쓴다.
+    @staticmethod
+    def _pending_rows_by_fifo(rows):
+        return sorted(rows, key=lambda row: row.get("_queue_sequence", 0))
+
+    # 여러 대기 주문 중 다음 주문을 KEV가 고르도록 요청을 만든다. lock 안에서 호출한다.
+    def _prepare_kev_order_scheduling(self, rows, candidates, mode):
+        pending_rows = self._pending_rows_by_fifo(rows)
+        if len(pending_rows) < 2 or not candidates:
+            return None
+
+        oldest = pending_rows[0]
+        oldest_wait_seconds = monotonic() - oldest.get("_queued_at_monotonic", monotonic())
+        max_wait_seconds = _kev_order_scheduling_max_wait_seconds()
+        # 오래 기다린 주문은 KEV 판단과 무관하게 FIFO로 보장한다. 0이면 이 보호 규칙을 끈다.
+        if max_wait_seconds and oldest_wait_seconds >= max_wait_seconds:
+            logger.info(
+                "KEV order scheduling skipped (FIFO age guard): order=%s waited=%.1fs limit=%.1fs",
+                oldest["order_id"],
+                oldest_wait_seconds,
+                max_wait_seconds,
+            )
+            return {"kind": "fifo", "order_id": oldest["order_id"]}
+
+        robot_profiles = []
+        for robot_id in candidates:
+            profile = self._dispatch_robot_profile(robot_id, mode)
+            if profile is not None:
+                robot_profiles.append(profile)
+        if not robot_profiles:
+            return {"kind": "fifo", "order_id": oldest["order_id"]}
+
+        now = monotonic()
+        order_profiles = []
+        choices = {}
+        for queue_position, row in enumerate(pending_rows, start=1):
+            eta_values = []
+            for robot in robot_profiles:
+                try:
+                    eta_values.append(self._pickup_eta(robot, row["pickup_nodes"])["pickup_eta_seconds"])
+                except (OSError, TypeError, ValueError):
+                    continue
+            minimum_eta_seconds = min(eta_values) if eta_values else None
+            waiting_seconds = max(0.0, now - row.get("_queued_at_monotonic", now))
+            # 주문 UUID는 과거 KEV 선택을 흔든 적이 있어 모델 입력과 후보 키에서 제외한다.
+            # KEV는 안정적인 큐 라벨만 고르고, 실제 UUID 연결은 아래 order_label_to_id가 코드에서 처리한다.
+            order_label = f"order_{queue_position}"
+            profile = {
+                "order_label": order_label,
+                "queue_position": queue_position,
+                "waiting_seconds": waiting_seconds,
+                "items": row["items"],
+                "total_quantity": row["total_quantity"],
+                "pickup_nodes": row["pickup_nodes"],
+                "eligible_robot_count": len(robot_profiles),
+                "minimum_pickup_eta_seconds": minimum_eta_seconds,
+            }
+            order_profiles.append(profile)
+            eta_text = "unknown" if minimum_eta_seconds is None else f"{minimum_eta_seconds:.3f}"
+            choices[order_label] = (
+                f"queue_position={queue_position}, "
+                f"waiting_seconds={waiting_seconds:.3f}, "
+                f"total_quantity={row['total_quantity']}, "
+                f"pickup_nodes={row['pickup_nodes']}, "
+                f"eligible_robot_count={len(robot_profiles)}, "
+                f"minimum_pickup_eta_seconds={eta_text}"
+            )
+
+        order_label_to_id = {
+            f"order_{queue_position}": row["order_id"] for queue_position, row in enumerate(pending_rows, start=1)
+        }
+        question_id = f"order_schedule_{pending_rows[0]['_queue_sequence']}"
+        instructions = (
+            "Choose exactly one listed pending order label to dispatch next. "
+            "Do not select a label outside the candidates. Prefer the order waiting longest when wait times differ materially. "
+            "When waiting times are similar, prefer the smaller minimum_pickup_eta_seconds to reduce immediate idle travel. "
+            "Do not infer urgency, deadlines, safety, or capacity constraints that are not provided. Return only one candidate label."
+        )
+        debug_record = {
+            "question_id": question_id,
+            "fifo_order_label": "order_1",
+            "state": {
+                "pending_orders": order_profiles,
+                "scheduling_context": {
+                    "eligible_robot_ids": [profile["robot_id"] for profile in robot_profiles],
+                    "max_wait_seconds": max_wait_seconds,
+                },
+            },
+            "choices": choices,
+            "instructions": instructions,
+        }
+        return {
+            "kind": "request",
+            "request_type": "order_scheduling",
+            "candidate_labels": list(choices),
+            "order_label_to_id": order_label_to_id,
+            "fifo_order_id": oldest["order_id"],
+            "debug_record": debug_record,
+        }
+
     # 배차 가능한 후보 중 한 대를 KEV로 선택한다.
     # tick은 lock 밖에서 KEV를 부르기 위해 준비(_prepare_kev_dispatch)와 호출(_request_kev_dispatch)을 따로 쓴다.
     def _select_robot_with_kev(self, row, candidates, mode):
@@ -531,6 +668,8 @@ class OrderManager:
                 profiles.append(profile)
         if not profiles:
             return "robot", None
+        # 후보 범위 오타는 ETA 계산 실패와 달리 실험 설정 오류다. 기존 알고리즘으로 조용히 fallback하지 않는다.
+        candidate_scope = _kev_dispatch_candidate_scope()
         try:
             eta_tie_window_seconds = _kev_dispatch_eta_tie_seconds()
             for profile in profiles:
@@ -550,10 +689,17 @@ class OrderManager:
         excluded_by_eta = [
             profile["robot_id"] for profile in profiles if profile not in near_eta_profiles
         ]
-        for profile in near_eta_profiles:
+        # 기존 코드. all_eligible에서는 근소 범위 밖 후보도 KEV에 보내므로 모든 후보에 차이를 넣는다.
+        # for profile in near_eta_profiles:
+        #     profile["eta_delta_seconds"] = profile["pickup_eta_seconds"] - minimum_eta_seconds
+        for profile in profiles:
             profile["eta_delta_seconds"] = profile["pickup_eta_seconds"] - minimum_eta_seconds
+        # robot_id 순으로 정렬했으므로 ETA가 같으면 앞 ID가 최단 ETA 로봇이다. KEV가 최단 ETA를 골랐는지 기록할 때 쓴다.
+        eta_winner = min(profiles, key=lambda profile: profile["pickup_eta_seconds"])["robot_id"]
 
-        if len(near_eta_profiles) == 1:
+        # 기존 코드. all_eligible에서는 ETA가 확실히 짧아도 KEV가 판단하도록 바꾼다.
+        # if len(near_eta_profiles) == 1:
+        if candidate_scope == "near_eta" and len(near_eta_profiles) == 1:
             robot_id = near_eta_profiles[0]["robot_id"]
             logger.info(
                 "KEV dispatch skipped (ETA winner): robot=%s order=%s eta=%.3fs tie_window=%.3fs excluded=%s",
@@ -565,15 +711,24 @@ class OrderManager:
             )
             return "robot", robot_id
 
-        profiles = near_eta_profiles
+        # 기존 코드. 기준선은 두 범위 모두 근소 후보군에서 고르고, KEV 후보만 범위에 따라 바꾼다.
+        # profiles = near_eta_profiles
+        # candidates = [profile["robot_id"] for profile in profiles]
+        # if len(profiles) == 1:
+        #     ...
+        # rule_baseline_choice = self._select_robot_by_dispatch_rules(profiles)
+        # KEV 실패·cooldown fallback은 범위와 관계없이 같은 ETA 우선 기준선을 써서 두 방식을 같은 조건에서 비교한다.
+        rule_baseline_choice = self._select_robot_by_dispatch_rules(near_eta_profiles)
+        if candidate_scope == "near_eta":
+            profiles = near_eta_profiles
+        else:
+            excluded_by_eta = []
         candidates = [profile["robot_id"] for profile in profiles]
         if len(profiles) == 1:
             logger.info(
                 "KEV dispatch skipped (single profile): robot=%s order=%s", profiles[0]["robot_id"], row["order_id"]
             )
             return "robot", profiles[0]["robot_id"]
-
-        rule_baseline_choice = self._select_robot_by_dispatch_rules(profiles)
 
         choices = {
             profile["robot_id"]: (
@@ -602,7 +757,10 @@ class OrderManager:
             },
             "robots": profiles,
             "dispatch_context": {
-                "eta_filter_applied": True,
+                # 기존 코드. all_eligible에서는 ETA 필터를 쓰지 않는다.
+                # "eta_filter_applied": True,
+                # near_eta의 KEV 입력은 기존 실험(D-6·D-7)과 같게 두고, 범위는 디버그 기록에만 남긴다.
+                "eta_filter_applied": candidate_scope == "near_eta",
                 "minimum_pickup_eta_seconds": minimum_eta_seconds,
                 "eta_tie_window_seconds": eta_tie_window_seconds,
                 "excluded_by_eta": excluded_by_eta,
@@ -623,12 +781,21 @@ class OrderManager:
         #     "Among idle and non-returning robots, choose the one with the highest battery. "
         #     "Use other fields only to break exact ties. Return only one candidate ID."
         # )
+        # near_eta 지시문. all_eligible은 아래에서 따로 쓴다.
         instructions = (
             "All listed robots have passed code safety checks and are within the configured pickup ETA near-tie window. "
             "Choose exactly one listed candidate ID. Do not re-rank candidates by pickup ETA and do not treat battery as a safety threshold. "
             "Prefer an IDLE, non-returning robot when operational state differs. Use the current battery only as secondary context; "
             "it is not an estimated post-task battery. Return only one candidate ID."
         )
+        if candidate_scope == "all_eligible":
+            instructions = (
+                "All listed robots have passed code safety checks, but they are not filtered by pickup ETA. "
+                "Choose exactly one listed candidate ID. Pickup ETA is the primary criterion: prefer the shortest "
+                "pickup_eta_seconds. When eta_delta_seconds differences are small, prefer an IDLE, non-returning robot. "
+                "Use the current battery only as secondary context; it is not a safety threshold or an estimated "
+                "post-task battery. Return only one candidate ID."
+            )
         question_id = f"dispatch_{row['order_id']}"
         debug_record = {
             "order_id": row["order_id"],
@@ -636,6 +803,8 @@ class OrderManager:
             "excluded_last_robot": excluded_last_robot,
             # KEV 입력에는 넣지 않는다. 비교 기록과 KEV 오류 시 코드 fallback에만 쓴다.
             "rule_baseline_choice": rule_baseline_choice,
+            "candidate_scope": candidate_scope,
+            "eta_winner": eta_winner,
             "state": state,
             "choices": choices,
             "instructions": instructions,
@@ -645,6 +814,8 @@ class OrderManager:
             "order_id": row["order_id"],
             "candidates": list(candidates),
             "rule_baseline_choice": rule_baseline_choice,
+            "candidate_scope": candidate_scope,
+            "eta_winner": eta_winner,
             "debug_record": debug_record,
         }
 
@@ -704,20 +875,106 @@ class OrderManager:
         chosen_robot = result.get("choice")
         if chosen_robot not in candidates:
             raise RuntimeError(f"KEV가 후보 목록에 없는 로봇을 선택했습니다: {chosen_robot}")
+        # 기존 로그. 후보 범위와 최단 ETA 로봇을 함께 남기도록 바꾼다.
+        # logger.info(
+        #     "KEV dispatch selected robot=%s order=%s candidates=%s rule_baseline=%s",
+        #     chosen_robot,
+        #     request["order_id"],
+        #     candidates,
+        #     request["rule_baseline_choice"],
+        # )
         logger.info(
-            "KEV dispatch selected robot=%s order=%s candidates=%s rule_baseline=%s",
+            "KEV dispatch selected robot=%s order=%s candidates=%s rule_baseline=%s scope=%s eta_winner=%s",
             chosen_robot,
             request["order_id"],
             candidates,
             request["rule_baseline_choice"],
+            request.get("candidate_scope", "near_eta"),
+            request.get("eta_winner"),
         )
         return chosen_robot
 
+    # 준비한 요청으로 KEV에게 다음 대기 주문을 선택하게 한다. 공유 상태를 건드리지 않으므로 lock 밖에서 호출한다.
+    def _request_kev_order_scheduling(self, request):
+        if self._kev_dispatch_selector is None:
+            from .route_selector.kev_selector import KevSelector
+
+            self._kev_dispatch_selector = KevSelector(timeout_seconds=KEV_DISPATCH_TIMEOUT_SECONDS)
+
+        debug_record = request["debug_record"]
+        candidate_labels = request["candidate_labels"]
+        debug_enabled = os.getenv("KEV_DISPATCH_DEBUG") == "1"
+        try:
+            result = self._kev_dispatch_selector.select_choice(
+                state=debug_record["state"],
+                candidates=debug_record["choices"],
+                instructions=debug_record["instructions"],
+                question_id=debug_record["question_id"],
+            )
+        except Exception as exc:
+            if debug_enabled:
+                logger.info(
+                    "KEV_ORDER_SCHEDULING_DEBUG %s",
+                    json.dumps(
+                        {
+                            **debug_record,
+                            "response": None,
+                            "error": {"type": type(exc).__name__, "message": str(exc)},
+                        },
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                    ),
+                )
+            raise
+
+        if debug_enabled:
+            logger.info(
+                "KEV_ORDER_SCHEDULING_DEBUG %s",
+                json.dumps(
+                    {
+                        **debug_record,
+                        "response": {
+                            "probabilities": result.get("probabilities"),
+                            "confidence": result.get("confidence"),
+                            "answer_confidence": result.get("answer_confidence"),
+                            "choice": result.get("choice"),
+                        },
+                    },
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                ),
+            )
+        chosen_label = result.get("choice")
+        if chosen_label not in candidate_labels:
+            raise RuntimeError(f"KEV가 후보 목록에 없는 주문 라벨을 선택했습니다: {chosen_label}")
+        chosen_order_id = request["order_label_to_id"][chosen_label]
+        logger.info(
+            "KEV order scheduling selected order=%s label=%s candidate_labels=%s fifo_order=%s",
+            chosen_order_id,
+            chosen_label,
+            candidate_labels,
+            request["fifo_order_id"],
+        )
+        return chosen_order_id
+
     # tick에서 KEV 요청을 별도 스레드로 보내고, 예외도 결과로 돌려준다.
     async def _run_kev_dispatch(self, request):
-        result = {"order_id": request["order_id"], "candidates": request["candidates"]}
+        result = {"request_type": "robot_dispatch", "order_id": request["order_id"], "candidates": request["candidates"]}
         try:
             result["choice"] = await asyncio.to_thread(self._request_kev_dispatch, request)
+        except Exception as exc:
+            result["error"] = exc
+        return result
+
+    # 주문 우선순위 KEV 요청도 로봇 배차와 마찬가지로 lock 밖 스레드에서 실행한다.
+    async def _run_kev_order_scheduling(self, request):
+        result = {
+            "request_type": "order_scheduling",
+            "candidate_order_ids": list(request["order_label_to_id"].values()),
+            "fifo_order_id": request["fifo_order_id"],
+        }
+        try:
+            result["choice"] = await asyncio.to_thread(self._request_kev_order_scheduling, request)
         except Exception as exc:
             result["error"] = exc
         return result
@@ -740,11 +997,17 @@ class OrderManager:
         # 기존 코드는 아래 _dispatch_round의 lock 블록을 tick 안에서 바로 실행했고, KEV HTTP 호출도 lock 안에서 했다.
         # 이제 KEV가 필요하면 lock을 풀고 스레드에서 호출한 뒤, 결과를 들고 배차를 다시 시도한다.
         kev_result = None
+        scheduled_order_id = None
         for _ in range(KEV_DISPATCH_MAX_ROUNDS):
-            kev_request, active = self._dispatch_round(mode, preemptions, kev_result)
+            kev_request, active, scheduled_order_id = self._dispatch_round(
+                mode, preemptions, kev_result, scheduled_order_id
+            )
             if kev_request is None:
                 break
-            kev_result = await self._run_kev_dispatch(kev_request)
+            if kev_request.get("request_type") == "order_scheduling":
+                kev_result = await self._run_kev_order_scheduling(kev_request)
+            else:
+                kev_result = await self._run_kev_dispatch(kev_request)
         if mode == "real":
             for order_id, robot_id in preemptions:
                 try:
@@ -760,7 +1023,7 @@ class OrderManager:
     # 대기 주문 배차를 lock 안에서 한 번 진행한다.
     # KEV 호출이 필요한 주문을 만나면 그 주문에서 멈추고 (KEV 요청, 진행 중 주문)을 반환한다.
     # kev_result는 직전 KEV 호출 결과이며, 같은 주문과 같은 후보일 때만 사용한다.
-    def _dispatch_round(self, mode, preemptions, kev_result):
+    def _dispatch_round(self, mode, preemptions, kev_result, scheduled_order_id):
         kev_request = None
         with self.lock:
             busy = {
@@ -791,9 +1054,64 @@ class OrderManager:
                 for robot_id, failed_id in self.recovering.items():
                     simulation_order_runner.start_recovery(failed_id, robot_id)
             candidates = available_robots(mode, busy, set(self.returning), mode_manager.operation_mode)
-            for row in self.orders.values():
-                if row["mode"] != mode or row["status"] != "PENDING" or not candidates:
-                    continue
+            # 기존 FIFO 순회 코드. 주문 우선순위 KEV가 꺼져 있으면 아래 pending_rows가 같은 등록 순서를 유지한다.
+            # for row in self.orders.values():
+            #     if row["mode"] != mode or row["status"] != "PENDING" or not candidates:
+            #         continue
+            pending_rows = self._pending_rows_by_fifo(
+                [row for row in self.orders.values() if row["mode"] == mode and row["status"] == "PENDING"]
+            )
+
+            # AI 주문 우선순위는 한 tick에서 한 번만 결정한다. 이후 로봇 KEV 응답을 받으러 다시 들어와도
+            # 같은 주문을 맨 앞으로 유지해 KEV 호출이 반복되지 않게 한다.
+            scheduling_enabled = (
+                bool(candidates)
+                and mode_manager.operation_mode == "ai"
+                and _kev_order_scheduling_enabled()
+            )
+            if scheduling_enabled and scheduled_order_id is None:
+                if kev_result is not None and kev_result.get("request_type") == "order_scheduling":
+                    valid_order_ids = {row["order_id"] for row in pending_rows}
+                    if "error" in kev_result:
+                        self._kev_order_scheduling_retry_at = monotonic() + KEV_DISPATCH_COOLDOWN_SECONDS
+                        logger.warning(
+                            "KEV order scheduling failed; falling back to FIFO for %.0fs: error=%r",
+                            KEV_DISPATCH_COOLDOWN_SECONDS,
+                            kev_result["error"],
+                            exc_info=kev_result["error"],
+                        )
+                        scheduled_order_id = kev_result["fifo_order_id"]
+                    elif kev_result.get("choice") in valid_order_ids:
+                        scheduled_order_id = kev_result["choice"]
+                    else:
+                        logger.info(
+                            "KEV order scheduling result discarded (pending orders changed): asked=%s now=%s",
+                            kev_result.get("candidate_order_ids"),
+                            sorted(valid_order_ids),
+                        )
+                        scheduled_order_id = pending_rows[0]["order_id"] if pending_rows else None
+                elif monotonic() >= self._kev_order_scheduling_retry_at:
+                    scheduling = self._prepare_kev_order_scheduling(pending_rows, candidates, mode)
+                    if scheduling is not None:
+                        if scheduling["kind"] == "request":
+                            active = [
+                                row for row in self.orders.values() if row["mode"] == mode and row["status"] == "IN_PROGRESS"
+                            ]
+                            return scheduling, active, scheduled_order_id
+                        scheduled_order_id = scheduling["order_id"]
+                else:
+                    logger.info(
+                        "KEV order scheduling skipped (cooldown %.1fs left); using FIFO",
+                        self._kev_order_scheduling_retry_at - monotonic(),
+                    )
+                    scheduled_order_id = pending_rows[0]["order_id"] if pending_rows else None
+
+            if scheduled_order_id is not None:
+                pending_rows.sort(key=lambda row: (row["order_id"] != scheduled_order_id, row.get("_queue_sequence", 0)))
+
+            for row in pending_rows:
+                if not candidates:
+                    break
                 blocked_by_earlier_pickup = False
                 if mode == "simulation":
                     for previous in self.orders.values():
@@ -873,7 +1191,8 @@ class OrderManager:
                 #         robot_id = None
                 # elif dispatch_engine == "ai":
                 kev_failure = None
-                if kev_result is not None and kev_result["order_id"] == row["order_id"] and "error" in kev_result:
+                is_robot_dispatch_result = kev_result is not None and kev_result.get("request_type") == "robot_dispatch"
+                if is_robot_dispatch_result and kev_result["order_id"] == row["order_id"] and "error" in kev_result:
                     kev_failure = kev_result.pop("error")
                 if dispatch_engine == "ai":
                     kind, value = self._prepare_kev_dispatch(row, eligible_candidates, mode)
@@ -896,13 +1215,13 @@ class OrderManager:
                             )
                         elif monotonic() >= self._kev_dispatch_retry_at:
                             if (
-                                kev_result is not None
+                                is_robot_dispatch_result
                                 and kev_result["order_id"] == row["order_id"]
                                 and kev_result["candidates"] == value["candidates"]
                             ):
                                 robot_id = kev_result["choice"]
                             else:
-                                if kev_result is not None and kev_result["order_id"] == row["order_id"]:
+                                if is_robot_dispatch_result and kev_result["order_id"] == row["order_id"]:
                                     # KEV 응답을 기다리는 동안 후보가 바뀌었으면 결과를 버리고 다시 묻는다.
                                     logger.info(
                                         "KEV dispatch result discarded (candidates changed): order=%s asked=%s now=%s",
@@ -972,7 +1291,7 @@ class OrderManager:
         #     for row in active:
         #         await self._tick_real(row)
         #     await self._tick_real_returns()
-        return kev_request, active
+        return kev_request, active, scheduled_order_id
 
     # 복귀 주행 정지 후 다음 주문을 시작한다.
     def _start_after_return_stop(self, order_id, robot_id):

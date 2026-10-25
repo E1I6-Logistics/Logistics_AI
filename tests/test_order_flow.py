@@ -30,6 +30,7 @@ def _reset(monkeypatch):
     order_manager._route_tasks.clear()
     order_manager._kev_dispatch_selector = None
     order_manager._kev_dispatch_retry_at = 0.0
+    order_manager._kev_order_scheduling_retry_at = 0.0
     workstation_manager._assigned.clear()
     simulation_order_runner.tasks.clear()
     simulation_order_runner.work_seconds = 0.01
@@ -218,6 +219,8 @@ def test_kev_dispatch_debug_log_is_opt_in(monkeypatch, caplog, debug_enabled):
         "question_id": captured["question_id"],
         "excluded_last_robot": None,
         "rule_baseline_choice": "robot1",
+        "candidate_scope": "near_eta",
+        "eta_winner": "robot2",
         "state": captured["state"],
         "choices": captured["candidates"],
         "instructions": captured["instructions"],
@@ -1473,3 +1476,181 @@ def test_robots_api_does_not_wait_for_order_lock(monkeypatch):
     finally:
         release.set()
         thread.join()
+
+
+# all_eligible에서는 ETA가 확실히 짧아도 안전 통과 후보 전체를 KEV에 보내는지 검증한다.
+def test_kev_dispatch_all_eligible_sends_every_candidate(monkeypatch):
+    _reset(monkeypatch)
+    monkeypatch.setenv("KEV_DISPATCH_ETA_TIE_SECONDS", "0")
+    monkeypatch.setenv("KEV_DISPATCH_CANDIDATE_SCOPE", "all_eligible")
+    captured = {}
+
+    class FakeKevSelector:
+        def select_choice(self, **kwargs):
+            captured.update(kwargs)
+            return {"choice": "robot3"}
+
+    async def scenario():
+        mode_manager.set_mode("simulation", "ai")
+        order_manager._kev_dispatch_selector = FakeKevSelector()
+        order = order_manager.create_order(items={"A": 1, "B": 0, "C": 0, "D": 0}, total_quantity=1)
+        await order_manager.tick()
+        assert order_manager.get_order(order["order_id"])["robot_id"] == "robot3"
+        await asyncio.gather(*list(simulation_order_runner.tasks.values()))
+
+    try:
+        asyncio.run(scenario())
+    finally:
+        mode_manager.set_mode("simulation", "algorithm")
+
+    assert set(captured["candidates"]) == {"robot1", "robot2", "robot3"}
+    assert captured["state"]["dispatch_context"]["eta_filter_applied"] is False
+    assert captured["state"]["dispatch_context"]["excluded_by_eta"] == []
+
+
+# all_eligible에서 KEV가 실패하면 근소 후보군의 ETA 우선 기준선으로 돌아가는지 검증한다.
+def test_kev_dispatch_all_eligible_fallback_uses_eta_baseline(monkeypatch):
+    _reset(monkeypatch)
+    monkeypatch.setenv("KEV_DISPATCH_ETA_TIE_SECONDS", "0")
+    monkeypatch.setenv("KEV_DISPATCH_CANDIDATE_SCOPE", "all_eligible")
+
+    class FailingKevSelector:
+        def select_choice(self, **kwargs):
+            raise RuntimeError("KEV server unavailable")
+
+    async def scenario():
+        mode_manager.set_mode("simulation", "ai")
+        order_manager._kev_dispatch_selector = FailingKevSelector()
+        order = order_manager.create_order(items={"A": 1, "B": 0, "C": 0, "D": 0}, total_quantity=1)
+        await order_manager.tick()
+        # 기본 배치에서 N5까지 ETA가 가장 짧은 로봇은 robot2(N1)다.
+        assert order_manager.get_order(order["order_id"])["robot_id"] == "robot2"
+        await asyncio.gather(*list(simulation_order_runner.tasks.values()))
+
+    try:
+        asyncio.run(scenario())
+    finally:
+        mode_manager.set_mode("simulation", "algorithm")
+
+
+def test_kev_dispatch_candidate_scope_rejects_unknown_value(monkeypatch):
+    _reset(monkeypatch)
+    monkeypatch.setenv("KEV_DISPATCH_CANDIDATE_SCOPE", "all")
+
+    with pytest.raises(ValueError, match="near_eta 또는 all_eligible"):
+        order_manager._prepare_kev_dispatch(
+            {"pickup_nodes": ["5"]}, ["robot1", "robot2"], "simulation"
+        )
+
+
+# 주문 우선순위 KEV가 고른 주문을 같은 tick에서 가장 먼저 배차하는지 검증한다.
+def test_kev_order_scheduling_dispatches_selected_pending_order_first(monkeypatch):
+    _reset(monkeypatch)
+    monkeypatch.setenv("KEV_ORDER_SCHEDULING_ENABLED", "1")
+    monkeypatch.setenv("KEV_DISPATCH_CANDIDATE_SCOPE", "all_eligible")
+    captured = {}
+
+    # 이 단위 테스트는 KEV 요청 결과를 검증하므로 워커 스레드 대신 즉시 실행한다.
+    async def immediate_to_thread(function, *args, **kwargs):
+        return function(*args, **kwargs)
+
+    monkeypatch.setattr(asyncio, "to_thread", immediate_to_thread)
+
+    class FakeKevSelector:
+        def select_choice(self, *, question_id, candidates, **kwargs):
+            captured[question_id] = candidates
+            if question_id.startswith("order_schedule_"):
+                return {"choice": "order_2"}
+            return {"choice": "robot1"}
+
+    async def scenario():
+        nonlocal first, second
+        mode_manager.set_mode("simulation", "ai")
+        order_manager._kev_dispatch_selector = FakeKevSelector()
+        first = order_manager.create_order(items={"A": 1, "B": 0, "C": 0, "D": 0}, total_quantity=1)
+        second = order_manager.create_order(
+            items={"A": 0, "B": 0, "C": 1, "D": 0}, total_quantity=1
+        )
+        await order_manager.tick()
+        assert order_manager.get_order(second["order_id"])["robot_id"] == "robot1"
+        assert order_manager.get_order(first["order_id"])["robot_id"] != "robot1"
+        await asyncio.gather(*list(simulation_order_runner.tasks.values()))
+
+    first = None
+    second = None
+    try:
+        asyncio.run(scenario())
+    finally:
+        mode_manager.set_mode("simulation", "algorithm")
+
+    schedule_questions = [key for key in captured if key.startswith("order_schedule_")]
+    assert len(schedule_questions) == 1
+    assert set(captured[schedule_questions[0]]) == {"order_1", "order_2"}
+    assert first["order_id"] not in captured[schedule_questions[0]]
+    assert second["order_id"] not in captured[schedule_questions[0]]
+
+
+# 주문 우선순위 KEV가 실패해도 가장 먼저 들어온 주문부터 FIFO로 배차하는지 검증한다.
+def test_kev_order_scheduling_failure_falls_back_to_fifo(monkeypatch):
+    _reset(monkeypatch)
+    monkeypatch.setenv("KEV_ORDER_SCHEDULING_ENABLED", "true")
+    monkeypatch.setenv("KEV_DISPATCH_CANDIDATE_SCOPE", "all_eligible")
+
+    # 이 단위 테스트는 KEV 요청 결과를 검증하므로 워커 스레드 대신 즉시 실행한다.
+    async def immediate_to_thread(function, *args, **kwargs):
+        return function(*args, **kwargs)
+
+    monkeypatch.setattr(asyncio, "to_thread", immediate_to_thread)
+
+    class FakeKevSelector:
+        def select_choice(self, *, question_id, **kwargs):
+            if question_id.startswith("order_schedule_"):
+                raise RuntimeError("KEV server unavailable")
+            return {"choice": "robot1"}
+
+    async def scenario():
+        mode_manager.set_mode("simulation", "ai")
+        order_manager._kev_dispatch_selector = FakeKevSelector()
+        first = order_manager.create_order(items={"A": 1, "B": 0, "C": 0, "D": 0}, total_quantity=1)
+        second = order_manager.create_order(items={"A": 0, "B": 0, "C": 1, "D": 0}, total_quantity=1)
+        await order_manager.tick()
+        assert order_manager.get_order(first["order_id"])["robot_id"] == "robot1"
+        assert order_manager.get_order(second["order_id"])["robot_id"] != "robot1"
+        await asyncio.gather(*list(simulation_order_runner.tasks.values()))
+
+    try:
+        asyncio.run(scenario())
+    finally:
+        mode_manager.set_mode("simulation", "algorithm")
+
+
+def test_kev_order_scheduling_age_guard_uses_fifo(monkeypatch):
+    _reset(monkeypatch)
+    monkeypatch.setenv("KEV_ORDER_SCHEDULING_MAX_WAIT_SECONDS", "1")
+    first = order_manager.create_order(items={"A": 1, "B": 0, "C": 0, "D": 0}, total_quantity=1)
+    order_manager.create_order(items={"A": 0, "B": 0, "C": 1, "D": 0}, total_quantity=1)
+    order_manager.orders[first["order_id"]]["_queued_at_monotonic"] = monotonic() - 2
+
+    result = order_manager._prepare_kev_order_scheduling(
+        list(order_manager.orders.values()), ["robot1", "robot2"], "simulation"
+    )
+
+    assert result == {"kind": "fifo", "order_id": first["order_id"]}
+
+
+# 주문 우선순위 기능이 꺼져 있을 때 재시도 주문의 기존 FIFO 위치를 바꾸지 않는지 검증한다.
+def test_retry_order_keeps_original_fifo_queue_position(monkeypatch):
+    _reset(monkeypatch)
+    first = order_manager.create_order(items={"A": 1, "B": 0, "C": 0, "D": 0}, total_quantity=1)
+    second = order_manager.create_order(items={"A": 0, "B": 0, "C": 1, "D": 0}, total_quantity=1)
+    first_row = order_manager.orders[first["order_id"]]
+    original_sequence = first_row["_queue_sequence"]
+    original_queued_at = first_row["_queued_at_monotonic"]
+    first_row.update(status="FAILED", robot_id="robot1")
+
+    order_manager.retry_order(first["order_id"])
+
+    pending_rows = order_manager._pending_rows_by_fifo(list(order_manager.orders.values()))
+    assert [row["order_id"] for row in pending_rows] == [first["order_id"], second["order_id"]]
+    assert first_row["_queue_sequence"] == original_sequence
+    assert first_row["_queued_at_monotonic"] == original_queued_at
