@@ -44,6 +44,13 @@ from .kev_dispatcher import (
 )
 from .kev_engine import KevMAPF
 from .kev_graph import Graph, _node, _node_sort
+from .kev_route_provider import generate_traffic_route
+from .kev_strategy import (
+    KEV_STRATEGY_INSTRUCTIONS,
+    build_avoidance_strategies,
+    fingerprint,
+    probability_order,
+)
 from .kev_traffic import live_traffic, mapf_traffic
 
 __all__ = [
@@ -76,4 +83,9 @@ __all__ = [
     "dispatch_simulation_mapf",
     "live_traffic",
     "mapf_traffic",
+    "generate_traffic_route",
+    "KEV_STRATEGY_INSTRUCTIONS",
+    "fingerprint",
+    "probability_order",
+    "build_avoidance_strategies",
 ]

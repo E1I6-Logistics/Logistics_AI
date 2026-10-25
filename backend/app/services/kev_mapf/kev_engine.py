@@ -1,10 +1,14 @@
 """[모듈: kev_engine.py - Kev 4단계 의사결정 MAPF 코어 엔진]
-- 역할: 공유 구간의 로봇 쌍 충돌을 반복 조정하여 WAIT / REROUTE / HOLD 행동 제안과 우선순위 관계를 생성한다.
-- 의사결정 4단계 파이프라인:
-  1단계 (_select_zone): 가장 먼저 해결할 공유 충돌 구간(zone) 선택
-  2단계 (_resolve_priority): 순환을 일으키지 않는 후보 중 우선 통과 로봇(high)과 양보 로봇(low) 결정 (score/choice 모드 지원)
-  3단계 (_select_action): 양보 로봇의 행동(WAIT / REROUTE / HOLD) 결정
-  4단계 (_apply_wait / _reroute): 상류 대기 노드 예약 및 경로 교차 검증, 또는 가상 그래프 기반 우회 경로 탐색
+- 역할: 전체 로봇 경로 및 공유 구간을 탐색하여, 충돌이 없으면 기존 경로(PROCEED)를 유지하고,
+  충돌 발생 시 KEV 인공지능이 로봇 간 우선순위(PROCEED 후보 확정) 및 양보 로봇의 행동(WAIT/REROUTE/HOLD)을 결정한다.
+- AX 의사결정 파이프라인:
+  [전체 로봇 경로·상태 입력] -> [공유 Node/Edge 탐색]
+    -> 충돌 없음: 기존 경로 유지 (PROCEED)
+    -> 충돌 발생:
+       1단계 (_select_zone): 충돌 구역 선정
+       2단계 (_resolve_priority): KEV 로봇 간 우선순위 평가 (score_many) -> High 로봇 PROCEED 확정
+       3단계 (_select_action): KEV 양보(Low) 로봇 행동 선택 (WAIT / REROUTE / HOLD)
+       4단계 (_apply_wait / _reroute): 상류 안전 대기 노드(wait_node) 배정 또는 KEV 우회 경로 생성
 """
 
 from __future__ import annotations
@@ -271,8 +275,8 @@ class KevMAPF:
                 for hi, lo in possible:
                     if not self._wait_candidates(self.robots[lo], info):
                         continue
-                    high_path = {str(n) for n in self.robots[hi]["path"]}
-                    low_curr = str(self.robots[lo]["path"][0])
+                    high_path = set(self.robots[hi]["path"])
+                    low_curr = self.robots[lo]["path"][0]
                     if low_curr not in high_path:
                         feasible.append((hi, lo))
                 if not feasible:
@@ -387,17 +391,20 @@ class KevMAPF:
         potential_conflict_zones = group_conflict_zones(zone_candidates(routes))
 
         for it in range(self.rounds):
-            available_zones = {
-                zid: info
-                for zid, info in potential_conflict_zones.items()
-                if self._pair_for(zid, info) is not None
-            }
+            zone_pairs: dict[str, tuple[str, str]] = {}
+            available_zones: dict[str, dict] = {}
+            for zid, info in potential_conflict_zones.items():
+                pair = self._pair_for(zid, info)
+                if pair is not None:
+                    zone_pairs[zid] = pair
+                    available_zones[zid] = info
+
             if not available_zones:
                 break
 
             # [1단계] 충돌 구간 선택
             zid, info = self._select_zone(it, available_zones)
-            pair = self._pair_for(zid, info)
+            pair = zone_pairs.get(zid) or self._pair_for(zid, info)
             if pair is None:
                 continue
 
@@ -481,7 +488,7 @@ class KevMAPF:
                 "action": "HOLD",
                 "wait_node": None,
                 "needs_fms_approval": True,
-                "priority_robot_action": "REQUEST_PROCEED_AFTER_FMS_PERMISSION",
+                "priority_robot_action": "PROCEED",
             }
 
             # [4단계] 선택한 행동 적용
@@ -540,11 +547,17 @@ class KevMAPF:
         if any(d["action"] == "HOLD" for d in self.decisions):
             status = "BLOCKED"
 
+        yield_robots = {
+            d["yield_robot"] for d in self.decisions if d.get("action") in ("WAIT", "HOLD")
+        }
+        proceed_robots = sorted(set(self.robots) - yield_robots)
+
         return {
             "status": status,
             "robot_count": len(self.robots),
             "paths": {rid: r["path"] for rid, r in sorted(self.robots.items())},
             "path_sources": {rid: r["source"] for rid, r in sorted(self.robots.items())},
+            "proceed_robots": proceed_robots,
             "potential_shared_zones": remaining,
             "decisions": self.decisions,
             "global_priority_relations": [list(x) for x in sorted(self.priorities)],

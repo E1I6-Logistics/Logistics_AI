@@ -28,7 +28,7 @@ KEV_ZONE_INSTRUCTIONS = (
     "Return only a supplied criteria ID."
 )
 
-# [2단계 지침 - Score 방식] 충돌 구간에서 로봇들의 상대적 우선순위 점수 평가
+# [2단계 지침 - Score 방식 (AX 표준)] 충돌 구간에서 로봇들의 상대적 우선순위 점수 평가 (score_many 일괄 평가)
 KEV_PRIORITY_SCORE_INSTRUCTIONS = (
     "Evaluate the priority of scoring_robot relative to "
     "other robots in the current MAPF state. "
@@ -40,7 +40,7 @@ KEV_PRIORITY_SCORE_INSTRUCTIONS = (
     "Do not treat the score as movement permission."
 )
 
-# [2단계 지침 - Choice 방식] 충돌 구간에서 두 로봇 중 먼저 통과할 우선순위 로봇(priority_robot) 결정
+# [2단계 지침 - Legacy Fallback (Choice 방식)] 충돌 구간에서 두 로봇 중 먼저 통과할 우선순위 로봇(priority_robot) 결정
 KEV_PRIORITY_INSTRUCTIONS = (
     "You are the MAPF priority-decision component. Choose ONE robot to have "
     "priority at the indicated shared resource, considering current position, "
