@@ -207,12 +207,12 @@ class FixedReservationTests(unittest.TestCase):
         self.assertEqual([xy[:2] for xy in sent[0]["waypoints"]], [(0.0, 1.0), (2.0, 0.0)])
 
     def test_turtlebot3_footprint_constants(self):
-        """TurtleBot3 Burger 표준 풋프린트 반경(0.105m) 상수가 정의되어 있는지 검증."""
+        """TurtleBot3 Burger 표준 풋프린트 반경(0.06m) 상수가 정의되어 있는지 검증."""
         from backend.app.services.traffic_manager import TURTLEBOT3_BURGER_RADIUS_M, TURTLEBOT3_CLEARANCE_DIAMETER_M
-        self.assertEqual(TURTLEBOT3_BURGER_RADIUS_M, 0.105)
-        self.assertEqual(TURTLEBOT3_CLEARANCE_DIAMETER_M, 0.21)
+        self.assertEqual(TURTLEBOT3_BURGER_RADIUS_M, 0.06)
+        self.assertEqual(TURTLEBOT3_CLEARANCE_DIAMETER_M, 0.12)
         tm = TrafficManager({"robot1": robot()}, speed_mps=1, safety_margin=0.2)
-        self.assertEqual(tm.robot_radius_m, 0.105)
+        self.assertEqual(tm.robot_radius_m, 0.06)
 
     def test_required_paths_mutual_vacating_resolves_deadlock(self):
         """[AI/MAPF] 두 로봇이 상대방의 현재 노드를 목적지로 하는 상호 대면/우회 경로일 때 교착 없이 완주하는지 검증."""

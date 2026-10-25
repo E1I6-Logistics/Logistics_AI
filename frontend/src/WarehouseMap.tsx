@@ -84,9 +84,9 @@ export default function WarehouseMap({
   const mapWidth = mapInfo?.width ?? 97
   const mapHeight = mapInfo?.height ?? 47
 
-  // TurtleBot3 Burger 물리적 풋프린트 반경 (0.105m) -> 맵 좌표 픽셀 변환
+  // TurtleBot3 Burger 물리적 풋프린트 반경 (0.06m) -> 맵 좌표 픽셀 변환
   const mapResolution = mapInfo?.resolution ?? 0.05
-  const tb3RadiusPx = 0.105 / mapResolution
+  const tb3RadiusPx = 0.06 / mapResolution
 
   const viewWidth = (mapWidth + 16) / zoom
   const viewHeight = (mapHeight + 16) / zoom

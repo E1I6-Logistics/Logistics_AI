@@ -115,8 +115,8 @@ class MockFmsStore:
                 "pixel_x": pixel_x,
                 "pixel_y": pixel_y,
                 "pose_source": "MOCK",
-                "footprint_radius_m": 0.105,
-                "footprint_diameter_m": 0.21,
+                "footprint_radius_m": 0.06,
+                "footprint_diameter_m": 0.12,
             }
         )
         return result

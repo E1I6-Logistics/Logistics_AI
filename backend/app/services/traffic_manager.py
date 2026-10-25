@@ -23,8 +23,8 @@ from .route_graph import find_edge_ids
 
 
 # TurtleBot3 Burger 규격 풋프린트: 반경 0.105m (지름 0.21m)
-TURTLEBOT3_BURGER_RADIUS_M = 0.105
-TURTLEBOT3_CLEARANCE_DIAMETER_M = 0.21
+TURTLEBOT3_BURGER_RADIUS_M = 0.06
+TURTLEBOT3_CLEARANCE_DIAMETER_M = 0.12
 
 
 @dataclass(frozen=True)

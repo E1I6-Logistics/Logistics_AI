@@ -169,6 +169,12 @@ class KevMAPF:
 
         curr = robot["current_node"]
         goal = robot["goal_node"]
+        other_goals = {
+            r["goal_node"]
+            for rid, r in self.robots.items()
+            if rid != robot["id"] and r.get("goal_node") is not None
+        }
+        forbid_nodes.update(other_goals - {curr, goal})
 
         if info["kind"] == "node":
             if info["node"] not in (curr, goal):
