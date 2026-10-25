@@ -24,6 +24,16 @@ class MockKEV:
             return "action_wait"
         return next(iter(candidates))
 
+    def score(self, state, question_id):
+        """단일 로봇 우선순위 평가 대역 (기본 0.5 반환)."""
+        self.calls += 1
+        return 0.5
+
+    def score_many(self, state, robot_ids):
+        """다중 로봇 우선순위 일괄 평가 대역 (정렬 순서대로 내림차순 점수 부여)."""
+        self.calls += 1
+        return {rid: round(1.0 - (i * 0.1), 2) for i, rid in enumerate(sorted(robot_ids))}
+
     def route(self, graph_data, start, goal, *, selector="kev", model=None, traffic=None):
         """오프라인 데모·테스트를 위해 단순 너비 우선 탐색(BFS)으로 연결 경로를 찾는다."""
         graph = Graph(graph_data)

@@ -47,7 +47,7 @@ class KevMAPF:
         self.graph, self.robots, self.live = graph, robots, live
         self.rounds, self.reroutes = rounds, reroutes
 
-        self.priority_mode = config.get("priority_mode", "choice")
+        self.priority_mode = config.get("priority_mode", "score")
         if self.priority_mode not in ("choice", "score"):
             raise ValueError("Invalid priority_mode")
 

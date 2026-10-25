@@ -45,6 +45,10 @@ class Decisions(mapf.MockKEV):
             return self.action
         return next(iter(candidates))
 
+    def score_many(self, state, robot_ids):
+        self.states.append(deepcopy(state))
+        return super().score_many(state, robot_ids)
+
 
 class MapfIntegrationTests(unittest.TestCase):
     def setUp(self):
