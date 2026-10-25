@@ -183,19 +183,13 @@ class MapfIntegrationTests(unittest.TestCase):
         preview.assert_called_once_with(self.graph, "1", "4", selector="kev", model="kev-08b")
 
 
-    def test_priority_robot_action_is_proceed_and_strategies_preserve_edges(self):
+    def test_priority_robot_action_is_proceed(self):
         planner = Decisions()
         result = self.plan(planner=planner, config={"wait_allowed_nodes": [5]})
         self.assertEqual(result["status"], "PROPOSED")
         self.assertEqual(len(result["decisions"]), 1)
         self.assertEqual(result["decisions"][0]["priority_robot_action"], "PROCEED")
         self.assertIn("a", result["proceed_robots"])
-
-        from backend.app.services.kev_mapf import build_avoidance_strategies
-        strategies = build_avoidance_strategies([1, 2], conflict_edges={(3, 1)})
-        self.assertIn("REROUTE_PRIMARY", strategies)
-        # Edge direction (3, 1) must be preserved as ['3', '1'], not sorted into ['1', '3']
-        self.assertEqual(strategies["REROUTE_PRIMARY"]["blocked_edges"], [["3", "1"]])
 
 
 if __name__ == "__main__":

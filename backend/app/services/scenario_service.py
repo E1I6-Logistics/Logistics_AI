@@ -216,11 +216,79 @@ class ScenarioManager:
 
                 touched = True
                 prepare(specs, nodes)
-            for rid, goal in goals.items():
-                if mode_manager.mode != mode:
-                    raise ValueError("운용 모드가 변경되었습니다.")
-                touched = True
-                navigate_to_node(rid, goal, mode)
+            operation_mode = scenario.get("operation_mode") or mode_manager.operation_mode
+            is_ai = operation_mode == "ai" or any(r.get("driving_mode") == "llm" for r in specs)
+
+            if is_ai:
+                from .kev_mapf import plan_mapf_from_route_results
+
+                route_planner = DistanceAStar(graph)
+                route_results = []
+                for spec in specs:
+                    if spec.get("goal") is None:
+                        continue
+                    rid, start, goal = spec["id"], str(spec["start"]), str(spec["goal"])
+                    path: list[str] | None = None
+                    try:
+                        from .llm_route_preview import preview_llm_route
+
+                        res = preview_llm_route(
+                            graph,
+                            start,
+                            goal,
+                            selector=spec.get("selector", "kev"),
+                            model=spec.get("model", "kev-08b"),
+                        )
+                        if isinstance(res, dict) and isinstance(res.get("path"), list):
+                            path = [str(n) for n in res["path"]]
+                    except Exception:
+                        pass
+
+                    if not path:
+                        plan_res = route_planner.plan(start, goal)
+                        path = [str(n) for n in getattr(plan_res, "route", getattr(plan_res, "node_ids", []))]
+
+                    route_results.append(
+                        {
+                            "order": {
+                                "robot_id": rid,
+                                "selector": spec.get("selector", "kev"),
+                                "model": spec.get("model", "kev-08b"),
+                            },
+                            "current_node": start,
+                            "node": goal,
+                            "result": {"path": path},
+                            "task_priority": int(spec.get("task_priority", 0)),
+                        }
+                    )
+
+                advisory = plan_mapf_from_route_results(
+                    graph,
+                    route_results,
+                    config={
+                        "wait_allowed_nodes": scenario.get("wait_allowed_nodes", ["0", "10", "7", "8"]),
+                        "priority_mode": "score",
+                    },
+                )
+                assigned_paths = {
+                    rid: [str(n) for n in p]
+                    for rid, p in advisory.get("paths", {}).items()
+                }
+                for rid, goal in goals.items():
+                    if mode_manager.mode != mode:
+                        raise ValueError("운용 모드가 변경되었습니다.")
+                    touched = True
+                    req_path = assigned_paths.get(rid)
+                    navigate_to_node(
+                        rid, goal, mode, **({"required_path": req_path} if req_path else {})
+                    )
+            else:
+                for rid, goal in goals.items():
+                    if mode_manager.mode != mode:
+                        raise ValueError("운용 모드가 변경되었습니다.")
+                    touched = True
+                    navigate_to_node(rid, goal, mode)
+
             self._status["message"] = "주행 및 도착 후 동작 완료 대기 중"
             while True:
                 if self._status["state"] == "stopping":
