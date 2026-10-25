@@ -11,7 +11,7 @@ from .route_graph import get_node, load_route_graph
 from .pathfinding import DistanceAStar
 from .reservation import reservation_tables
 from .occupancy import locate_occupancy, occupied_resource
-from .traffic_manager import TrafficManager
+from .traffic_manager import TrafficManager, safe_travel_distance
 
 import math
 
@@ -325,23 +325,47 @@ class MockFmsStore:
                     # 차체 방향을 유지하는 실제 후진 명령으로 취급하지 않음
                     robot["yaw"] = route["waypoint_yaws"][next_index]
 
+                other_positions = [
+                    (other["x"], other["y"])
+                    for oid, other in self._robots.items()
+                    if oid != robot["robot_id"]
+                ]
+
                 # 다음 노드까지 도착하고 남은 거리로 계속 진행
                 if distance <= remaining:
+                    safe_step = safe_travel_distance(
+                        robot["x"], robot["y"], dx, dy, distance, other_positions
+                    )
+                    if safe_step < distance - 1e-5:
+                        if safe_step >= 1e-4:
+                            ratio = safe_step / distance
+                            robot["x"] += dx * ratio
+                            robot["y"] += dy * ratio
+                            self._traffic.confirm_edge_occupancy(robot["robot_id"])
+                        robot["status"] = "WAITING"
+                        route["phase"] = "waiting"
+                        return
                     robot["x"] = target_x
                     robot["y"] = target_y
                     self._traffic.confirm_node_arrival(robot["robot_id"], target_id)
                     remaining -= distance
                     if robot["route"] is None:
                         return
-
                 else:
-                    # 목표 노드 방향으로 remaining만큼 이동
-                    ratio = remaining / distance
+                    safe_step = safe_travel_distance(
+                        robot["x"], robot["y"], dx, dy, remaining, other_positions
+                    )
+                    if safe_step < 1e-4:
+                        robot["status"] = "WAITING"
+                        route["phase"] = "waiting"
+                        return
+                    ratio = safe_step / distance
                     robot["x"] += dx * ratio
                     robot["y"] += dy * ratio
-
-                    # 노드 사이를 이동하는 상태
                     self._traffic.confirm_edge_occupancy(robot["robot_id"])
+                    if safe_step < remaining - 1e-5:
+                        robot["status"] = "WAITING"
+                        route["phase"] = "waiting"
                     return
 
 

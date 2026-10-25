@@ -33,6 +33,45 @@ class SegmentPermission:
     reason: str
 
 
+def safe_travel_distance(
+    x: float,
+    y: float,
+    dx: float,
+    dy: float,
+    max_step: float,
+    other_positions: list[tuple[float, float]],
+    min_clearance: float = TURTLEBOT3_CLEARANCE_DIAMETER_M,
+) -> float:
+    """전진 이동 시 다른 로봇과의 거리가 min_clearance 미만으로 좁혀지지 않는 최대 이동 거리를 반환한다."""
+    step = max_step
+    dist_to_target = math.hypot(dx, dy)
+    if dist_to_target < 1e-9:
+        return 0.0
+    ux = dx / dist_to_target
+    uy = dy / dist_to_target
+
+    for ox, oy in other_positions:
+        vx = ox - x
+        vy = oy - y
+        curr_dist = math.hypot(vx, vy)
+        dot = ux * vx + uy * vy
+        c = curr_dist**2 - min_clearance**2
+        if c < 0:
+            if dot > 0:
+                return 0.0
+            continue
+        if dot <= 0:
+            continue
+        discriminant = dot**2 - c
+        if discriminant > 0:
+            s1 = dot - math.sqrt(discriminant)
+            if s1 > 0:
+                step = min(step, max(0.0, s1 - 1e-4))
+            elif dot > 0:
+                return 0.0
+    return max(0.0, step)
+
+
 class TrafficManager:
     # TrafficManager의 초기 상태를 설정한다.
     def __init__(self, robots: dict[str, dict[str, Any]], reservations=None, *, speed_mps: float, safety_margin: float):
@@ -282,7 +321,7 @@ class TrafficManager:
         self._pending.setdefault(robot["robot_id"], None)
 
     # 로봇의 경로 예약을 시도한다.
-    def _try_schedule(self, robot, now, graph, planner):
+    def _try_schedule(self, robot, now, graph, planner, *, vacating_nodes=None):
         others = [row for row in self._reservations.snapshot() if row.robot_id != robot["robot_id"]]
         blocked = {}
         for row in others:
@@ -297,19 +336,21 @@ class TrafficManager:
             resource = occupied_resource(other, graph)
             route = other["route"]
             scheduled = route is not None and route.get("departure_at") is not None
-            # 예정 시각이 지나도 실제 점유가 남아 있으면 해제하지 않는다.
-            until = (
-                max(
-                    (
-                        row.end
-                        for row in others
-                        if row.robot_id == other["robot_id"] and row.resource == resource and row.start <= now < row.end
-                    ),
-                    default=math.inf,
+            if not scheduled and resource[0] == "node" and vacating_nodes and resource[1] in vacating_nodes:
+                until = vacating_nodes[resource[1]]
+            else:
+                until = (
+                    max(
+                        (
+                            row.end
+                            for row in others
+                            if row.robot_id == other["robot_id"] and row.resource == resource and row.start <= now < row.end
+                        ),
+                        default=math.inf,
+                    )
+                    if scheduled
+                    else math.inf
                 )
-                if scheduled
-                else math.inf
-            )
             blocked.setdefault(resource, []).append((max(0.0, now - self.safety_margin), until))
 
         resource = occupied_resource(robot, graph)
@@ -575,106 +616,26 @@ class TrafficManager:
         if len(pending_reqs) < 2:
             return
 
+        clearance_time = (self.robot_radius_m * 2) / self.speed_mps
+
         for starter_id in sorted(pending_reqs, key=lambda r: self._robots[r]["request_order"] or 0):
             trial = self._planning_copy()
             vacating_nodes = {}
             for rid in pending_reqs:
-                if rid == starter_id:
-                    continue
                 req = self._required_paths.get(rid)
                 occ = self._robots[rid]["occupied_node"]
                 if req and len(req) > 1 and req[0] == occ:
-                    vacating_nodes[occ] = now
+                    vacating_nodes[occ] = now + clearance_time
 
             starter = trial._robots[starter_id]
-            others = [row for row in trial._reservations.snapshot() if row.robot_id != starter_id]
-            blocked = {}
-            for row in others:
-                blocked.setdefault(row.resource, []).append((row.start, row.end))
-            for owner, resources in trial._protected_resources.items():
-                if owner != starter_id:
-                    for resource in resources:
-                        blocked.setdefault(resource, []).append((now, math.inf))
-            for other in trial._robots.values():
-                if other is starter:
-                    continue
-                resource = occupied_resource(other, graph)
-                route = other["route"]
-                scheduled = route is not None and route.get("departure_at") is not None
-                if not scheduled and resource[0] == "node" and resource[1] in vacating_nodes:
-                    until = vacating_nodes[resource[1]]
-                else:
-                    until = (
-                        max(
-                            (
-                                row.end
-                                for row in others
-                                if row.robot_id == other["robot_id"] and row.resource == resource and row.start <= now < row.end
-                            ),
-                            default=math.inf,
-                        )
-                        if scheduled
-                        else math.inf
-                    )
-                blocked.setdefault(resource, []).append((max(0.0, now - trial.safety_margin), until))
-
-            res_resource = occupied_resource(starter, graph)
-            plan = planner.plan_timed(
-                starter["goal_node"],
-                (starter["x"], starter["y"]),
-                starter["occupied_node"],
-                res_resource[1:] if res_resource[0] == "edge" else None,
-                blocked=blocked,
-                now=now,
-                speed_mps=trial.speed_mps,
-                safety_margin=trial.safety_margin,
-                required_path=trial._required_paths.get(starter_id),
-            )
-            if plan is None:
+            if not trial._try_schedule(starter, now, graph, planner, vacating_nodes=vacating_nodes):
                 continue
 
-            node_ids, departures = plan["node_ids"], plan["segment_departures"]
-            edge_ids = find_edge_ids(graph, node_ids)
-            waypoint_yaws = [float(starter["yaw"])]
-            for s_node, e_node in zip(node_ids, node_ids[1:]):
-                ax, ay = planner.nodes[s_node]
-                bx, by = planner.nodes[e_node]
-                waypoint_yaws.append(
-                    math.atan2(by - ay, bx - ax) if math.hypot(bx - ax, by - ay) > 1e-9 else waypoint_yaws[-1]
-                )
-            departure = departures[0] if departures else now
-            batch = build_schedule(
-                starter_id,
-                starter["navigation_id"],
-                node_ids,
-                planner.nodes,
-                (starter["x"], starter["y"]),
-                starter["occupied_node"],
-                now=now,
-                departure_at=departure,
-                speed_mps=trial.speed_mps,
-                safety_margin=trial.safety_margin,
-                segment_departures=departures,
-            )
-            if not trial._reservations.replace_request(starter_id, starter["navigation_id"], batch):
-                continue
-            starter["route"] = {
-                "node_ids": node_ids,
-                "edge_ids": edge_ids,
-                "waypoint_yaws": waypoint_yaws,
-                "segment_index": 0,
-                "phase": "ready",
-                "departure_at": departure,
-                "segment_departures": departures,
-                "route_source": "llm",
-            }
-            starter["status"] = "WAITING" if departure > now else "NAVIGATING"
             trial._pending.pop(starter_id, None)
-
             remaining = [rid for rid in pending_reqs if rid != starter_id]
             all_ok = True
             for rid in remaining:
-                if not trial._try_schedule(trial._robots[rid], now, graph, planner):
+                if not trial._try_schedule(trial._robots[rid], now, graph, planner, vacating_nodes=vacating_nodes):
                     all_ok = False
                     break
                 trial._pending.pop(rid, None)
