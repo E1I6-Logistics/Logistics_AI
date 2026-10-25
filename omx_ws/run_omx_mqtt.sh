@@ -377,6 +377,8 @@ ROLLOUT_PID=$!
 
 echo "LeRobot PID: $ROLLOUT_PID"
 
+elif [[ "$ROBOT_ID" == "omx3" ]]; then
+  echo "[OMX3] MQTT 대기. command 수신 시 E 모델을 실행합니다."
 else
   echo "$ROBOT_ID 하차 동작은 아직 구현되지 않아 LeRobot을 시작하지 않습니다."
 fi
