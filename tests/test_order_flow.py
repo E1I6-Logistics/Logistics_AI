@@ -1558,7 +1558,7 @@ def test_kev_order_scheduling_dispatches_selected_pending_order_first(monkeypatc
 
     class FakeKevSelector:
         def select_choice(self, *, question_id, candidates, **kwargs):
-            captured[question_id] = candidates
+            captured[question_id] = {"candidates": candidates, "instructions": kwargs["instructions"]}
             if question_id.startswith("order_schedule_"):
                 return {"choice": "order_2"}
             return {"choice": "robot1"}
@@ -1585,9 +1585,13 @@ def test_kev_order_scheduling_dispatches_selected_pending_order_first(monkeypatc
 
     schedule_questions = [key for key in captured if key.startswith("order_schedule_")]
     assert len(schedule_questions) == 1
-    assert set(captured[schedule_questions[0]]) == {"order_1", "order_2"}
-    assert first["order_id"] not in captured[schedule_questions[0]]
-    assert second["order_id"] not in captured[schedule_questions[0]]
+    schedule_question = schedule_questions[0]
+    assert set(captured[schedule_question]["candidates"]) == {"order_1", "order_2"}
+    assert first["order_id"] not in captured[schedule_question]["candidates"]
+    assert second["order_id"] not in captured[schedule_question]["candidates"]
+    assert first["order_id"] not in schedule_question
+    assert second["order_id"] not in schedule_question
+    assert "candidate label" in captured[schedule_question]["instructions"]
 
 
 # 주문 우선순위 KEV가 실패해도 가장 먼저 들어온 주문부터 FIFO로 배차하는지 검증한다.
