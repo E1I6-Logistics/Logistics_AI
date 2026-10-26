@@ -18,10 +18,14 @@ from backend.app.services.workstation_manager import workstation_manager
 # 테스트 사이에 공유 상태를 초기화한다.
 def _reset(monkeypatch):
     mode_manager.set_mode("simulation", "algorithm")
-    # 코드 기본값과 같은 2초를 명시해 .env 설정과 무관하게 세 후보를 비교하도록 한다.
+    # 기존 ETA 비교 실험 테스트는 near_eta를 명시해 새 거리 기반 기본값과 분리한다.
+    monkeypatch.setenv("KEV_DISPATCH_CANDIDATE_SCOPE", "near_eta")
+    # 기존 코드 기본값과 같은 2초를 명시해 .env 설정과 무관하게 세 후보를 비교하도록 한다.
     monkeypatch.setenv("KEV_DISPATCH_ETA_TIE_SECONDS", "2")
     # 시뮬레이션 이동 속도와 같은 0.2 m/s를 명시한다. .env에는 실제 로봇용 0.06이 있다.
     monkeypatch.setenv("KEV_DISPATCH_ETA_SPEED_MPS", "0.2")
+    # 실제 실행용 .env의 최근 작업량 설정이 기존 회귀 테스트에 섞이지 않게 기본 입력을 고정한다.
+    monkeypatch.setenv("KEV_DISPATCH_RECENT_WORKLOAD", "0")
     mock_fms.reset()
     order_manager.orders.clear()
     order_manager.returning.clear()
@@ -261,6 +265,80 @@ def test_kev_dispatch_uses_code_for_clear_eta_winner(monkeypatch):
         mode_manager.set_mode("simulation", "algorithm")
 
     assert calls == []
+
+
+# 거리 기반 기본 모드는 ETA 속도를 사용하지 않고, 근소 거리 후보에 ETA 값을 전달하지 않는지 검증한다.
+def test_kev_dispatch_near_distance_uses_route_distance_without_eta(monkeypatch):
+    _reset(monkeypatch)
+    monkeypatch.setenv("KEV_DISPATCH_CANDIDATE_SCOPE", "near_distance")
+    monkeypatch.setenv("KEV_DISPATCH_DISTANCE_TIE_METERS", "0.15")
+    # ETA 속도가 잘못돼도 거리 기반 배차에는 영향이 없어야 한다.
+    monkeypatch.setenv("KEV_DISPATCH_ETA_SPEED_MPS", "0")
+    captured = {}
+
+    class FakeKevSelector:
+        def select_choice(self, **kwargs):
+            captured.update(kwargs)
+            assert set(kwargs["candidates"]) == {"robot2", "robot3"}
+            return {"choice": "robot3"}
+
+    row = {
+        "order_id": "distance-test",
+        "items": {"A": 1, "B": 0, "C": 0, "D": 0},
+        "total_quantity": 1,
+        "pickup_nodes": ["5"],
+    }
+    kind, request = order_manager._prepare_kev_dispatch(row, ["robot1", "robot2", "robot3"], "simulation")
+    assert kind == "request"
+    order_manager._kev_dispatch_selector = FakeKevSelector()
+    assert order_manager._request_kev_dispatch(request) == "robot3"
+
+    assert captured["state"]["dispatch_context"] == {
+        "post_task_battery_available": False,
+        "recent_workload_available": False,
+        "distance_filter_applied": True,
+        "minimum_pickup_distance_m": pytest.approx(1.3560958040035024),
+        "distance_tie_window_meters": 0.15,
+        "excluded_by_distance": ["robot1"],
+    }
+    assert all("pickup_eta_seconds" not in profile and "eta_delta_seconds" not in profile for profile in captured["state"]["robots"])
+    assert all("pickup_eta_seconds=" not in choice and "eta_delta_seconds=" not in choice for choice in captured["candidates"].values())
+
+
+# 기존 ETA 실험의 KEV 요청 형식은 확률 재현 비교에 쓰이므로 거리 기준 필드를 섞지 않는다.
+def test_kev_dispatch_near_eta_keeps_legacy_request_shape(monkeypatch):
+    _reset(monkeypatch)
+    row = {
+        "order_id": "legacy-eta-test",
+        "items": {"A": 1, "B": 0, "C": 0, "D": 0},
+        "total_quantity": 1,
+        "pickup_nodes": ["5"],
+    }
+
+    kind, request = order_manager._prepare_kev_dispatch(row, ["robot1", "robot2", "robot3"], "simulation")
+
+    assert kind == "request"
+    debug_record = request["debug_record"]
+    assert list(debug_record) == [
+        "order_id",
+        "question_id",
+        "excluded_last_robot",
+        "rule_baseline_choice",
+        "candidate_scope",
+        "eta_winner",
+        "state",
+        "choices",
+        "instructions",
+    ]
+    assert "distance_winner" not in debug_record
+    assert list(debug_record["state"]["dispatch_context"]) == [
+        "eta_filter_applied",
+        "minimum_pickup_eta_seconds",
+        "eta_tie_window_seconds",
+        "excluded_by_eta",
+        "post_task_battery_available",
+        "recent_workload_available",
+    ]
 
 
 # ETA 근소 후보군 안에서만 쓰는 임시 코드 기준선의 우선순위를 검증한다.
@@ -1558,7 +1636,7 @@ def test_kev_dispatch_candidate_scope_rejects_unknown_value(monkeypatch):
     _reset(monkeypatch)
     monkeypatch.setenv("KEV_DISPATCH_CANDIDATE_SCOPE", "all")
 
-    with pytest.raises(ValueError, match="near_eta 또는 all_eligible"):
+    with pytest.raises(ValueError, match="near_distance, near_eta 또는 all_eligible"):
         order_manager._prepare_kev_dispatch(
             {"pickup_nodes": ["5"]}, ["robot1", "robot2"], "simulation"
         )

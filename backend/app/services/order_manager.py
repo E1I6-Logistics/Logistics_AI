@@ -1,7 +1,6 @@
 """공통 주문 대기열, 배차, Real 작업 단계."""
 
 import asyncio
-import json
 import logging
 import math
 import os
@@ -16,6 +15,23 @@ from ..models.robot import RobotState
 from ..ros2.ros_gateway import CHARGING_STATION_NODES, NODE_OMX_MAP, ros_gateway
 from ..schemas.robot import normalize_robot_id
 from .fleet_manager import fleet_manager
+from .kev_mapf.kev_dispatch_client import request_choice as request_kev_dispatch_choice
+from .kev_mapf.kev_dispatch_policy import (
+    KEV_DISPATCH_COOLDOWN_SECONDS,
+    KEV_DISPATCH_MAX_ROUNDS,
+    KEV_DISPATCH_TIMEOUT_SECONDS,
+    KevDispatchEtaRejected,
+    kev_dispatch_candidate_scope as _kev_dispatch_candidate_scope,
+    kev_dispatch_distance_tie_meters as _kev_dispatch_distance_tie_meters,
+    kev_dispatch_eta_speed_mps as _kev_dispatch_eta_speed_mps,
+    kev_dispatch_eta_tie_seconds as _kev_dispatch_eta_tie_seconds,
+    kev_dispatch_recent_workload_enabled as _kev_dispatch_recent_workload_enabled,
+    kev_dispatch_workload_window_seconds as _kev_dispatch_workload_window_seconds,
+    kev_order_scheduling_enabled as _kev_order_scheduling_enabled,
+    kev_order_scheduling_max_wait_gap_seconds as _kev_order_scheduling_max_wait_gap_seconds,
+    kev_order_scheduling_max_wait_seconds as _kev_order_scheduling_max_wait_seconds,
+    order_scheduling_guard as _order_scheduling_guard,
+)
 from .mode_service import mode_manager, feature_engine
 from .mqtt_manager import mqtt_manager
 # 기존 코드. 배터리 전압 차단 이유도 같은 함수로 계산하도록 바꾼다.
@@ -29,121 +45,9 @@ from .workstation_manager import workstation_manager
 
 logger = logging.getLogger(__name__)
 
-# 기존 주석. KEV 호출을 lock 밖 스레드로 옮겨서 tick이 이벤트 루프를 막지 않는다.
-# # 배차 KEV 호출은 주문 tick 안에서 동기로 실행되므로 짧게 끊고, 실패 후에는 잠시 호출하지 않는다.
-# 배차 KEV 호출은 tick 한 번을 그만큼 늦추므로 짧게 끊고, 실패 후에는 잠시 호출하지 않는다.
-KEV_DISPATCH_TIMEOUT_SECONDS = float(os.getenv("KEV_DISPATCH_TIMEOUT_SECONDS", "3"))
-KEV_DISPATCH_COOLDOWN_SECONDS = float(os.getenv("KEV_DISPATCH_COOLDOWN_SECONDS", "30"))
-# tick 한 번에서 KEV 결과를 받아 배차를 다시 시도하는 최대 횟수. 남은 주문은 다음 tick에서 처리한다.
-KEV_DISPATCH_MAX_ROUNDS = 4
+# KEV 배차 정책·Choice API 호출은 kev_mapf/kev_dispatch_*.py로 분리했다.
 # /api/robots 조회가 배차 tick을 기다리지 않도록 주문 lock 대기 시간을 짧게 둔다.
 DISPATCH_STATUS_LOCK_TIMEOUT_S = 0.05
-
-
-def _kev_dispatch_eta_tie_seconds():
-    """Return the configured ETA window, rejecting an invalid policy value."""
-    seconds = float(os.getenv("KEV_DISPATCH_ETA_TIE_SECONDS", "2"))
-    if seconds < 0:
-        raise ValueError("KEV_DISPATCH_ETA_TIE_SECONDS는 0 이상이어야 합니다.")
-    return seconds
-
-
-def _kev_dispatch_eta_speed_mps():
-    """Return the ETA conversion speed configured for the active deployment."""
-    speed_mps = float(os.getenv("KEV_DISPATCH_ETA_SPEED_MPS", "0.2"))
-    if speed_mps <= 0:
-        raise ValueError("KEV_DISPATCH_ETA_SPEED_MPS는 0보다 커야 합니다.")
-    return speed_mps
-
-
-class KevDispatchEtaRejected(RuntimeError):
-    """KEV가 유효 후보를 골랐지만 ETA 상한을 넘어 코드가 거부한 경우. 서버 오류가 아니므로 cooldown을 걸지 않는다."""
-
-
-# KEV가 비교할 후보 범위. near_eta는 최단 ETA + 근소 범위 안의 후보만, all_eligible은 안전 검사를 통과한 후보 전체.
-KEV_DISPATCH_CANDIDATE_SCOPES = {"near_eta", "all_eligible"}
-
-
-def _kev_dispatch_candidate_scope():
-    """Return the configured KEV candidate scope for dispatch experiments."""
-    scope = os.getenv("KEV_DISPATCH_CANDIDATE_SCOPE", "near_eta").strip().lower()
-    if scope not in KEV_DISPATCH_CANDIDATE_SCOPES:
-        raise ValueError("KEV_DISPATCH_CANDIDATE_SCOPE는 near_eta 또는 all_eligible이어야 합니다.")
-    return scope
-
-
-def _kev_dispatch_recent_workload_enabled():
-    """로봇별 최근 작업량을 KEV 배차 입력에 넣을지 읽는다. 기본은 꺼져 기존 KEV 입력과 같다."""
-    value = os.getenv("KEV_DISPATCH_RECENT_WORKLOAD", "0").strip().lower()
-    if value in {"1", "true", "yes", "on"}:
-        return True
-    if value in {"0", "false", "no", "off"}:
-        return False
-    raise ValueError("KEV_DISPATCH_RECENT_WORKLOAD는 true 또는 false여야 합니다.")
-
-
-def _kev_dispatch_workload_window_seconds():
-    """최근 작업량을 셀 기간(초)을 읽는다."""
-    seconds = float(os.getenv("KEV_DISPATCH_WORKLOAD_WINDOW_SECONDS", "600"))
-    if not math.isfinite(seconds) or seconds <= 0:
-        raise ValueError("KEV_DISPATCH_WORKLOAD_WINDOW_SECONDS는 0보다 커야 합니다.")
-    return seconds
-
-
-def _kev_order_scheduling_max_wait_gap_seconds():
-    """KEV가 고른 주문보다 이 시간(초) 이상 더 기다린 주문이 있으면 KEV 선택을 거부한다."""
-    seconds = float(os.getenv("KEV_ORDER_SCHEDULING_MAX_WAIT_GAP_SECONDS", "30"))
-    if not math.isfinite(seconds) or seconds < 0:
-        raise ValueError("KEV_ORDER_SCHEDULING_MAX_WAIT_GAP_SECONDS는 0 이상이어야 합니다.")
-    return seconds
-
-
-# KEV가 고른 주문을 코드가 다시 검증한다. 명백히 나쁜 선택이면 대신 배차할 주문 라벨과 사유를 돌려준다.
-# 1) 훨씬 오래 기다린 주문이 있으면 그중 가장 오래된 주문(FIFO)으로,
-# 2) 대기는 비슷한데 최단 픽업 ETA가 근소 범위(KEV_DISPATCH_ETA_TIE_SECONDS)보다 더 짧은 주문이 있으면 ETA 최단 주문으로.
-# 확률 차이는 정답률로 보정됐다는 근거가 없어 제어에는 쓰지 않는다.
-def _order_scheduling_guard(pending_orders, chosen_label, max_wait_gap_seconds, eta_gap_seconds):
-    by_label = {profile["order_label"]: profile for profile in pending_orders}
-    chosen = by_label[chosen_label]
-    longer_waiting = [
-        profile for profile in pending_orders
-        if profile["waiting_seconds"] >= chosen["waiting_seconds"] + max_wait_gap_seconds
-    ]
-    if longer_waiting:
-        oldest = min(longer_waiting, key=lambda profile: profile["queue_position"])
-        return oldest["order_label"], "wait"
-    chosen_eta = chosen["minimum_pickup_eta_seconds"]
-    if chosen_eta is None:
-        return None, None
-    # 훨씬 덜 기다린 주문으로는 바꾸지 않는다. 오래 기다린 주문을 고른 것은 ETA가 느려도 공정성 면에서 허용한다.
-    faster = [
-        profile for profile in pending_orders
-        if profile["minimum_pickup_eta_seconds"] is not None
-        and profile["minimum_pickup_eta_seconds"] < chosen_eta - eta_gap_seconds
-        and profile["waiting_seconds"] > chosen["waiting_seconds"] - max_wait_gap_seconds
-    ]
-    if faster:
-        best = min(faster, key=lambda profile: (profile["minimum_pickup_eta_seconds"], profile["queue_position"]))
-        return best["order_label"], "eta"
-    return None, None
-
-
-def _kev_order_scheduling_enabled():
-    """대기 주문 우선순위 KEV 실험의 사용 여부를 읽는다."""
-    value = os.getenv("KEV_ORDER_SCHEDULING_ENABLED", "0").strip().lower()
-    if value in {"1", "true", "yes", "on"}:
-        return True
-    if value in {"0", "false", "no", "off"}:
-        return False
-    raise ValueError("KEV_ORDER_SCHEDULING_ENABLED는 true 또는 false여야 합니다.")
-
-
-def _kev_order_scheduling_max_wait_seconds():
-    """주문 starvation을 막기 위해 KEV보다 FIFO를 우선할 최대 대기 시간을 읽는다."""
-    seconds = float(os.getenv("KEV_ORDER_SCHEDULING_MAX_WAIT_SECONDS", "120"))
-    if seconds < 0:
-        raise ValueError("KEV_ORDER_SCHEDULING_MAX_WAIT_SECONDS는 0 이상이어야 합니다.")
-    return seconds
 
 
 class OrderManager:
@@ -528,7 +432,8 @@ class OrderManager:
         try:
             profile = self._dispatch_robot_profile(robot_id, mode)
             if profile is not None:
-                distance_m = self._pickup_eta(profile, row["pickup_nodes"])["pickup_distance_m"]
+                # 최근 작업량은 ETA가 아니라 배정 시점의 route graph 거리 합을 기록한다.
+                distance_m = self._pickup_distance(profile, row["pickup_nodes"])["pickup_distance_m"]
         except (OSError, TypeError, ValueError):
             distance_m = None
         self._dispatch_history.append((monotonic(), robot_id, distance_m))
@@ -741,9 +646,9 @@ class OrderManager:
             return value
         return self._request_kev_dispatch(value)
 
-    # 한 로봇이 주문에서 실제로 첫 방문할 픽업 노드에 도달하는 최단 거리와 ETA를 계산한다.
+    # 한 로봇이 주문에서 실제로 첫 방문할 픽업 노드까지의 route graph 거리를 계산한다.
     @staticmethod
-    def _pickup_eta(profile, pickup_nodes):
+    def _pickup_distance(profile, pickup_nodes):
         current_node = profile.get("current_node")
         if current_node is None:
             raise ValueError(f"현재 노드가 없는 로봇입니다: {profile['robot_id']}")
@@ -764,7 +669,15 @@ class OrderManager:
         return {
             "pickup_node": pickup_node,
             "pickup_distance_m": distance_m,
-            "pickup_eta_seconds": distance_m / _kev_dispatch_eta_speed_mps(),
+        }
+
+    # ETA 기반 비교 실험과 주문 우선순위 KEV는 계속 초 단위 ETA를 사용한다.
+    @staticmethod
+    def _pickup_eta(profile, pickup_nodes):
+        result = OrderManager._pickup_distance(profile, pickup_nodes)
+        return {
+            **result,
+            "pickup_eta_seconds": result["pickup_distance_m"] / _kev_dispatch_eta_speed_mps(),
         }
 
     @staticmethod
@@ -827,58 +740,80 @@ class OrderManager:
         recent_workload_enabled = _kev_dispatch_recent_workload_enabled()
         workload_window_seconds = _kev_dispatch_workload_window_seconds() if recent_workload_enabled else None
         try:
-            eta_tie_window_seconds = _kev_dispatch_eta_tie_seconds()
-            for profile in profiles:
-                profile.update(self._pickup_eta(profile, row["pickup_nodes"]))
+            if candidate_scope == "near_distance":
+                distance_tie_meters = _kev_dispatch_distance_tie_meters()
+                for profile in profiles:
+                    profile.update(self._pickup_distance(profile, row["pickup_nodes"]))
+            else:
+                eta_tie_window_seconds = _kev_dispatch_eta_tie_seconds()
+                for profile in profiles:
+                    profile.update(self._pickup_eta(profile, row["pickup_nodes"]))
         except (OSError, TypeError, ValueError) as exc:
-            # ETA를 계산할 수 없으면 안전하게 기존 알고리즘 fallback을 사용한다.
-            logger.warning("KEV dispatch ETA preparation failed; falling back to algorithm: order=%s error=%r", row["order_id"], exc)
+            logger.warning("KEV dispatch route preparation failed; falling back to algorithm: order=%s error=%r", row["order_id"], exc)
             return "robot", None
 
         profiles.sort(key=lambda profile: profile["robot_id"])
-        minimum_eta_seconds = min(profile["pickup_eta_seconds"] for profile in profiles)
-        near_eta_profiles = [
-            profile
-            for profile in profiles
-            if profile["pickup_eta_seconds"] <= minimum_eta_seconds + eta_tie_window_seconds
-        ]
-        excluded_by_eta = [
-            profile["robot_id"] for profile in profiles if profile not in near_eta_profiles
-        ]
-        # 기존 코드. all_eligible에서는 근소 범위 밖 후보도 KEV에 보내므로 모든 후보에 차이를 넣는다.
-        # for profile in near_eta_profiles:
-        #     profile["eta_delta_seconds"] = profile["pickup_eta_seconds"] - minimum_eta_seconds
-        for profile in profiles:
-            profile["eta_delta_seconds"] = profile["pickup_eta_seconds"] - minimum_eta_seconds
-        # robot_id 순으로 정렬했으므로 ETA가 같으면 앞 ID가 최단 ETA 로봇이다. KEV가 최단 ETA를 골랐는지 기록할 때 쓴다.
-        eta_winner = min(profiles, key=lambda profile: profile["pickup_eta_seconds"])["robot_id"]
-
-        # 기존 코드. all_eligible에서는 ETA가 확실히 짧아도 KEV가 판단하도록 바꾼다.
-        # if len(near_eta_profiles) == 1:
-        if candidate_scope == "near_eta" and len(near_eta_profiles) == 1:
-            robot_id = near_eta_profiles[0]["robot_id"]
-            logger.info(
-                "KEV dispatch skipped (ETA winner): robot=%s order=%s eta=%.3fs tie_window=%.3fs excluded=%s",
-                robot_id,
-                row["order_id"],
-                minimum_eta_seconds,
-                eta_tie_window_seconds,
-                excluded_by_eta,
-            )
-            return "robot", robot_id
-
-        # 기존 코드. 기준선은 두 범위 모두 근소 후보군에서 고르고, KEV 후보만 범위에 따라 바꾼다.
-        # profiles = near_eta_profiles
-        # candidates = [profile["robot_id"] for profile in profiles]
-        # if len(profiles) == 1:
-        #     ...
-        # rule_baseline_choice = self._select_robot_by_dispatch_rules(profiles)
-        # KEV 실패·cooldown fallback은 범위와 관계없이 같은 ETA 우선 기준선을 써서 두 방식을 같은 조건에서 비교한다.
-        rule_baseline_choice = self._select_robot_by_dispatch_rules(near_eta_profiles)
-        if candidate_scope == "near_eta":
-            profiles = near_eta_profiles
+        if candidate_scope == "near_distance":
+            minimum_pickup_distance_m = min(profile["pickup_distance_m"] for profile in profiles)
+            near_distance_profiles = [
+                profile
+                for profile in profiles
+                if profile["pickup_distance_m"] <= minimum_pickup_distance_m + distance_tie_meters
+            ]
+            excluded_by_distance = [
+                profile["robot_id"] for profile in profiles if profile not in near_distance_profiles
+            ]
+            for profile in profiles:
+                profile["distance_delta_m"] = profile["pickup_distance_m"] - minimum_pickup_distance_m
+            distance_winner = min(profiles, key=lambda profile: profile["pickup_distance_m"])["robot_id"]
+            if len(near_distance_profiles) == 1:
+                robot_id = near_distance_profiles[0]["robot_id"]
+                logger.info(
+                    "KEV dispatch skipped (distance winner): robot=%s order=%s distance=%.3fm tie_window=%.3fm excluded=%s",
+                    robot_id,
+                    row["order_id"],
+                    minimum_pickup_distance_m,
+                    distance_tie_meters,
+                    excluded_by_distance,
+                )
+                return "robot", robot_id
+            # 거리 범위 안에서만 KEV와 fallback 기준선을 같은 후보로 비교한다.
+            rule_baseline_choice = self._select_robot_by_dispatch_rules(near_distance_profiles)
+            profiles = near_distance_profiles
         else:
-            excluded_by_eta = []
+            minimum_eta_seconds = min(profile["pickup_eta_seconds"] for profile in profiles)
+            near_eta_profiles = [
+                profile
+                for profile in profiles
+                if profile["pickup_eta_seconds"] <= minimum_eta_seconds + eta_tie_window_seconds
+            ]
+            excluded_by_eta = [
+                profile["robot_id"] for profile in profiles if profile not in near_eta_profiles
+            ]
+            # 기존 코드. all_eligible에서는 근소 범위 밖 후보도 KEV에 보내므로 모든 후보에 차이를 넣는다.
+            # for profile in near_eta_profiles:
+            #     profile["eta_delta_seconds"] = profile["pickup_eta_seconds"] - minimum_eta_seconds
+            for profile in profiles:
+                profile["eta_delta_seconds"] = profile["pickup_eta_seconds"] - minimum_eta_seconds
+            eta_winner = min(profiles, key=lambda profile: profile["pickup_eta_seconds"])["robot_id"]
+            if candidate_scope == "near_eta" and len(near_eta_profiles) == 1:
+                robot_id = near_eta_profiles[0]["robot_id"]
+                logger.info(
+                    "KEV dispatch skipped (ETA winner): robot=%s order=%s eta=%.3fs tie_window=%.3fs excluded=%s",
+                    robot_id,
+                    row["order_id"],
+                    minimum_eta_seconds,
+                    eta_tie_window_seconds,
+                    excluded_by_eta,
+                )
+                return "robot", robot_id
+            # KEV 실패·cooldown fallback은 범위와 관계없이 같은 ETA 우선 기준선을 써서 두 방식을 같은 조건에서 비교한다.
+            rule_baseline_choice = self._select_robot_by_dispatch_rules(near_eta_profiles)
+            if candidate_scope == "near_eta":
+                profiles = near_eta_profiles
+            else:
+                excluded_by_eta = []
+
         candidates = [profile["robot_id"] for profile in profiles]
         if len(profiles) == 1:
             logger.info(
@@ -892,8 +827,8 @@ class OrderManager:
             for profile in profiles:
                 profile["recent_dispatch_count"] = workload[profile["robot_id"]]["recent_dispatch_count"]
                 profile["recent_pickup_distance_m"] = round(workload[profile["robot_id"]]["recent_pickup_distance_m"], 3)
-        choices = {
-            profile["robot_id"]: (
+        def choice_text(profile):
+            text = (
                 f"state={profile['state']}, "
                 f"battery={profile['battery']}, "
                 f"current_node={profile['current_node']}, "
@@ -901,18 +836,23 @@ class OrderManager:
                 f"goal_node={profile['goal_node']}, "
                 f"returning={profile['returning']}, "
                 f"pickup_node={profile['pickup_node']}, "
-                f"pickup_distance_m={profile['pickup_distance_m']:.3f}, "
-                f"pickup_eta_seconds={profile['pickup_eta_seconds']:.3f}, "
-                f"eta_delta_seconds={profile['eta_delta_seconds']:.3f}"
-                + (
+                f"pickup_distance_m={profile['pickup_distance_m']:.3f}"
+            )
+            if candidate_scope == "near_distance":
+                text += f", distance_delta_m={profile['distance_delta_m']:.3f}"
+            else:
+                text += (
+                    f", pickup_eta_seconds={profile['pickup_eta_seconds']:.3f}, "
+                    f"eta_delta_seconds={profile['eta_delta_seconds']:.3f}"
+                )
+            if recent_workload_enabled:
+                text += (
                     f", recent_dispatch_count={profile['recent_dispatch_count']}, "
                     f"recent_pickup_distance_m={profile['recent_pickup_distance_m']:.3f}"
-                    if recent_workload_enabled
-                    else ""
                 )
-            )
-            for profile in profiles
-        }
+            return text
+
+        choices = {profile["robot_id"]: choice_text(profile) for profile in profiles}
         state = {
             "order": {
                 # 기존 코드. 직접 재생 실험(D-3)에서 order_id가 선택을 흔들어 state에서는 뺀다.
@@ -924,20 +864,26 @@ class OrderManager:
                 "last_robot_id": row.get("last_robot_id"),
             },
             "robots": profiles,
-            "dispatch_context": {
-                # 기존 코드. all_eligible에서는 ETA 필터를 쓰지 않는다.
-                # "eta_filter_applied": True,
-                # near_eta의 KEV 입력은 기존 실험(D-6·D-7)과 같게 두고, 범위는 디버그 기록에만 남긴다.
+        }
+        if candidate_scope == "near_distance":
+            state["dispatch_context"] = {
+                "distance_filter_applied": True,
+                "minimum_pickup_distance_m": minimum_pickup_distance_m,
+                "distance_tie_window_meters": distance_tie_meters,
+                "excluded_by_distance": excluded_by_distance,
+                "post_task_battery_available": False,
+                "recent_workload_available": recent_workload_enabled,
+            }
+        else:
+            # 기존 ETA 기반 비교 실험 입력과 JSON 키 순서를 그대로 보존한다.
+            state["dispatch_context"] = {
                 "eta_filter_applied": candidate_scope == "near_eta",
                 "minimum_pickup_eta_seconds": minimum_eta_seconds,
                 "eta_tie_window_seconds": eta_tie_window_seconds,
                 "excluded_by_eta": excluded_by_eta,
                 "post_task_battery_available": False,
-                # 기존 코드. 최근 작업량을 켜면 True와 집계 기간을 넣는다.
-                # "recent_workload_available": False,
                 "recent_workload_available": recent_workload_enabled,
-            },
-        }
+            }
         if recent_workload_enabled:
             state["dispatch_context"]["recent_workload_window_seconds"] = workload_window_seconds
         # 기존 지시문(V1). D-3에서 최고 배터리 선택 정확도가 2/6이어서 V3로 바꾼다.
@@ -960,6 +906,13 @@ class OrderManager:
             "Prefer an IDLE, non-returning robot when operational state differs. Use the current battery only as secondary context; "
             "it is not an estimated post-task battery. Return only one candidate ID."
         )
+        if candidate_scope == "near_distance":
+            instructions = (
+                "All listed robots have passed code safety checks and are within the configured route graph distance near-tie window. "
+                "Choose exactly one listed candidate ID. Do not re-rank candidates by pickup distance and do not treat battery as a safety threshold. "
+                "Prefer an IDLE, non-returning robot when operational state differs. Use the current battery only as secondary context; "
+                "it is not an estimated post-task battery. Return only one candidate ID."
+            )
         if candidate_scope == "all_eligible":
             instructions = (
                 "All listed robots have passed code safety checks, but they are not filtered by pickup ETA. "
@@ -969,12 +922,20 @@ class OrderManager:
                 "post-task battery. Return only one candidate ID."
             )
         if recent_workload_enabled:
-            instructions += (
-                " recent_dispatch_count and recent_pickup_distance_m are this robot's assignments and estimated pickup "
-                "travel within recent_workload_window_seconds. When pickup ETA and operational state are similar, prefer "
-                "the robot with less recent workload to balance assignments; do not let workload override a clearly "
-                "shorter pickup ETA."
-            )
+            if candidate_scope == "near_distance":
+                instructions += (
+                    " recent_dispatch_count and recent_pickup_distance_m are this robot's assignments and estimated pickup "
+                    "travel within recent_workload_window_seconds. When route distance and operational state are similar, prefer "
+                    "the robot with less recent workload to balance assignments; do not let workload override a clearly "
+                    "shorter pickup distance."
+                )
+            else:
+                instructions += (
+                    " recent_dispatch_count and recent_pickup_distance_m are this robot's assignments and estimated pickup "
+                    "travel within recent_workload_window_seconds. When pickup ETA and operational state are similar, prefer "
+                    "the robot with less recent workload to balance assignments; do not let workload override a clearly "
+                    "shorter pickup ETA."
+                )
         # 기존 질문 ID. UUID는 선택 입력에 불필요하고 실험마다 달라져 재현성을 흐릴 수 있다.
         # question_id = f"dispatch_{row['order_id']}"
         question_id = f"dispatch_order_{row.get('_queue_sequence', 0)}_retry_{row.get('retry_count', 0)}"
@@ -985,78 +946,52 @@ class OrderManager:
             # KEV 입력에는 넣지 않는다. 비교 기록과 KEV 오류 시 코드 fallback에만 쓴다.
             "rule_baseline_choice": rule_baseline_choice,
             "candidate_scope": candidate_scope,
-            "eta_winner": eta_winner,
-            "state": state,
-            "choices": choices,
-            "instructions": instructions,
         }
-        # state, choices는 lock 안에서 만든 사본이라 lock 밖에서 읽어도 된다.
-        return "request", {
+        # 기존 ETA 실험의 KEV 요청 JSON 형식을 보존한다. KEV는 입력 표현에도 영향을 받을 수 있다.
+        if candidate_scope == "near_distance":
+            debug_record["distance_winner"] = distance_winner
+        else:
+            debug_record["eta_winner"] = eta_winner
+        debug_record.update(
+            {
+                "state": state,
+                "choices": choices,
+                "instructions": instructions,
+            }
+        )
+
+        request = {
             "order_id": row["order_id"],
             "candidates": list(candidates),
             "rule_baseline_choice": rule_baseline_choice,
             "candidate_scope": candidate_scope,
-            "eta_winner": eta_winner,
             # all_eligible은 KEV가 근소 범위 밖 후보를 고를 수 있으므로 같은 범위(초)를 상한으로 다시 검증한다.
-            # near_eta는 후보가 이미 범위 안이라 검증하지 않는다.
+            # near_eta와 near_distance는 후보가 이미 각 범위 안이라 검증하지 않는다.
             "max_eta_delta_seconds": eta_tie_window_seconds if candidate_scope == "all_eligible" else None,
-            "eta_delta_by_robot": {profile["robot_id"]: profile["eta_delta_seconds"] for profile in profiles},
+            "eta_delta_by_robot": (
+                {profile["robot_id"]: profile["eta_delta_seconds"] for profile in profiles}
+                if candidate_scope == "all_eligible"
+                else {}
+            ),
             "debug_record": debug_record,
         }
+        if candidate_scope == "near_distance":
+            request["distance_winner"] = distance_winner
+        else:
+            request["eta_winner"] = eta_winner
+        # state, choices는 lock 안에서 만든 사본이라 lock 밖에서 읽어도 된다.
+        return "request", request
 
     # 준비한 요청으로 KEV를 호출하고 선택된 로봇 ID를 반환한다. 공유 상태를 건드리지 않으므로 lock 밖에서 호출한다.
     def _request_kev_dispatch(self, request):
-        if self._kev_dispatch_selector is None:
-            from .route_selector.kev_selector import KevSelector
-
-            # 기존 코드. 기본 KEV_TIMEOUT_SECONDS(60초)를 그대로 써서 tick이 오래 멈출 수 있었다.
-            # self._kev_dispatch_selector = KevSelector()
-            # KEV_MODEL, KEV_HOST 등은 환경변수에서 읽는다. 배차 timeout만 경로 선택과 따로 둔다.
-            self._kev_dispatch_selector = KevSelector(timeout_seconds=KEV_DISPATCH_TIMEOUT_SECONDS)
-
-        debug_record = request["debug_record"]
         candidates = request["candidates"]
-        debug_enabled = os.getenv("KEV_DISPATCH_DEBUG") == "1"
-        try:
-            result = self._kev_dispatch_selector.select_choice(
-                state=debug_record["state"],
-                candidates=debug_record["choices"],
-                instructions=debug_record["instructions"],
-                question_id=debug_record["question_id"],
-            )
-        except Exception as exc:
-            if debug_enabled:
-                logger.info(
-                    "KEV_DISPATCH_DEBUG %s",
-                    json.dumps(
-                        {
-                            **debug_record,
-                            "response": None,
-                            "error": {"type": type(exc).__name__, "message": str(exc)},
-                        },
-                        ensure_ascii=False,
-                        separators=(",", ":"),
-                    ),
-                )
-            raise
-
-        if debug_enabled:
-            logger.info(
-                "KEV_DISPATCH_DEBUG %s",
-                json.dumps(
-                    {
-                        **debug_record,
-                        "response": {
-                            "probabilities": result.get("probabilities"),
-                            "confidence": result.get("confidence"),
-                            "answer_confidence": result.get("answer_confidence"),
-                            "choice": result.get("choice"),
-                        },
-                    },
-                    ensure_ascii=False,
-                    separators=(",", ":"),
-                ),
-            )
+        result, self._kev_dispatch_selector = request_kev_dispatch_choice(
+            request,
+            self._kev_dispatch_selector,
+            timeout_seconds=KEV_DISPATCH_TIMEOUT_SECONDS,
+            logger=logger,
+            debug_prefix="KEV_DISPATCH_DEBUG",
+        )
         chosen_robot = result.get("choice")
         if chosen_robot not in candidates:
             raise RuntimeError(f"KEV가 후보 목록에 없는 로봇을 선택했습니다: {chosen_robot}")
@@ -1084,67 +1019,30 @@ class OrderManager:
         #     candidates,
         #     request["rule_baseline_choice"],
         # )
+        winner_name = "distance_winner" if request.get("candidate_scope") == "near_distance" else "eta_winner"
         logger.info(
-            "KEV dispatch selected robot=%s order=%s candidates=%s rule_baseline=%s scope=%s eta_winner=%s",
+            "KEV dispatch selected robot=%s order=%s candidates=%s rule_baseline=%s scope=%s %s=%s",
             chosen_robot,
             request["order_id"],
             candidates,
             request["rule_baseline_choice"],
             request.get("candidate_scope", "near_eta"),
-            request.get("eta_winner"),
+            winner_name,
+            request.get(winner_name),
         )
         return chosen_robot
 
     # 준비한 요청으로 KEV에게 다음 대기 주문을 선택하게 한다. 공유 상태를 건드리지 않으므로 lock 밖에서 호출한다.
     def _request_kev_order_scheduling(self, request):
-        if self._kev_dispatch_selector is None:
-            from .route_selector.kev_selector import KevSelector
-
-            self._kev_dispatch_selector = KevSelector(timeout_seconds=KEV_DISPATCH_TIMEOUT_SECONDS)
-
         debug_record = request["debug_record"]
         candidate_labels = request["candidate_labels"]
-        debug_enabled = os.getenv("KEV_DISPATCH_DEBUG") == "1"
-        try:
-            result = self._kev_dispatch_selector.select_choice(
-                state=debug_record["state"],
-                candidates=debug_record["choices"],
-                instructions=debug_record["instructions"],
-                question_id=debug_record["question_id"],
-            )
-        except Exception as exc:
-            if debug_enabled:
-                logger.info(
-                    "KEV_ORDER_SCHEDULING_DEBUG %s",
-                    json.dumps(
-                        {
-                            **debug_record,
-                            "response": None,
-                            "error": {"type": type(exc).__name__, "message": str(exc)},
-                        },
-                        ensure_ascii=False,
-                        separators=(",", ":"),
-                    ),
-                )
-            raise
-
-        if debug_enabled:
-            logger.info(
-                "KEV_ORDER_SCHEDULING_DEBUG %s",
-                json.dumps(
-                    {
-                        **debug_record,
-                        "response": {
-                            "probabilities": result.get("probabilities"),
-                            "confidence": result.get("confidence"),
-                            "answer_confidence": result.get("answer_confidence"),
-                            "choice": result.get("choice"),
-                        },
-                    },
-                    ensure_ascii=False,
-                    separators=(",", ":"),
-                ),
-            )
+        result, self._kev_dispatch_selector = request_kev_dispatch_choice(
+            request,
+            self._kev_dispatch_selector,
+            timeout_seconds=KEV_DISPATCH_TIMEOUT_SECONDS,
+            logger=logger,
+            debug_prefix="KEV_ORDER_SCHEDULING_DEBUG",
+        )
         chosen_label = result.get("choice")
         if chosen_label not in candidate_labels:
             raise RuntimeError(f"KEV가 후보 목록에 없는 주문 라벨을 선택했습니다: {chosen_label}")

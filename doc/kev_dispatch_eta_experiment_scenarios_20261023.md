@@ -33,7 +33,7 @@ ETA 근소 차이 범위가 2초일 때 다음 동작을 시뮬레이션으로 �
 
 충전 노드는 robot1=N0, robot2=N1, robot3=N2이다. 다른 로봇의 충전 노드에 로봇을 배치하지 않는다.
 
-2026-10-24부터 `.env`에 실제 로봇용 `KEV_DISPATCH_ETA_SPEED_MPS=0.06`이 있다. 이 시나리오를 재현할 때는 아래 시작 명령 앞에 `KEV_DISPATCH_ETA_SPEED_MPS=0.2`를 붙여 0.2 m/s로 실행한다.
+현재 기본 로봇 배차 범위는 `near_distance`이며, 실제 `.env`에는 거리 기준과 최근 작업량 설정이 적용돼 있다. 이 문서는 기존 ETA 기반 실험 기록이므로 재현할 때는 반드시 `near_eta`, ETA 속도 `0.2 m/s`, 최근 작업량 끔을 함께 지정한다.
 
 ## 3. 공통 절차
 
@@ -46,6 +46,9 @@ cd /home/heeyeon/turtlebot3_E1i6/Logistics_AI
 S0~S2는 KEV 서버를 포함해 아래처럼 시작한다.
 
 ```bash
+KEV_DISPATCH_CANDIDATE_SCOPE=near_eta \
+KEV_DISPATCH_ETA_SPEED_MPS=0.2 \
+KEV_DISPATCH_RECENT_WORKLOAD=0 \
 SIM_BATTERY_OVERRIDE="robot1=40,robot2=90,robot3=70" \
 KEV_DISPATCH_DEBUG=1 \
 ./start_fms.sh
@@ -179,6 +182,9 @@ KEV 서버를 실행하지 않고, cooldown을 600초로 설정한다.
 
 FMS_KEV_ENABLED=0 \
 KEV_DISPATCH_COOLDOWN_SECONDS=600 \
+KEV_DISPATCH_CANDIDATE_SCOPE=near_eta \
+KEV_DISPATCH_ETA_SPEED_MPS=0.2 \
+KEV_DISPATCH_RECENT_WORKLOAD=0 \
 SIM_BATTERY_OVERRIDE="robot1=40,robot2=90,robot3=70" \
 KEV_DISPATCH_DEBUG=1 \
 ./start_fms.sh
