@@ -1364,6 +1364,20 @@ def test_order_api_accepts_items_without_robot_or_workstation(monkeypatch):
     assert created["pickup_nodes"] == ["5", "6"]
 
 
+# 복합 주문은 가까운 픽업대가 아니라 실제 방문 순서의 첫 픽업대(N5)를 ETA 기준으로 쓰는지 검증한다.
+def test_pickup_eta_uses_first_visit_node_for_multi_pickup_order(monkeypatch):
+    _reset(monkeypatch)
+
+    result = order_manager._pickup_eta(
+        {"robot_id": "robot1", "current_node": "6"},
+        ["5", "6"],
+    )
+
+    assert result["pickup_node"] == "5"
+    assert result["pickup_distance_m"] > 0
+    assert result["pickup_eta_seconds"] > 0
+
+
 # 시뮬레이션 /api/robots가 주문 중인 로봇을 IDLE이어도 배차 불가로 표시하는지 검증한다.
 def test_robots_api_reports_dispatch_status_in_simulation(monkeypatch):
     _reset(monkeypatch)

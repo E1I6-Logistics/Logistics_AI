@@ -703,20 +703,26 @@ class OrderManager:
             return value
         return self._request_kev_dispatch(value)
 
-    # 한 로봇이 주문의 첫 픽업 노드에 도달하는 최단 거리와 ETA를 계산한다.
+    # 한 로봇이 주문에서 실제로 첫 방문할 픽업 노드에 도달하는 최단 거리와 ETA를 계산한다.
     @staticmethod
     def _pickup_eta(profile, pickup_nodes):
         current_node = profile.get("current_node")
         if current_node is None:
             raise ValueError(f"현재 노드가 없는 로봇입니다: {profile['robot_id']}")
 
-        routes = []
-        for pickup_node in pickup_nodes:
-            route = plan_route(str(current_node), str(pickup_node))
-            routes.append((float(route["cost"]), str(pickup_node)))
-        if not routes:
+        if not pickup_nodes:
             raise ValueError("주문에 픽업 노드가 없습니다.")
-        distance_m, pickup_node = min(routes)
+        # 기존 코드. 모든 픽업 노드 중 가장 가까운 곳을 ETA 기준으로 골랐다.
+        # routes = []
+        # for pickup_node in pickup_nodes:
+        #     route = plan_route(str(current_node), str(pickup_node))
+        #     routes.append((float(route["cost"]), str(pickup_node)))
+        # distance_m, pickup_node = min(routes)
+
+        # 실제 주문 이동은 pickup_nodes 순서대로 진행한다. 복합 주문도 첫 방문 노드까지의 ETA로 배차한다.
+        pickup_node = str(pickup_nodes[0])
+        route = plan_route(str(current_node), pickup_node)
+        distance_m = float(route["cost"])
         return {
             "pickup_node": pickup_node,
             "pickup_distance_m": distance_m,
