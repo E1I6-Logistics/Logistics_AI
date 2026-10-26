@@ -1589,8 +1589,13 @@ def test_kev_order_scheduling_dispatches_selected_pending_order_first(monkeypatc
         mode_manager.set_mode("simulation", "ai")
         order_manager._kev_dispatch_selector = FakeKevSelector()
         first = order_manager.create_order(items={"A": 1, "B": 0, "C": 0, "D": 0}, total_quantity=1)
+        # 기존 코드. C 주문(N6)은 A 주문(N5)보다 최단 ETA가 2초 넘게 길어 ETA 검증이 KEV 선택을 바꾼다.
+        # second = order_manager.create_order(
+        #     items={"A": 0, "B": 0, "C": 1, "D": 0}, total_quantity=1
+        # )
+        # KEV 선택 반영만 확인하도록 ETA가 같은 주문을 쓴다.
         second = order_manager.create_order(
-            items={"A": 0, "B": 0, "C": 1, "D": 0}, total_quantity=1
+            items={"A": 1, "B": 0, "C": 0, "D": 0}, total_quantity=1
         )
         await order_manager.tick()
         assert order_manager.get_order(second["order_id"])["robot_id"] == "robot1"
@@ -1888,3 +1893,45 @@ def test_kev_order_scheduling_skips_orders_without_robots(monkeypatch):
     result = order_manager._prepare_kev_order_scheduling(rows, ["robot2"], "simulation")
 
     assert result == {"kind": "fifo", "order_id": other_pickup["order_id"]}
+
+
+
+def _scheduling_profile(label, position, waiting, eta):
+    return {"order_label": label, "queue_position": position, "waiting_seconds": waiting, "minimum_pickup_eta_seconds": eta}
+
+
+# 주문 우선순위 KEV 검증: 훨씬 오래 기다린 주문이 있으면 그 주문, 아니면 확실히 짧은 ETA 주문으로 바꾸는지 검증한다.
+def test_order_scheduling_guard_rules():
+    from backend.app.services.order_manager import _order_scheduling_guard
+
+    waits = [_scheduling_profile("order_1", 1, 60.0, 6.0), _scheduling_profile("order_2", 2, 10.0, 2.0)]
+    assert _order_scheduling_guard(waits, "order_2", 30.0, 2.0) == ("order_1", "wait")
+    assert _order_scheduling_guard(waits, "order_1", 30.0, 2.0) == (None, None)
+
+    etas = [_scheduling_profile("order_1", 1, 20.0, 8.04), _scheduling_profile("order_2", 2, 20.0, 4.11)]
+    assert _order_scheduling_guard(etas, "order_1", 30.0, 2.0) == ("order_2", "eta")
+    # ETA 차이가 근소 범위 안이면 KEV 선택을 그대로 둔다.
+    near = [_scheduling_profile("order_1", 1, 20.0, 5.0), _scheduling_profile("order_2", 2, 20.0, 4.11)]
+    assert _order_scheduling_guard(near, "order_1", 30.0, 2.0) == (None, None)
+
+
+# KEV가 덜 기다린 주문을 고르면 코드가 가장 오래된 주문으로 바꾸고 cooldown을 걸지 않는지 검증한다.
+def test_kev_order_scheduling_rejects_much_newer_order(monkeypatch, caplog):
+    _reset(monkeypatch)
+    caplog.set_level(logging.WARNING, logger="backend.app.services.order_manager")
+    old = order_manager.create_order(items={"A": 1, "B": 0, "C": 0, "D": 0}, total_quantity=1)
+    new = order_manager.create_order(items={"A": 1, "B": 0, "C": 0, "D": 0}, total_quantity=1)
+    order_manager.orders[old["order_id"]]["_queued_at_monotonic"] -= 60
+    rows = [order_manager.orders[old["order_id"]], order_manager.orders[new["order_id"]]]
+    request = order_manager._prepare_kev_order_scheduling(rows, ["robot1", "robot2", "robot3"], "simulation")
+    assert request["kind"] == "request"
+
+    class NewestKevSelector:
+        def select_choice(self, **kwargs):
+            return {"choice": "order_2", "probabilities": {"order_1": 0.49, "order_2": 0.51}}
+
+    order_manager._kev_dispatch_selector = NewestKevSelector()
+
+    assert order_manager._request_kev_order_scheduling(request) == old["order_id"]
+    assert order_manager._kev_order_scheduling_retry_at == 0.0
+    assert any("KEV order scheduling rejected (wait guard)" in record.getMessage() for record in caplog.records)

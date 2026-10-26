@@ -90,6 +90,44 @@ def _kev_dispatch_workload_window_seconds():
     return seconds
 
 
+def _kev_order_scheduling_max_wait_gap_seconds():
+    """KEV가 고른 주문보다 이 시간(초) 이상 더 기다린 주문이 있으면 KEV 선택을 거부한다."""
+    seconds = float(os.getenv("KEV_ORDER_SCHEDULING_MAX_WAIT_GAP_SECONDS", "30"))
+    if not math.isfinite(seconds) or seconds < 0:
+        raise ValueError("KEV_ORDER_SCHEDULING_MAX_WAIT_GAP_SECONDS는 0 이상이어야 합니다.")
+    return seconds
+
+
+# KEV가 고른 주문을 코드가 다시 검증한다. 명백히 나쁜 선택이면 대신 배차할 주문 라벨과 사유를 돌려준다.
+# 1) 훨씬 오래 기다린 주문이 있으면 그중 가장 오래된 주문(FIFO)으로,
+# 2) 대기는 비슷한데 최단 픽업 ETA가 근소 범위(KEV_DISPATCH_ETA_TIE_SECONDS)보다 더 짧은 주문이 있으면 ETA 최단 주문으로.
+# 확률 차이는 정답률로 보정됐다는 근거가 없어 제어에는 쓰지 않는다.
+def _order_scheduling_guard(pending_orders, chosen_label, max_wait_gap_seconds, eta_gap_seconds):
+    by_label = {profile["order_label"]: profile for profile in pending_orders}
+    chosen = by_label[chosen_label]
+    longer_waiting = [
+        profile for profile in pending_orders
+        if profile["waiting_seconds"] >= chosen["waiting_seconds"] + max_wait_gap_seconds
+    ]
+    if longer_waiting:
+        oldest = min(longer_waiting, key=lambda profile: profile["queue_position"])
+        return oldest["order_label"], "wait"
+    chosen_eta = chosen["minimum_pickup_eta_seconds"]
+    if chosen_eta is None:
+        return None, None
+    # 훨씬 덜 기다린 주문으로는 바꾸지 않는다. 오래 기다린 주문을 고른 것은 ETA가 느려도 공정성 면에서 허용한다.
+    faster = [
+        profile for profile in pending_orders
+        if profile["minimum_pickup_eta_seconds"] is not None
+        and profile["minimum_pickup_eta_seconds"] < chosen_eta - eta_gap_seconds
+        and profile["waiting_seconds"] > chosen["waiting_seconds"] - max_wait_gap_seconds
+    ]
+    if faster:
+        best = min(faster, key=lambda profile: (profile["minimum_pickup_eta_seconds"], profile["queue_position"]))
+        return best["order_label"], "eta"
+    return None, None
+
+
 def _kev_order_scheduling_enabled():
     """대기 주문 우선순위 KEV 실험의 사용 여부를 읽는다."""
     value = os.getenv("KEV_ORDER_SCHEDULING_ENABLED", "0").strip().lower()
@@ -1110,6 +1148,26 @@ class OrderManager:
         chosen_label = result.get("choice")
         if chosen_label not in candidate_labels:
             raise RuntimeError(f"KEV가 후보 목록에 없는 주문 라벨을 선택했습니다: {chosen_label}")
+        pending_orders = debug_record["state"]["pending_orders"]
+        top = sorted((result.get("probabilities") or {}).values(), reverse=True)
+        # 확률 차이는 제어에 쓰지 않고 분석용으로만 남긴다.
+        probability_margin = round(top[0] - top[1], 4) if len(top) > 1 else None
+        replacement_label, reason = _order_scheduling_guard(
+            pending_orders,
+            chosen_label,
+            _kev_order_scheduling_max_wait_gap_seconds(),
+            _kev_dispatch_eta_tie_seconds(),
+        )
+        if replacement_label is not None:
+            # 정상 응답이지만 정책을 어긴 선택이다. 서버 문제가 아니므로 cooldown 없이 코드가 고른 주문으로 바꾼다.
+            logger.warning(
+                "KEV order scheduling rejected (%s guard): label=%s replaced_by=%s probability_margin=%s",
+                reason,
+                chosen_label,
+                replacement_label,
+                probability_margin,
+            )
+            chosen_label = replacement_label
         chosen_order_id = request["order_label_to_id"][chosen_label]
         logger.info(
             "KEV order scheduling selected order=%s label=%s candidate_labels=%s fifo_order=%s",
