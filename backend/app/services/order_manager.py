@@ -796,7 +796,9 @@ class OrderManager:
                 "Use the current battery only as secondary context; it is not a safety threshold or an estimated "
                 "post-task battery. Return only one candidate ID."
             )
-        question_id = f"dispatch_{row['order_id']}"
+        # 기존 질문 ID. UUID는 선택 입력에 불필요하고 실험마다 달라져 재현성을 흐릴 수 있다.
+        # question_id = f"dispatch_{row['order_id']}"
+        question_id = f"dispatch_order_{row.get('_queue_sequence', 0)}_retry_{row.get('retry_count', 0)}"
         debug_record = {
             "order_id": row["order_id"],
             "question_id": question_id,

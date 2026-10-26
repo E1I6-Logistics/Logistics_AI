@@ -179,7 +179,9 @@ def test_kev_dispatch_debug_log_is_opt_in(monkeypatch, caplog, debug_enabled):
     finally:
         mode_manager.set_mode("simulation", "algorithm")
 
-    assert captured["question_id"] == f"dispatch_{order['order_id']}"
+    queue_sequence = order_manager.orders[order["order_id"]]["_queue_sequence"]
+    assert captured["question_id"] == f"dispatch_order_{queue_sequence}_retry_0"
+    assert order["order_id"] not in captured["question_id"]
     assert "order_id" not in captured["state"]["order"]
     assert [profile["robot_id"] for profile in captured["state"]["robots"]] == [
         "robot1",
@@ -423,7 +425,9 @@ def test_kev_dispatch_debug_log_records_request_error(monkeypatch, caplog):
     assert len(debug_messages) == 1
     record = json.loads(debug_messages[0].removeprefix("KEV_DISPATCH_DEBUG "))
     assert record["order_id"] == order["order_id"]
-    assert record["question_id"] == f"dispatch_{order['order_id']}"
+    queue_sequence = order_manager.orders[order["order_id"]]["_queue_sequence"]
+    assert record["question_id"] == f"dispatch_order_{queue_sequence}_retry_0"
+    assert order["order_id"] not in record["question_id"]
     assert record["state"]["order"]["items"] == {"A": 1, "B": 0, "C": 0, "D": 0}
     assert list(record["choices"]) == ["robot1", "robot2", "robot3"]
     assert record["response"] is None
@@ -1658,3 +1662,23 @@ def test_retry_order_keeps_original_fifo_queue_position(monkeypatch):
     assert [row["order_id"] for row in pending_rows] == [first["order_id"], second["order_id"]]
     assert first_row["_queue_sequence"] == original_sequence
     assert first_row["_queued_at_monotonic"] == original_queued_at
+
+
+# 로봇 배차 KEV 질문 ID는 주문 UUID 대신 큐 순번과 재시도 횟수로 구분하는지 검증한다.
+def test_kev_dispatch_question_id_uses_queue_sequence_and_retry_count(monkeypatch):
+    _reset(monkeypatch)
+    order = order_manager.create_order(items={"A": 1, "B": 0, "C": 0, "D": 0}, total_quantity=1)
+    row = order_manager.orders[order["order_id"]]
+
+    kind, request = order_manager._prepare_kev_dispatch(row, ["robot1", "robot2", "robot3"], "simulation")
+
+    assert kind == "request"
+    assert request["debug_record"]["question_id"] == f"dispatch_order_{row['_queue_sequence']}_retry_0"
+    assert order["order_id"] not in request["debug_record"]["question_id"]
+
+    row.update(status="FAILED", robot_id="robot1")
+    order_manager.retry_order(order["order_id"])
+    kind, request = order_manager._prepare_kev_dispatch(row, ["robot1", "robot2", "robot3"], "simulation")
+
+    assert kind == "request"
+    assert request["debug_record"]["question_id"] == f"dispatch_order_{row['_queue_sequence']}_retry_1"
