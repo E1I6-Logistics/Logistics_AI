@@ -1835,3 +1835,42 @@ def test_kev_dispatch_all_eligible_accepts_choice_within_eta_limit(monkeypatch):
         asyncio.run(scenario())
     finally:
         mode_manager.set_mode("simulation", "algorithm")
+
+
+# 주문 우선순위 KEV가 주문마다 실제 배정 가능한 로봇 수를 배차 루프와 같은 기준으로 계산하는지 검증한다.
+def test_kev_order_scheduling_counts_robots_per_order(monkeypatch):
+    _reset(monkeypatch)
+    in_progress = order_manager.create_order(items={"A": 1, "B": 0, "C": 0, "D": 0}, total_quantity=1)
+    same_pickup = order_manager.create_order(items={"A": 1, "B": 0, "C": 0, "D": 0}, total_quantity=1)
+    other_pickup = order_manager.create_order(items={"A": 0, "B": 0, "C": 1, "D": 0}, total_quantity=1)
+    order_manager.orders[in_progress["order_id"]].update(status="IN_PROGRESS", robot_id="robot3")
+    # robot2는 다른 주문을 끝내고 복귀 중이다. 같은 픽업대(N5)를 쓰는 앞 주문이 진행 중이면 그 뒤 주문 후보에서 빠진다.
+    order_manager.returning["robot2"] = "finished-order"
+    order_manager.orders[other_pickup["order_id"]]["last_robot_id"] = "robot1"
+    rows = [order_manager.orders[same_pickup["order_id"]], order_manager.orders[other_pickup["order_id"]]]
+
+    request = order_manager._prepare_kev_order_scheduling(rows, ["robot1", "robot2"], "simulation")
+
+    assert request["kind"] == "request"
+    counts = {
+        profile["order_label"]: profile["eligible_robot_count"]
+        for profile in request["debug_record"]["state"]["pending_orders"]
+    }
+    # same_pickup: robot2 제외 → robot1만. other_pickup: 직전 로봇 robot1 제외 → robot2만.
+    assert counts == {"order_1": 1, "order_2": 1}
+    assert "eligible_robot_count=1" in request["debug_record"]["choices"]["order_1"]
+
+
+# 배정할 로봇이 없는 주문은 KEV 후보에서 빼고, 남은 주문이 하나면 KEV 없이 그 주문을 고르는지 검증한다.
+def test_kev_order_scheduling_skips_orders_without_robots(monkeypatch):
+    _reset(monkeypatch)
+    in_progress = order_manager.create_order(items={"A": 1, "B": 0, "C": 0, "D": 0}, total_quantity=1)
+    same_pickup = order_manager.create_order(items={"A": 1, "B": 0, "C": 0, "D": 0}, total_quantity=1)
+    other_pickup = order_manager.create_order(items={"A": 0, "B": 0, "C": 1, "D": 0}, total_quantity=1)
+    order_manager.orders[in_progress["order_id"]].update(status="IN_PROGRESS", robot_id="robot3")
+    order_manager.returning["robot2"] = "finished-order"
+    rows = [order_manager.orders[same_pickup["order_id"]], order_manager.orders[other_pickup["order_id"]]]
+
+    result = order_manager._prepare_kev_order_scheduling(rows, ["robot2"], "simulation")
+
+    assert result == {"kind": "fifo", "order_id": other_pickup["order_id"]}

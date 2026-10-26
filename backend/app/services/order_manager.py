@@ -546,6 +546,31 @@ class OrderManager:
         return sorted(rows, key=lambda row: row.get("_queue_sequence", 0))
 
     # 여러 대기 주문 중 다음 주문을 KEV가 고르도록 요청을 만든다. lock 안에서 호출한다.
+    # 시뮬레이션에서 같은 픽업대를 쓰는 앞 주문이 진행 중이면, 복귀 중 로봇이 그 주문 뒤에 끼지 않도록 이 주문 후보에서 뺀다.
+    # 배차 루프와 주문 우선순위 KEV가 같은 기준을 쓰도록 함수로 둔다. lock 안에서 호출한다.
+    def _blocked_by_earlier_pickup(self, row, mode):
+        if mode != "simulation":
+            return False
+        for previous in self.orders.values():
+            if previous is row:
+                break
+            if (
+                previous["mode"] == mode
+                and previous["status"] == "IN_PROGRESS"
+                and set(previous["pickup_nodes"]).intersection(row["pickup_nodes"])
+            ):
+                return True
+        return False
+
+    # 배차 루프와 같은 기준으로 이 주문에 실제로 배정할 수 있는 로봇 목록. AI 배차의 직전 로봇 제외도 반영한다.
+    def _order_dispatch_candidates(self, row, candidates, mode):
+        blocked = self._blocked_by_earlier_pickup(row, mode)
+        eligible = [candidate for candidate in candidates if not (blocked and candidate in self.returning)]
+        last_robot_id = row.get("last_robot_id")
+        if last_robot_id in eligible and len(eligible) > 1:
+            eligible = [candidate for candidate in eligible if candidate != last_robot_id]
+        return eligible
+
     def _prepare_kev_order_scheduling(self, rows, candidates, mode):
         pending_rows = self._pending_rows_by_fifo(rows)
         if len(pending_rows) < 2 or not candidates:
@@ -571,13 +596,28 @@ class OrderManager:
                 robot_profiles.append(profile)
         if not robot_profiles:
             return {"kind": "fifo", "order_id": oldest["order_id"]}
+        profiles_by_id = {profile["robot_id"]: profile for profile in robot_profiles}
 
         now = monotonic()
         order_profiles = []
         choices = {}
+        fifo_order_label = None
+        first_dispatchable_order_id = None
         for queue_position, row in enumerate(pending_rows, start=1):
+            # 기존 코드. 공통 후보 전체로 ETA와 후보 수를 계산해 주문별 제약(동일 픽업대 대기, 직전 로봇 제외)을 반영하지 못했다.
+            # eta_values = []
+            # for robot in robot_profiles:
+            order_robots = [
+                profiles_by_id[robot_id]
+                for robot_id in self._order_dispatch_candidates(row, list(profiles_by_id), mode)
+            ]
+            # 배정할 로봇이 없는 주문은 KEV가 골라도 이번에 배차할 수 없으므로 후보에서 뺀다.
+            if not order_robots:
+                continue
+            if first_dispatchable_order_id is None:
+                first_dispatchable_order_id = row["order_id"]
             eta_values = []
-            for robot in robot_profiles:
+            for robot in order_robots:
                 try:
                     eta_values.append(self._pickup_eta(robot, row["pickup_nodes"])["pickup_eta_seconds"])
                 except (OSError, TypeError, ValueError):
@@ -587,6 +627,8 @@ class OrderManager:
             # 주문 UUID는 과거 KEV 선택을 흔든 적이 있어 모델 입력과 후보 키에서 제외한다.
             # KEV는 안정적인 큐 라벨만 고르고, 실제 UUID 연결은 아래 order_label_to_id가 코드에서 처리한다.
             order_label = f"order_{queue_position}"
+            if row is oldest:
+                fifo_order_label = order_label
             profile = {
                 "order_label": order_label,
                 "queue_position": queue_position,
@@ -594,7 +636,9 @@ class OrderManager:
                 "items": row["items"],
                 "total_quantity": row["total_quantity"],
                 "pickup_nodes": row["pickup_nodes"],
-                "eligible_robot_count": len(robot_profiles),
+                # 기존 코드. 공통 후보 수였다.
+                # "eligible_robot_count": len(robot_profiles),
+                "eligible_robot_count": len(order_robots),
                 "minimum_pickup_eta_seconds": minimum_eta_seconds,
             }
             order_profiles.append(profile)
@@ -604,12 +648,21 @@ class OrderManager:
                 f"waiting_seconds={waiting_seconds:.3f}, "
                 f"total_quantity={row['total_quantity']}, "
                 f"pickup_nodes={row['pickup_nodes']}, "
-                f"eligible_robot_count={len(robot_profiles)}, "
+                f"eligible_robot_count={len(order_robots)}, "
                 f"minimum_pickup_eta_seconds={eta_text}"
             )
 
+        # 배정할 로봇이 있는 주문이 하나뿐이면 KEV로 고를 것이 없다.
+        if len(choices) < 2:
+            return {"kind": "fifo", "order_id": first_dispatchable_order_id or oldest["order_id"]}
+        # 기존 코드. 배정할 로봇이 없는 주문을 후보에서 빼므로 제시한 라벨만 연결한다.
+        # order_label_to_id = {
+        #     f"order_{queue_position}": row["order_id"] for queue_position, row in enumerate(pending_rows, start=1)
+        # }
         order_label_to_id = {
-            f"order_{queue_position}": row["order_id"] for queue_position, row in enumerate(pending_rows, start=1)
+            f"order_{queue_position}": row["order_id"]
+            for queue_position, row in enumerate(pending_rows, start=1)
+            if f"order_{queue_position}" in choices
         }
         question_id = f"order_schedule_{pending_rows[0]['_queue_sequence']}"
         instructions = (
@@ -620,7 +673,9 @@ class OrderManager:
         )
         debug_record = {
             "question_id": question_id,
-            "fifo_order_label": "order_1",
+            # 기존 코드. 가장 오래된 주문이 후보에서 빠질 수 있어 실제 라벨을 넣는다.
+            # "fifo_order_label": "order_1",
+            "fifo_order_label": fifo_order_label,
             "state": {
                 "pending_orders": order_profiles,
                 "scheduling_context": {
@@ -1214,18 +1269,20 @@ class OrderManager:
             for row in pending_rows:
                 if not candidates:
                     break
-                blocked_by_earlier_pickup = False
-                if mode == "simulation":
-                    for previous in self.orders.values():
-                        if previous is row:
-                            break
-                        if (
-                            previous["mode"] == mode
-                            and previous["status"] == "IN_PROGRESS"
-                            and set(previous["pickup_nodes"]).intersection(row["pickup_nodes"])
-                        ):
-                            blocked_by_earlier_pickup = True
-                            break
+                # 기존 코드. 주문 우선순위 KEV와 같은 기준을 쓰도록 _blocked_by_earlier_pickup으로 옮겼다.
+                # blocked_by_earlier_pickup = False
+                # if mode == "simulation":
+                #     for previous in self.orders.values():
+                #         if previous is row:
+                #             break
+                #         if (
+                #             previous["mode"] == mode
+                #             and previous["status"] == "IN_PROGRESS"
+                #             and set(previous["pickup_nodes"]).intersection(row["pickup_nodes"])
+                #         ):
+                #             blocked_by_earlier_pickup = True
+                #             break
+                blocked_by_earlier_pickup = self._blocked_by_earlier_pickup(row, mode)
 
                 # 기존 알고리즘 배차 코드. KEV fallback에서 같은 정책을 함수로 호출한다.
                 # candidate_index = None
