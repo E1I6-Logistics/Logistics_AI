@@ -166,10 +166,10 @@ export default function WarehouseMap({
             const contact = sensor?.broker_connected ? sensor.contact : 'UNKNOWN'
             const color = contact === 'CONTACT' ? '#16a34a' : contact === 'RELEASED' ? '#dc2626' : '#9ca3af'
             const label = contact === 'CONTACT' ? '접촉' : contact === 'RELEASED' ? '미접촉' : '확인 불가'
-            return <g key={`dock-${station}`} transform={`translate(${point.x + px(17)}, ${point.y + px(15)})`}>
+            return <g key={`dock-${station}`} transform={`translate(${point.x - px(56)}, ${point.y})`}>
               <title>{`Station ${station} · ${label} · 도킹 ${sensor?.docking_complete ? '완료' : '미검증'}`}</title>
               <circle r={px(5)} fill={color} stroke="#fff" strokeWidth={px(1.5)} />
-              <text x={px(8)} y={px(3)} fontSize={px(9)} fill={color}
+              <text x={-px(9)} y={px(3)} textAnchor="end" fontSize={px(9)} fill={color}
                 paintOrder="stroke" stroke="#fff" strokeWidth={px(2)}>{`S${station}`}</text>
             </g>
           })}
