@@ -48,6 +48,7 @@ export type GeoJsonFeatureCollection = {
 }
 
 export type MapInfoDto = {
+  resolution: number
   width: number
   height: number
   image_url: string
@@ -339,4 +340,20 @@ export function resetScenario(runId: string) {
   return request<ScenarioStatus>('/api/scenarios/reset', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ run_id: runId }),
   })
+}
+
+
+export type DockingStationDto = {
+  station: number
+  contact: 'CONTACT' | 'RELEASED' | 'UNKNOWN'
+  received_at_unix: number | null
+  age_s: number | null
+  stable: boolean
+  broker_connected: boolean
+  robot_id: string | null
+  docking_complete: boolean
+}
+
+export function getDockingStations() {
+  return request<DockingStationDto[]>('/api/robots/docking-stations', { signal: AbortSignal.timeout(3000) })
 }

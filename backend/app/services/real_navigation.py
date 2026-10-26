@@ -69,6 +69,11 @@ class RealNavigation:
         clock=monotonic,
         station_nodes=None,
         mapf_ready,
+        before_send=None,
+        departure_ready=None,
+        before_request=None,
+        on_requested=None,
+        navigation_kind=None,
     ):
 
         self._fleet = fleet
@@ -89,6 +94,11 @@ class RealNavigation:
         )
 
         self.lock = self._traffic.lock
+        self._before_send = before_send or (lambda rid: None)
+        self._departure_ready = departure_ready or (lambda rid: False)
+        self._before_request = before_request or (lambda rid: None)
+        self._on_requested = on_requested or (lambda rid: None)
+        self._navigation_kind = navigation_kind or (lambda rid, goal, kind: kind)
         self._mapf_ready = mapf_ready
         self._executing = {}
         self._stopping = {}
@@ -133,7 +143,8 @@ class RealNavigation:
                 row["command_epoch"] = (self._request_versions.get(rid, 0), robot.order_id,
                                         robot.navigation_type)
                 if rid not in self._requests and not blocked:
-                    row["status"] = "IDLE" if robot.state in (RobotState.IDLE, RobotState.TASK_ASSIGNED) else robot.state.value
+                    row["status"] = "IDLE" if (robot.state in (RobotState.IDLE, RobotState.TASK_ASSIGNED)
+                                             or self._departure_ready(rid)) else robot.state.value
 
     def robot_snapshot(self, robot_id, mode="real"):
         with self.lock:
@@ -150,12 +161,13 @@ class RealNavigation:
         if mode_manager.mode != self.mode:
             raise ValueError("운용 모드가 변경되었습니다.")
         for rid in pending:
+            self._before_request(rid)
             robot = self._fleet.get_robot(rid)
             row = self._robots[rid]
             if (not self._mapf_ready(rid) or row["connection_state"] != "ONLINE"
                     or row["execution_blocked"] or row["stop_requested"]
                     or rid in self._requests
-                    or robot.state not in (RobotState.IDLE, RobotState.TASK_ASSIGNED)
+                    or robot.state not in (RobotState.IDLE, RobotState.CHARGING, RobotState.TASK_ASSIGNED)
                     or row.get("occupied_node") is None or row.get("occupied_edge") is not None):
                 raise ValueError(f"실로봇의 정지·위치·ROS 준비 상태를 확인할 수 없습니다: {rid}")
 
@@ -163,7 +175,8 @@ class RealNavigation:
         for rid, goal in goals.items():
             robot = self._fleet.get_robot(rid)
             previous = self._requests.get(rid)
-            kind = previous[1] if previous else NavigationType.GOAL
+            kind = self._navigation_kind(rid, goal, previous[1] if previous else NavigationType.GOAL)
+            self._on_requested(rid)
             if previous is None:
                 self._request_versions[rid] = self._request_versions.get(rid, 0) + 1
             self._requests[rid] = (str(goal), kind)
@@ -921,9 +934,25 @@ class RealNavigation:
 
                 return
 
-            self._traffic.request_navigation_after_stop(
-                robot_id, str(node_id), now=self._clock(), graph=graph, required_path=required_path
-            )
+            if navigation_type != NavigationType.CHARGING:
+                self._before_request(robot_id)
+            state = self._robots[robot_id]
+            previous_status = state["status"]
+            if ((robot.state in (RobotState.IDLE, RobotState.CHARGING, RobotState.TASK_ASSIGNED, RobotState.WAITING)
+                    or (navigation_type == NavigationType.CHARGING and robot.state == RobotState.PAUSED))
+                    and state["route"] is None and state["goal_node"] is None
+                    and robot_id not in self._requests and robot_id not in self._executing
+                    and robot_id not in self._stopping and robot_id not in self._arrivals):
+                state["status"] = "IDLE"
+            try:
+                self._traffic.request_navigation_after_stop(
+                    robot_id, str(node_id), now=self._clock(), graph=graph, required_path=required_path
+                )
+            except (ValueError, RuntimeError):
+                state["status"] = previous_status
+                raise
+            self._on_requested(robot_id)
+            navigation_type = self._navigation_kind(robot_id, node_id, navigation_type)
 
             robot.goal_node = str(node_id)
             robot.navigation_type = navigation_type
@@ -1555,6 +1584,13 @@ class RealNavigation:
 
         if rid not in self._requests:
             self._yielding.add(rid)
+
+        try:
+            self._before_send(rid)
+        except ValueError as exc:
+            self._pause(rid, "dock_sensor_unavailable", str(exc))
+            self.stop(rid, lambda: self.cancel_after_stop(rid), reason="dock_sensor_unavailable")
+            return
 
         self._arrival_observed.pop(rid, None)
         self._executing[rid] = (state["navigation_id"], target, segment_index, final)

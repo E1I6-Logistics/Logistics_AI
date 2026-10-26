@@ -73,6 +73,7 @@ class FmsRosNode(Node):
         self.navigation_result_callback = None
         self.navigation_error_callback = None
         self.precision_dock_result_callback = None
+        self.navigation_started_callback = None
         self.aruco_align_result_callback = None
 
     # 로봇을 등록한다.
@@ -246,6 +247,8 @@ class FmsRosNode(Node):
 
         print(f"[{strftime('%Y-%m-%d %H:%M:%S')}] [INFO] [ROS NAV] goal accepted: robot={robot_id}", flush=True)
 
+        if self.navigation_started_callback:
+            self.navigation_started_callback(robot_id)
         self._query_navigation_result(robot_id, goal_handle)
         if robot_id in self._follow_waypoints_cancel_callbacks:
             self.cancel_follow_waypoints(robot_id, self._follow_waypoints_cancel_callbacks[robot_id])
@@ -590,7 +593,10 @@ class FmsRosNode(Node):
             flush=True,
         )
 
-        self._finish_auxiliary(robot_id, entry, result.status, self.precision_dock_result_callback)
+        status = result.status
+        if status == GoalStatus.STATUS_SUCCEEDED and getattr(getattr(result, "result", None), "success", False) is not True:
+            status = GoalStatus.STATUS_ABORTED
+        self._finish_auxiliary(robot_id, entry, status, self.precision_dock_result_callback)
 
     # ArUco 정렬을 전송한다.
     @_navigation_locked

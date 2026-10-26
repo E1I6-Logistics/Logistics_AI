@@ -52,3 +52,11 @@ async def fetch_robots():
         )
 
     return result
+
+
+@router.get("/docking-stations")
+async def fetch_docking_stations():
+    if mode_manager.mode != "real":
+        return []
+    from ..ros2.ros_gateway import ros_gateway
+    return ros_gateway.docking_station_snapshots()

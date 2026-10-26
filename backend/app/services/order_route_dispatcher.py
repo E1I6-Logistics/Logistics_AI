@@ -17,7 +17,7 @@ from .mode_service import feature_engine, mode_manager
 from .route_graph import load_route_graph
 
 
-async def dispatch_order_route(order, node, current_node, valid=None):
+async def dispatch_order_route(order, node, current_node, valid=None, *, charging_return=False):
     """주문 이동에 선택된 Algorithm/AI 경로를 기존 주행기로 전달한다."""
     mode = order["mode"]
     if mode_manager.mode != mode:
@@ -110,9 +110,10 @@ async def dispatch_order_route(order, node, current_node, valid=None):
     robot = fleet_manager.get_robot(order["robot_id"])
     if robot is None or not robot.connected or robot.occupied_node != str(current_node):
         raise ValueError("경로 생성 중 실제 로봇의 현재 위치가 변경되었습니다.")
-    return ros_gateway.navigate_to_node(
-        order["robot_id"], node, _order_step=True, required_path=required_path
-    )
+    kwargs = {"_order_step": True, "required_path": required_path}
+    if charging_return:
+        kwargs["_charging_return"] = True
+    return ros_gateway.navigate_to_node(order["robot_id"], node, **kwargs)
 
 
 __all__ = [

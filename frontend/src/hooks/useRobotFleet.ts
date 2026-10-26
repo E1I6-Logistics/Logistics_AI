@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   dashboardWsUrl,
   getConnections,
+  getDockingStations,
+  type DockingStationDto,
   getRobotMode,
   getRobots,
   setRobotMode,
@@ -50,6 +52,7 @@ function uiToBackendId(id: RobotId) {
 }
 
 export function useRobotFleet() {
+  const [dockingStations, setDockingStations] = useState<DockingStationDto[]>([])
   const [devices, setDevices] = useState<ConnectionDeviceDto[]>([])
   const [connectionSnapshotAvailable, setConnectionSnapshotAvailable] = useState(true)
   const [robotStates, setRobotStates] = useState<Record<string, RobotStateDto>>({})
@@ -59,6 +62,25 @@ export function useRobotFleet() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const reconnectTimer = useRef<number | null>(null)
+
+  useEffect(() => {
+    setDockingStations([])
+    if (mode !== 'real') return
+    let disposed = false
+    let timer: number | undefined
+    const refresh = async () => {
+      try {
+        const rows = await getDockingStations()
+        if (!disposed) setDockingStations(rows)
+      } catch {
+        if (!disposed) setDockingStations([])
+      } finally {
+        if (!disposed) timer = window.setTimeout(refresh, 1000)
+      }
+    }
+    void refresh()
+    return () => { disposed = true; window.clearTimeout(timer) }
+  }, [mode])
 
   const refreshMode = useCallback(async () => {
     const result = await getRobotMode()
@@ -245,6 +267,7 @@ export function useRobotFleet() {
   [managedRobots, mode, robotIds])
 
   return {
+    dockingStations: mode === 'real' ? dockingStations : [],
     managedIds,
     mapRobotIds,
     managedRobots,

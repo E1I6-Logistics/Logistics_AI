@@ -5,6 +5,7 @@ import {
   MAP_IMAGE_URL,
   type MapInfoDto,
   type OmxDeviceDto,
+  type DockingStationDto,
 } from './api/fmsApi'
 
 import type { MapEdge, MapPoint } from './hooks/useRouteGraph'
@@ -29,6 +30,7 @@ type Props = {
   visibleRobotIds?: RobotId[]
   robotStates?: ManagedRobot[]
   omxDevices?: OmxDeviceDto[]
+  dockingStations?: DockingStationDto[]
 }
 
 const ROBOT_COLORS: Record<RobotId, string> = {
@@ -51,6 +53,7 @@ export default function WarehouseMap({
   visibleRobotIds = [],
   robotStates = [],
   omxDevices = [],
+  dockingStations,
 }: Props) {
   const host = useRef<HTMLDivElement>(null)
   const drag = useRef<{ id: number; x: number; y: number; pan: Point } | null>(null)
@@ -155,6 +158,23 @@ export default function WarehouseMap({
         )}
 
         {/* GeoJSON 기반 Edge */}
+        {dockingStations !== undefined && <g aria-label="도킹 스테이션 센서">
+          {[1, 2, 3].map(station => {
+            const point = nodes[String(station - 1)]
+            if (!point) return null
+            const sensor = dockingStations.find(row => row.station === station)
+            const contact = sensor?.broker_connected ? sensor.contact : 'UNKNOWN'
+            const color = contact === 'CONTACT' ? '#16a34a' : contact === 'RELEASED' ? '#dc2626' : '#9ca3af'
+            const label = contact === 'CONTACT' ? '접촉' : contact === 'RELEASED' ? '미접촉' : '확인 불가'
+            return <g key={`dock-${station}`} transform={`translate(${point.x + px(17)}, ${point.y + px(15)})`}>
+              <title>{`Station ${station} · ${label} · 도킹 ${sensor?.docking_complete ? '완료' : '미검증'}`}</title>
+              <circle r={px(5)} fill={color} stroke="#fff" strokeWidth={px(1.5)} />
+              <text x={px(8)} y={px(3)} fontSize={px(9)} fill={color}
+                paintOrder="stroke" stroke="#fff" strokeWidth={px(2)}>{`S${station}`}</text>
+            </g>
+          })}
+        </g>}
+
         {!raw && layers.nodeEdge && (
           <g data-testid="navigation-edges" fill="none" stroke="#B9C3CF" strokeWidth={px(2)} strokeLinecap="round">
             {edges.map(edge => {

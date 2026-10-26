@@ -215,6 +215,7 @@ export default function FmsControlApp() {
 
   const {
     managedIds,
+    dockingStations,
     mapRobotIds,
     managedRobots,
     mode: robotMode,
@@ -666,6 +667,7 @@ export default function FmsControlApp() {
               visibleRobotIds={mapRobotIds as RobotId[]}
               robotStates={managedRobots}
               omxDevices={omxDevices}
+              dockingStations={robotMode === 'real' ? dockingStations : undefined}
             />
             <button
               onClick={emergencyStopAll}

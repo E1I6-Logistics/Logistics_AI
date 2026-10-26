@@ -1,6 +1,7 @@
 """공통 주문 대기열, 배차, Real 작업 단계."""
 
 import asyncio
+from contextlib import nullcontext
 from datetime import datetime, timezone
 from threading import RLock
 from uuid import uuid4
@@ -251,7 +252,9 @@ class OrderManager:
             return
         mode = mode_manager.mode
         preemptions = []
-        with self.lock:
+        # Dock eligibility reads execution state. Use the same navigation->order
+        # lock order as on_mqtt_result to avoid a ROS/MQTT callback deadlock.
+        with (ros_gateway.navigation.lock if mode == "real" else nullcontext()), self.lock:
             busy = {
                 row["robot_id"] for row in self.orders.values() if row["status"] == "IN_PROGRESS" and row["robot_id"]
             }
@@ -296,7 +299,16 @@ class OrderManager:
                             blocked_by_earlier_pickup = True
                             break
                 candidate_index = None
-                preferred = sorted(enumerate(candidates), key=lambda item: item[1] == row.get("last_robot_id"))
+                def preference(item):
+                    robot_id = item[1]
+                    tier = 0
+                    if mode == "real":
+                        robot = fleet_manager.get_robot(robot_id)
+                        tier = (0 if robot.state == RobotState.IDLE
+                                else 1 if robot.state == RobotState.CHARGING else 2)
+                    return tier, robot_id == row.get("last_robot_id")
+
+                preferred = sorted(enumerate(candidates), key=preference)
                 for index, candidate in preferred:
                     # A returning robot must leave the workstation before
                     # waiting behind an earlier order at the same pickup.
@@ -419,7 +431,7 @@ class OrderManager:
             row = self.orders.get(order_id)
             robot = fleet_manager.get_robot(robot_id)
             if row and row["status"] == "CANCELLED" and row.get("recovery_status") == "BLOCKED" and robot and robot.connected:
-                if robot.occupied_node == CHARGING_STATION_NODES.get(robot_id) and robot.state == RobotState.IDLE and not ros_gateway.navigation_active(robot_id):
+                if robot.occupied_node == CHARGING_STATION_NODES.get(robot_id) and robot.state == RobotState.CHARGING and not ros_gateway.navigation_active(robot_id):
                     self.recovering.pop(robot_id, None)
                     row["recovery_status"] = "RETURNED"
                     robot.returning = False
@@ -432,7 +444,7 @@ class OrderManager:
             row = self.orders[order_id]
             if (
                 robot.occupied_node == station
-                and robot.state == RobotState.IDLE
+                and robot.state == RobotState.CHARGING
                 and not ros_gateway.navigation_active(robot_id)
             ):
                 self.returning.pop(robot_id, None)
@@ -464,7 +476,8 @@ class OrderManager:
             if row["status"] == "CANCELLED":
                 route_order = dict(row, operation_mode="algorithm", driving_mode="standard")
             await dispatch_order_route(
-                route_order, station, robot.occupied_node, valid=lambda: self.returning.get(robot_id) == order_id
+                route_order, station, robot.occupied_node, valid=lambda: self.returning.get(robot_id) == order_id,
+                charging_return=True
             )
         except Exception as exc:
             self.returning.pop(robot_id, None)
@@ -473,7 +486,6 @@ class OrderManager:
                 self.orders[order_id]["recovery_status"] = "BLOCKED"
                 self.orders[order_id]["recovery_error"] = str(exc)
             else:
-                self.orders[order_id]["phase"] = "COMPLETED"
                 self.orders[order_id]["return_error"] = str(exc)
         finally:
             self._route_tasks.pop(key, None)
