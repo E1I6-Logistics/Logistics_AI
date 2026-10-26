@@ -304,3 +304,18 @@ KEV 확률(주요 회차):
 - 4개 조건 모두 KEV 오류·fallback 없이 주문이 완료됐다.
 
 정리: 현재 데이터로는 근소 후보군 안에서만 KEV가 판단하는 `near_eta`에 최근 작업량을 더한 조건(C)이 ETA 보호와 편중 완화를 함께 만족했다. `all_eligible`은 작업량을 함께 줄 때 ETA가 크게 느린 로봇을 고를 수 있어, 운영에 쓰려면 코드가 ETA 차이 상한을 다시 검증해야 한다. 조건별 1회(L3 4건)라 표본이 작고, 시뮬레이션은 회전 시간이 없어 완료 시간은 비교하지 않았다. 원본 로그는 `logs/testD9_{A,B,C,D}_backend.log`, `logs/testD9_{A,B,C,D}_kev.log`(git 제외).
+
+## 14. D-10 all_eligible ETA 상한 검증 (2026-10-26)
+
+D-9의 D 조건(`all_eligible` + 작업량)에서 KEV가 ETA 0초 robot1 대신 11.44초 robot3를 고른 문제를 막기 위해, `all_eligible`에서는 KEV가 고른 로봇의 ETA가 최단 ETA보다 근소 범위(`KEV_DISPATCH_ETA_TIE_SECONDS`, 현재 2초)를 넘게 길면 코드가 거부한다. 거부되면 근소 후보군의 기준선으로 배정하고, 서버 오류가 아니므로 cooldown은 걸지 않는다. 로그에는 `KEV dispatch rejected (ETA guard)`와 `falling back to rule baseline (ETA guard)`가 남는다. `near_eta`는 후보가 이미 범위 안이라 검증하지 않는다.
+
+D 조건으로 L1·L2만 다시 실행했다.
+
+| 배치 | KEV 선택 | ETA 차이 | 결과 | 최종 배정 |
+| --- | --- | ---: | --- | --- |
+| L1 | robot1 | 0.000초 | 허용 | robot1 |
+| L2 | robot3 | 11.437초 | 거부, 기준선 | robot1 |
+
+D-9에서 robot3로 배정됐던 L2가 robot1로 배정됐다. 원본 로그는 `logs/testD10_D_L1L2_backend.log`(git 제외).
+
+이 보호를 넣으면 `all_eligible`도 ETA 차이 2초 밖의 로봇은 배정되지 않으므로, 결과적으로 `near_eta`와 같은 ETA 경계를 갖는다. 차이는 KEV가 범위 밖 후보까지 본 뒤 고르고 코드가 사후에 거부한다는 점이다. 운영 관점에서는 처음부터 범위 안 후보만 주는 `near_eta` + 최근 작업량(C)이 더 단순하고 예측 가능하다.
