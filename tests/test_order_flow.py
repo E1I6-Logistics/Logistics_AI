@@ -30,6 +30,7 @@ def _reset(monkeypatch):
     order_manager._route_tasks.clear()
     order_manager._kev_dispatch_selector = None
     order_manager._kev_dispatch_retry_at = 0.0
+    order_manager._dispatch_history.clear()
     order_manager._kev_order_scheduling_retry_at = 0.0
     workstation_manager._assigned.clear()
     simulation_order_runner.tasks.clear()
@@ -1682,3 +1683,98 @@ def test_kev_dispatch_question_id_uses_queue_sequence_and_retry_count(monkeypatc
 
     assert kind == "request"
     assert request["debug_record"]["question_id"] == f"dispatch_order_{row['_queue_sequence']}_retry_1"
+
+
+# 최근 작업량은 기본으로 KEV 입력에 넣지 않는지 검증한다(기존 실험과 같은 입력).
+def test_kev_dispatch_recent_workload_is_off_by_default(monkeypatch):
+    _reset(monkeypatch)
+    monkeypatch.delenv("KEV_DISPATCH_RECENT_WORKLOAD", raising=False)
+    order = order_manager.create_order(items={"A": 1, "B": 0, "C": 0, "D": 0}, total_quantity=1)
+    row = order_manager.orders[order["order_id"]]
+
+    kind, request = order_manager._prepare_kev_dispatch(row, ["robot1", "robot2", "robot3"], "simulation")
+
+    assert kind == "request"
+    state = request["debug_record"]["state"]
+    assert state["dispatch_context"]["recent_workload_available"] is False
+    assert "recent_workload_window_seconds" not in state["dispatch_context"]
+    assert all("recent_dispatch_count" not in profile for profile in state["robots"])
+    assert all("recent_dispatch_count" not in text for text in request["debug_record"]["choices"].values())
+    assert not order_manager._dispatch_history
+
+
+# 최근 작업량을 켜면 기간 안의 로봇별 배정 횟수와 픽업 거리를 KEV 입력에 넣는지 검증한다.
+def test_kev_dispatch_recent_workload_counts_recent_assignments(monkeypatch):
+    _reset(monkeypatch)
+    monkeypatch.setenv("KEV_DISPATCH_RECENT_WORKLOAD", "1")
+    monkeypatch.setenv("KEV_DISPATCH_WORKLOAD_WINDOW_SECONDS", "600")
+    now = monotonic()
+    order_manager._dispatch_history.extend(
+        [
+            (now - 1000, "robot1", 9.0),  # 기간 밖
+            (now - 100, "robot1", 1.5),
+            (now - 50, "robot1", None),
+            (now - 10, "robot3", 0.5),
+        ]
+    )
+    order = order_manager.create_order(items={"A": 1, "B": 0, "C": 0, "D": 0}, total_quantity=1)
+    row = order_manager.orders[order["order_id"]]
+
+    kind, request = order_manager._prepare_kev_dispatch(row, ["robot1", "robot2", "robot3"], "simulation")
+
+    assert kind == "request"
+    state = request["debug_record"]["state"]
+    assert state["dispatch_context"]["recent_workload_available"] is True
+    assert state["dispatch_context"]["recent_workload_window_seconds"] == 600
+    workload = {p["robot_id"]: (p["recent_dispatch_count"], p["recent_pickup_distance_m"]) for p in state["robots"]}
+    assert workload == {"robot1": (2, 1.5), "robot2": (0, 0.0), "robot3": (1, 0.5)}
+    assert "recent_dispatch_count=2" in request["debug_record"]["choices"]["robot1"]
+    assert "less recent workload" in request["debug_record"]["instructions"]
+    # 기간이 지난 기록은 지운다.
+    assert len(order_manager._dispatch_history) == 3
+
+
+# 실제 배정이 작업량 기록에 남는지 검증한다.
+def test_dispatch_records_assignment_for_recent_workload(monkeypatch):
+    _reset(monkeypatch)
+    monkeypatch.setenv("KEV_DISPATCH_RECENT_WORKLOAD", "1")
+
+    async def scenario():
+        order = order_manager.create_order(items={"A": 1, "B": 0, "C": 0, "D": 0}, total_quantity=1)
+        await order_manager.tick()
+        robot_id = order_manager.get_order(order["order_id"])["robot_id"]
+        await asyncio.gather(*list(simulation_order_runner.tasks.values()))
+        return robot_id
+
+    robot_id = asyncio.run(scenario())
+
+    assert [entry[1] for entry in order_manager._dispatch_history] == [robot_id]
+    assert order_manager._dispatch_history[0][2] is not None
+
+
+# 작업량 기능이 꺼진 운영에서는 배정 기록이 메모리에 누적되지 않는지 검증한다.
+def test_dispatch_does_not_record_recent_workload_when_disabled(monkeypatch):
+    _reset(monkeypatch)
+    monkeypatch.setenv("KEV_DISPATCH_RECENT_WORKLOAD", "0")
+
+    async def scenario():
+        order = order_manager.create_order(items={"A": 1, "B": 0, "C": 0, "D": 0}, total_quantity=1)
+        await order_manager.tick()
+        await asyncio.gather(*list(simulation_order_runner.tasks.values()))
+
+    asyncio.run(scenario())
+
+    assert not order_manager._dispatch_history
+
+
+# KEV를 부르지 않는 배정만 이어져도 기간이 지난 작업량 기록은 지우는지 검증한다.
+def test_record_dispatch_prunes_expired_workload(monkeypatch):
+    _reset(monkeypatch)
+    monkeypatch.setenv("KEV_DISPATCH_RECENT_WORKLOAD", "1")
+    monkeypatch.setenv("KEV_DISPATCH_WORKLOAD_WINDOW_SECONDS", "600")
+    order_manager._dispatch_history.append((monotonic() - 1000, "robot1", 1.0))
+    order = order_manager.create_order(items={"A": 1, "B": 0, "C": 0, "D": 0}, total_quantity=1)
+
+    order_manager._record_dispatch("robot2", order_manager.orders[order["order_id"]], "simulation")
+
+    assert [entry[1] for entry in order_manager._dispatch_history] == ["robot2"]

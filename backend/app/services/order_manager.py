@@ -5,6 +5,7 @@ import json
 import logging
 import math
 import os
+from collections import deque
 from datetime import datetime, timezone
 from threading import RLock
 from time import monotonic
@@ -67,6 +68,24 @@ def _kev_dispatch_candidate_scope():
     return scope
 
 
+def _kev_dispatch_recent_workload_enabled():
+    """로봇별 최근 작업량을 KEV 배차 입력에 넣을지 읽는다. 기본은 꺼져 기존 KEV 입력과 같다."""
+    value = os.getenv("KEV_DISPATCH_RECENT_WORKLOAD", "0").strip().lower()
+    if value in {"1", "true", "yes", "on"}:
+        return True
+    if value in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError("KEV_DISPATCH_RECENT_WORKLOAD는 true 또는 false여야 합니다.")
+
+
+def _kev_dispatch_workload_window_seconds():
+    """최근 작업량을 셀 기간(초)을 읽는다."""
+    seconds = float(os.getenv("KEV_DISPATCH_WORKLOAD_WINDOW_SECONDS", "600"))
+    if not math.isfinite(seconds) or seconds <= 0:
+        raise ValueError("KEV_DISPATCH_WORKLOAD_WINDOW_SECONDS는 0보다 커야 합니다.")
+    return seconds
+
+
 def _kev_order_scheduling_enabled():
     """대기 주문 우선순위 KEV 실험의 사용 여부를 읽는다."""
     value = os.getenv("KEV_ORDER_SCHEDULING_ENABLED", "0").strip().lower()
@@ -97,6 +116,8 @@ class OrderManager:
         self._kev_dispatch_selector = None
         self._kev_dispatch_retry_at = 0.0
         self._kev_order_scheduling_retry_at = 0.0
+        # 배정 기록 (monotonic 시각, robot_id, 배정 시 첫 픽업까지 route graph 거리 또는 None). 최근 작업량 집계에 쓴다.
+        self._dispatch_history = deque()
         self._order_queue_sequence = 0
 
     # 주문 품목에 필요한 픽업대 노드를 반환한다.
@@ -456,6 +477,36 @@ class OrderManager:
             return "not_idle"
         return "unavailable"
 
+    # 주문 배정을 작업량 기록에 남긴다. 거리를 계산하지 못해도 배정 횟수는 센다. lock 안에서 호출한다.
+    def _record_dispatch(self, robot_id, row, mode):
+        # 기능이 꺼진 운영에서는 FMS 재시작 전까지 사용할 수 없는 기록을 쌓지 않는다.
+        if not _kev_dispatch_recent_workload_enabled():
+            return
+        distance_m = None
+        try:
+            profile = self._dispatch_robot_profile(robot_id, mode)
+            if profile is not None:
+                distance_m = self._pickup_eta(profile, row["pickup_nodes"])["pickup_distance_m"]
+        except (OSError, TypeError, ValueError):
+            distance_m = None
+        self._dispatch_history.append((monotonic(), robot_id, distance_m))
+        # KEV를 부르지 않는 배정(후보 1대 등)만 이어져도 기록이 쌓이지 않도록 기간이 지난 기록을 여기서도 지운다.
+        self._recent_workload((), _kev_dispatch_workload_window_seconds())
+
+    # 최근 기간 안의 로봇별 배정 횟수와 픽업까지 이동 거리 합을 돌려준다. 기간이 지난 기록은 지운다.
+    def _recent_workload(self, robot_ids, window_seconds, now=None):
+        now = monotonic() if now is None else now
+        while self._dispatch_history and now - self._dispatch_history[0][0] > window_seconds:
+            self._dispatch_history.popleft()
+        workload = {robot_id: {"recent_dispatch_count": 0, "recent_pickup_distance_m": 0.0} for robot_id in robot_ids}
+        for _at, robot_id, distance_m in self._dispatch_history:
+            if robot_id not in workload:
+                continue
+            workload[robot_id]["recent_dispatch_count"] += 1
+            if distance_m is not None:
+                workload[robot_id]["recent_pickup_distance_m"] += distance_m
+        return workload
+
     # KEV 배차 판단에 사용할 로봇 상태를 만든다.
     def _dispatch_robot_profile(self, robot_id, mode):
         if mode == "simulation":
@@ -670,6 +721,8 @@ class OrderManager:
             return "robot", None
         # 후보 범위 오타는 ETA 계산 실패와 달리 실험 설정 오류다. 기존 알고리즘으로 조용히 fallback하지 않는다.
         candidate_scope = _kev_dispatch_candidate_scope()
+        recent_workload_enabled = _kev_dispatch_recent_workload_enabled()
+        workload_window_seconds = _kev_dispatch_workload_window_seconds() if recent_workload_enabled else None
         try:
             eta_tie_window_seconds = _kev_dispatch_eta_tie_seconds()
             for profile in profiles:
@@ -730,6 +783,12 @@ class OrderManager:
             )
             return "robot", profiles[0]["robot_id"]
 
+        # 최근 작업량은 켰을 때만 KEV 입력에 넣는다. 끄면 기존 실험과 같은 입력이다.
+        if recent_workload_enabled:
+            workload = self._recent_workload([profile["robot_id"] for profile in profiles], workload_window_seconds)
+            for profile in profiles:
+                profile["recent_dispatch_count"] = workload[profile["robot_id"]]["recent_dispatch_count"]
+                profile["recent_pickup_distance_m"] = round(workload[profile["robot_id"]]["recent_pickup_distance_m"], 3)
         choices = {
             profile["robot_id"]: (
                 f"state={profile['state']}, "
@@ -742,6 +801,12 @@ class OrderManager:
                 f"pickup_distance_m={profile['pickup_distance_m']:.3f}, "
                 f"pickup_eta_seconds={profile['pickup_eta_seconds']:.3f}, "
                 f"eta_delta_seconds={profile['eta_delta_seconds']:.3f}"
+                + (
+                    f", recent_dispatch_count={profile['recent_dispatch_count']}, "
+                    f"recent_pickup_distance_m={profile['recent_pickup_distance_m']:.3f}"
+                    if recent_workload_enabled
+                    else ""
+                )
             )
             for profile in profiles
         }
@@ -765,9 +830,13 @@ class OrderManager:
                 "eta_tie_window_seconds": eta_tie_window_seconds,
                 "excluded_by_eta": excluded_by_eta,
                 "post_task_battery_available": False,
-                "recent_workload_available": False,
+                # 기존 코드. 최근 작업량을 켜면 True와 집계 기간을 넣는다.
+                # "recent_workload_available": False,
+                "recent_workload_available": recent_workload_enabled,
             },
         }
+        if recent_workload_enabled:
+            state["dispatch_context"]["recent_workload_window_seconds"] = workload_window_seconds
         # 기존 지시문(V1). D-3에서 최고 배터리 선택 정확도가 2/6이어서 V3로 바꾼다.
         # instructions = (
         #     "Choose exactly one available robot for this order. "
@@ -795,6 +864,13 @@ class OrderManager:
                 "pickup_eta_seconds. When eta_delta_seconds differences are small, prefer an IDLE, non-returning robot. "
                 "Use the current battery only as secondary context; it is not a safety threshold or an estimated "
                 "post-task battery. Return only one candidate ID."
+            )
+        if recent_workload_enabled:
+            instructions += (
+                " recent_dispatch_count and recent_pickup_distance_m are this robot's assignments and estimated pickup "
+                "travel within recent_workload_window_seconds. When pickup ETA and operational state are similar, prefer "
+                "the robot with less recent workload to balance assignments; do not let workload override a clearly "
+                "shorter pickup ETA."
             )
         # 기존 질문 ID. UUID는 선택 입력에 불필요하고 실험마다 달라져 재현성을 흐릴 수 있다.
         # question_id = f"dispatch_{row['order_id']}"
@@ -1253,6 +1329,7 @@ class OrderManager:
                         candidates.remove(robot_id)
                 if robot_id is None:
                     continue
+                self._record_dispatch(robot_id, row, mode)
                 row["robot_id"] = robot_id
                 row["status"] = "IN_PROGRESS"
                 returning = robot_id in self.returning
