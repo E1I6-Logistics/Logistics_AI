@@ -271,3 +271,36 @@ S0~S4 모두 D-6과 같은 결과로 통과했다. 원본 로그는 `logs/testD7
 | 최종 배정 / 완료 | robot2 / COMPLETED | robot2 / COMPLETED |
 
 질문 ID 변경 후에도 선택과 확률이 같았다. 원본 로그는 `logs/testD8_S2_backend.log`(git 제외).
+
+## 13. D-9 후보 범위·최근 작업량 비교 (2026-10-26)
+
+`KEV_DISPATCH_CANDIDATE_SCOPE`(`near_eta`/`all_eligible`)와 `KEV_DISPATCH_RECENT_WORKLOAD`(0/1) 4개 조건을 코드 `b3aacb8`에서 비교했다. 조건마다 FMS를 재시작했고, 공통 조건은 3절과 같다(ETA 0.2 m/s, 근소 범위 2초, 배터리 40/90/70, 작업량 집계 600초). 배치는 조건마다 같다.
+
+- L1: robot1=N3, robot2=N4, robot3=N2, C 주문 1건 (S2 배치)
+- L2: robot1=N6, robot2=N4, robot3=N2, C 주문 1건 (S1 배치)
+- L3: 충전 노드 N0/N1/N2에서 A 주문 4건을 하나씩 완료·복귀 후 연속 등록. N5 ETA는 robot1 8.26초, robot2 6.78초, robot3 7.51초로 셋 모두 근소 범위 안이다.
+
+| 조건 | 범위 | 작업량 | L1 | L2 | L3 배정 (1~4) | KEV 호출 중 ETA 최단 선택 | fallback |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| A | near_eta | 끔 | robot2 | robot1 (ETA winner, KEV 없음) | robot3 ×4 | 0/5 | 0 |
+| B | all_eligible | 끔 | robot1 | robot1 | robot2 ×4 | 6/6 | 0 |
+| C | near_eta | 켬 | robot1 | robot1 (ETA winner, KEV 없음) | robot2, robot2, robot3, robot3 | 3/5 | 0 |
+| D | all_eligible | 켬 | robot1 | **robot3** | robot2 ×4 | 5/6 | 0 |
+
+KEV 확률(주요 회차):
+
+- A L3: robot1 0.2953, robot2 0.3207, robot3 0.3840 (4회 동일). L1은 D-6~D-8과 같은 robot2 0.5347.
+- B L3: robot2 0.6006. L2: robot1 0.5222.
+- C L3: robot2 0.4362 → 0.4439, 이후 robot2 작업량 2·robot3 0에서 robot3 0.4557 → 0.4425.
+- D L2: robot1(ETA 0.00초, 작업량 1) 0.2899, robot3(ETA 11.44초, 작업량 0) 0.3778로 robot3 선택.
+
+관찰:
+
+- 같은 입력에서 KEV 확률은 매번 같았다. 회차별 차이는 입력(작업량) 차이에서만 생겼다.
+- `all_eligible`(B)은 작업량이 없으면 6회 모두 ETA 최단 로봇을 골랐다.
+- `near_eta`(A)는 지시문대로 근소 후보 안에서 ETA로 재정렬하지 않아, L3에서 ETA 최단이 아니고 배터리도 가장 높지 않은 robot3를 4회 연속 골랐다(편중).
+- 작업량을 켜면 `near_eta`(C)에서 robot2·robot3가 2회씩 나뉘어 편중이 줄었다.
+- `all_eligible` + 작업량(D)에서는 L2에서 ETA 0.00초인 robot1 대신 작업량이 적은 robot3(11.44초)를 골랐다. 지시문의 "작업량이 확실히 짧은 ETA를 뒤집지 않게 한다"를 지키지 않은 사례로, 근소 범위 밖 후보를 KEV에 맡길 때의 위험이다.
+- 4개 조건 모두 KEV 오류·fallback 없이 주문이 완료됐다.
+
+정리: 현재 데이터로는 근소 후보군 안에서만 KEV가 판단하는 `near_eta`에 최근 작업량을 더한 조건(C)이 ETA 보호와 편중 완화를 함께 만족했다. `all_eligible`은 작업량을 함께 줄 때 ETA가 크게 느린 로봇을 고를 수 있어, 운영에 쓰려면 코드가 ETA 차이 상한을 다시 검증해야 한다. 조건별 1회(L3 4건)라 표본이 작고, 시뮬레이션은 회전 시간이 없어 완료 시간은 비교하지 않았다. 원본 로그는 `logs/testD9_{A,B,C,D}_backend.log`, `logs/testD9_{A,B,C,D}_kev.log`(git 제외).
