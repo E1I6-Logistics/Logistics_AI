@@ -14,13 +14,23 @@ OperationMode = Literal["algorithm", "ai"]
 # Traffic and safety continue to use the existing algorithms in both modes.
 FEATURE_ENGINES = {
     "algorithm": {"route": "algorithm", "dispatch": "algorithm", "workstation": "algorithm"},
-    "ai": {"route": "ai", "dispatch": "algorithm", "workstation": "algorithm"},
+    "ai": {"route": "ai", "dispatch": "ai", "workstation": "algorithm"},
 }
 
 
 # 기능별 AI 또는 알고리즘 실행 방식을 결정한다.
-def feature_engine(feature, operation_mode):
+def feature_engine(feature, operation_mode, *, mode=None):
+    if feature == "dispatch" and operation_mode == "ai":
+        from .kev_mapf.kev_dispatch_policy import dispatch_enabled
+
+        if not dispatch_enabled(mode or mode_manager.mode):
+            return "algorithm"
     return FEATURE_ENGINES[operation_mode][feature]
+
+
+def feature_engines(operation_mode, *, mode=None):
+    return {feature: feature_engine(feature, operation_mode, mode=mode)
+            for feature in FEATURE_ENGINES[operation_mode]}
 
 
 class RobotModeManager:
@@ -29,6 +39,7 @@ class RobotModeManager:
         self._lock = RLock()
         self._mode: RobotMode = self._validate(initial_mode)
         self._operation_mode: OperationMode = "algorithm"
+        self.generation = 0
 
     # 관련을 검증한다.
     @staticmethod
@@ -59,6 +70,8 @@ class RobotModeManager:
         if operation_mode is not None and operation_mode not in FEATURE_ENGINES:
             raise ValueError("operation_mode must be either 'algorithm' or 'ai'")
         with self._lock:
+            if normalized != self._mode or (operation_mode is not None and operation_mode != self._operation_mode):
+                self.generation += 1
             self._mode = normalized
             if operation_mode is not None:
                 self._operation_mode = operation_mode

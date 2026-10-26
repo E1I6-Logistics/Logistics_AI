@@ -232,6 +232,8 @@ export type RobotStateDto = {
   pause_reason?: string | null
   pause_reason_code?: string | null
   battery: number | null
+  battery_voltage?: number | null
+  dispatch_battery_block_reason?: 'battery_unknown' | 'low_battery' | null
   x: number
   y: number
   yaw: number

@@ -41,6 +41,7 @@ export type OrderDto = CreateOrderResponse & {
   recovery_status?: string
   recovery_error?: string
   retry_count?: number
+  dispatch_reason?: string
 }
 
 export type PickupDto = {

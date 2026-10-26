@@ -100,6 +100,9 @@ async def lifespan(app: FastAPI):
             with suppress(asyncio.CancelledError):
                 await simulation_task
         finally:
+            from .services.order_manager import order_manager
+
+            order_manager._robot_dispatcher.close()
             executor.shutdown()
             ros_node.destroy_node()
 

@@ -5,6 +5,7 @@ from fastapi import APIRouter
 from ..services.mode_service import mode_manager
 from ..services.fleet_manager import fleet_manager
 from ..services.map_service import world_to_pixel
+from ..services.order_dispatcher import battery_block_reason
 
 router = APIRouter(prefix="/api/robots", tags=["robots"])
 
@@ -36,6 +37,8 @@ async def fetch_robots():
                 "pause_reason_code": robot.pause_reason_code,
                 "pause_reason": robot.pause_reason,
                 "battery": robot.battery,
+                "battery_voltage": robot.battery_voltage,
+                "dispatch_battery_block_reason": battery_block_reason(robot.min_battery_voltage()),
                 "x": robot.x,
                 "y": robot.y,
                 "yaw": robot.yaw,

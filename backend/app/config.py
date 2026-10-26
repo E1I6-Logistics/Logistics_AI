@@ -82,6 +82,14 @@ if any(not math.isfinite(value) or value <= 0 for value in (DOCK_CONTACT_TIMEOUT
 # 정상 응답에서 로봇이 잠시 누락되어도 OFFLINE으로 확정하지 않는 시간.
 ZENOH_MISSING_GRACE_S = float(os.getenv("FMS_ZENOH_MISSING_GRACE_S", "5.0"))
 
+# heeyeon 배차 기준: 최근 유효 전압의 최저값. 실측값이며 잔량(%)과 별개이다.
+MIN_DISPATCH_BATTERY_VOLTAGE = float(os.getenv("FMS_MIN_DISPATCH_BATTERY_VOLTAGE", "11.2"))
+BATTERY_VOLTAGE_WINDOW_S = float(os.getenv("FMS_BATTERY_VOLTAGE_WINDOW_S", "60"))
+if not math.isfinite(MIN_DISPATCH_BATTERY_VOLTAGE) or MIN_DISPATCH_BATTERY_VOLTAGE < 0:
+    raise ValueError("FMS_MIN_DISPATCH_BATTERY_VOLTAGE는 유한한 0 이상의 값이어야 합니다.")
+if not math.isfinite(BATTERY_VOLTAGE_WINDOW_S) or BATTERY_VOLTAGE_WINDOW_S <= 0:
+    raise ValueError("FMS_BATTERY_VOLTAGE_WINDOW_S는 유한한 양수여야 합니다.")
+
 # 실제 로봇이 움직일 것으로 예상하는 속도(m/s). 예약 시간을 계산할 때 쓴다.
 # 기본값은 0.10이며 Nav2 주행 속도를 직접 변경하지 않는다.
 # 실측 평균속도보다 낮추면 예약이 길어지고, 높이면 예약 충돌 위험이 커진다.

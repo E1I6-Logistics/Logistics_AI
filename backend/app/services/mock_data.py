@@ -15,15 +15,27 @@ from .traffic_manager import TrafficManager, safe_travel_distance
 from .mapf_execution import MapfExecution
 
 import math
+import os
 
 SIMULATION_SPEED_MPS = 0.2
 RESERVATION_MARGIN_S = 0.2
 
 _MOCK_ROBOT_DEFINITIONS = {
-    "robot1": {"node_id": "0", "status": "IDLE", "battery": 92.0},
-    "robot2": {"node_id": "1", "status": "IDLE", "battery": 78.0},
-    "robot3": {"node_id": "2", "status": "IDLE", "battery": 64.0},
+    "robot1": {"node_id": "0", "status": "IDLE", "battery": 92.0, "battery_voltage": 12.0},
+    "robot2": {"node_id": "1", "status": "IDLE", "battery": 78.0, "battery_voltage": 12.0},
+    "robot3": {"node_id": "2", "status": "IDLE", "battery": 64.0, "battery_voltage": 12.0},
 }
+
+
+def _robot_value_overrides(name):
+    values = {}
+    for item in filter(None, os.getenv(name, "").strip().split(",")):
+        robot_id, separator, number = item.partition("=")
+        robot_id = robot_id.strip()
+        if not separator or robot_id not in _MOCK_ROBOT_DEFINITIONS:
+            raise ValueError(f"{name}: robot1=값,robot2=값 형식으로 입력하세요.")
+        values[robot_id] = float(number)
+    return values
 
 _MOCK_CONNECTIONS = {"10.10.141.225": "robot1", "10.10.141.221": "robot2", "10.10.141.222": "robot3"}
 
@@ -53,13 +65,17 @@ class MockFmsStore:
             self._last_tick = monotonic()
             self._robots.clear()
             self._blocked_ips.clear()
+            batteries = _robot_value_overrides("SIM_BATTERY_OVERRIDE")
+            voltages = _robot_value_overrides("SIM_BATTERY_VOLTAGE_OVERRIDE")
             for robot_id, definition in _MOCK_ROBOT_DEFINITIONS.items():
                 node = get_node(definition["node_id"])
                 self._robots[robot_id] = {
                     "robot_id": robot_id,
                     "ui_id": to_ui_robot_id(robot_id),
                     "status": definition["status"],
-                    "battery": definition["battery"],
+                    "battery": batteries.get(robot_id, definition["battery"]),
+                    # 모의 전압은 12V 고정이며 실측 이력이 아니다. override로 저전압을 재현한다.
+                    "battery_voltage": voltages.get(robot_id, definition["battery_voltage"]),
                     "x": node["x"],
                     "y": node["y"],
                     "yaw": 0.0,
@@ -110,7 +126,13 @@ class MockFmsStore:
     # 현재 상태의 복사본을 만든다.
     @staticmethod
     def _snapshot(robot: dict[str, Any], mode: str) -> dict[str, Any]:
+        from .order_dispatcher import battery_block_reason
+
         result = deepcopy(robot)
+        result["dispatch_battery_block_reason"] = battery_block_reason(result.get("battery_voltage"))
+        for key in ("battery", "battery_voltage"):
+            if isinstance(result.get(key), float) and not math.isfinite(result[key]):
+                result[key] = None
         pixel_x, pixel_y = world_to_pixel(result["x"], result["y"])
         result.update(
             {

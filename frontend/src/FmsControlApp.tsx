@@ -135,6 +135,7 @@ function OrderStatus({ orders, workstations, pickups }: {
       <button onClick={() => setSelectedId(null)} aria-label="주문 상세 닫기" style={{ float: 'right', border: 0, background: 'transparent', cursor: 'pointer' }}>닫기 ×</button>
       <strong>{selected.order_name}</strong><div>{itemText(selected)}</div>
       <div>등록 모드: {selected.operation_mode === 'ai' ? 'AI' : '알고리즘'}</div>
+      {selected.status === 'PENDING' && selected.dispatch_reason && <div>{selected.dispatch_reason}</div>}
       {selected.error && <div style={{ color: C.danger }}>
         실패 단계: {PHASE_TEXT[selected.failed_phase ?? ''] ?? selected.failed_phase}<br />
         원인: {selected.error}
@@ -896,6 +897,13 @@ function RobotPanel({ scenarioActive, robotId, orders, liveRobot, targetNode, dr
         <SectionTitle>핵심 상태</SectionTitle>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
           <StatusCard label="배터리" value={`${Math.round(battery)}%`} color={batteryColor}>
+            <div style={{ fontSize: 10, marginTop: 4 }}>
+              {liveRobot?.batteryVoltage != null && Number.isFinite(liveRobot.batteryVoltage)
+                ? `${liveRobot.batteryVoltage.toFixed(2)} V` : '전압 미확인'}
+            </div>
+            {liveRobot?.dispatchBatteryBlockReason && <div style={{ color: C.danger, fontSize: 10 }}>
+              배차 불가 · {liveRobot.dispatchBatteryBlockReason === 'low_battery' ? '전압 부족' : '최근 전압 기록 없음'}
+            </div>}
             <div style={{ height: 5, borderRadius: 5, overflow: 'hidden', background: '#E3E8EF', marginTop: 8 }}><div style={{ width: `${battery}%`, height: '100%', background: batteryColor }} /></div>
           </StatusCard>
           <StatusCard label="통신 상태"

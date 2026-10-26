@@ -9,7 +9,7 @@ from time import strftime
 from ..models.robot import RobotState
 from ..ros2.ros_gateway import ros_gateway
 from ..services.fleet_manager import fleet_manager
-from ..services.mode_service import mode_manager, FEATURE_ENGINES
+from ..services.mode_service import mode_manager, feature_engines
 from ..services.websocket_manager import manager
 from .robots import fetch_robots
 from ..schemas.robot import to_ui_robot_id
@@ -29,7 +29,7 @@ def _snapshot() -> dict[str, object]:
     return {
         "mode": mode_manager.mode,
         "operation_mode": mode_manager.operation_mode,
-        "feature_engines": FEATURE_ENGINES[mode_manager.operation_mode],
+        "feature_engines": feature_engines(mode_manager.operation_mode),
         "real_available": ros_gateway._ros_node is not None,
         "simulation_active": mode_manager.mode == "simulation",
         "using_mock": mode_manager.mode == "simulation",

@@ -9,6 +9,7 @@ from ..services.scenario_service import scenario_manager
 from ..services.websocket_manager import manager
 from ..services.fleet_manager import fleet_manager
 from ..services.map_service import world_to_pixel
+from ..services.order_dispatcher import battery_block_reason
 from ..schemas.robot import to_ui_robot_id
 
 router = APIRouter(tags=["websocket"])
@@ -61,6 +62,8 @@ async def dashboard_websocket(websocket: WebSocket):
                     "pause_reason_code": robot.pause_reason_code,
                     "pause_reason": robot.pause_reason,
                     "battery": robot.battery,
+                    "battery_voltage": robot.battery_voltage,
+                    "dispatch_battery_block_reason": battery_block_reason(robot.min_battery_voltage()),
                     "x": robot.x,
                     "y": robot.y,
                     "yaw": robot.yaw,

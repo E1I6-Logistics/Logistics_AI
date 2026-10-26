@@ -54,6 +54,10 @@ def test_pickup_wait_ends_when_previous_robot_vacates_node(monkeypatch):
 
 # 테스트 사이에 공유 상태를 초기화한다.
 def _reset(monkeypatch):
+    # 기존 경로/주문 테스트는 배차 선택과 분리한다. KEV 통합은 별도 테스트에서 활성화한다.
+    monkeypatch.setenv("FMS_SIM_KEV_DISPATCH_ENABLED", "0")
+    monkeypatch.setenv("FMS_REAL_KEV_DISPATCH_ENABLED", "0")
+    order_manager._robot_dispatcher.discard()
     mode_manager.set_mode("simulation", "algorithm")
     mock_fms.reset()
     order_manager.orders.clear()
@@ -111,6 +115,7 @@ def test_simulation_pickups_then_workstation_then_return(monkeypatch):
 @pytest.mark.parametrize("operation", ["algorithm", "ai"])
 def test_four_operating_modes_use_feature_policies(monkeypatch, environment, operation):
     _reset(monkeypatch)
+    monkeypatch.setenv("FMS_SIM_KEV_DISPATCH_ENABLED", "1")
     from backend.app.routers.mode import ModeRequest, get_mode, set_mode
     from backend.app.routers.orders import create_order
     from backend.app.schemas.order import CreateOrderRequest
@@ -125,7 +130,7 @@ def test_four_operating_modes_use_feature_policies(monkeypatch, environment, ope
         assert (await get_mode())["operation_mode"] == operation
         assert result["feature_engines"] == {
             "route": "ai" if operation == "ai" else "algorithm",
-            "dispatch": "algorithm",
+            "dispatch": "ai" if operation == "ai" and environment == "simulation" else "algorithm",
             "workstation": "algorithm",
         }
         order = await create_order(
@@ -337,6 +342,7 @@ def test_real_dispatch_waits_for_navigation_to_finish(monkeypatch):
     from backend.app.services.order_dispatcher import available_robots
 
     robot = Robot("robot1")
+    robot.update_battery(80, voltage=12)
     robot.set_connected(True)
     robot.update_pose(0, 0, 0)
     robot.occupied_node = "0"

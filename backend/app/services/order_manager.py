@@ -14,6 +14,7 @@ from .mode_service import mode_manager, feature_engine
 from .mqtt_manager import mqtt_manager
 from .order_dispatcher import available_robots
 from .order_route_dispatcher import dispatch_order_route
+from .robot_dispatch_service import KevRobotDispatcher, prepare_dispatch
 from .scenario_service import scenario_manager
 from .workstation_manager import workstation_manager
 
@@ -27,6 +28,8 @@ class OrderManager:
         self.recovering = {}  # robot_id -> failed order_id
         self._return_started = set()
         self._route_tasks = {}
+        self._robot_dispatcher = KevRobotDispatcher()
+        self._order_queue_sequence = 0
 
     # 주문 품목에 필요한 픽업대 노드를 반환한다.
     @staticmethod
@@ -64,6 +67,7 @@ class OrderManager:
         with scenario_manager.lock, self.lock:
             scenario_manager.ensure_order_available(scenario_run_id)
             order_id = str(uuid4())
+            self._order_queue_sequence += 1
             row = {
                 "order_id": order_id,
                 "order_name": (order_name or "").strip() or f"ORDER-{len(self.orders) + 1:03d}",
@@ -81,6 +85,7 @@ class OrderManager:
                 "selector": selector,
                 "model": model,
                 "route_started": False,
+                "_queue_sequence": self._order_queue_sequence,
             }
             self.orders[order_id] = row
             return self.public_order(row)
@@ -180,6 +185,7 @@ class OrderManager:
                         robot = fleet_manager.get_robot(robot_id)
                         owns_robot = robot is not None and robot.occupied_node != CHARGING_STATION_NODES.get(robot_id)
             row["status"] = row["phase"] = "CANCELLED"
+            self._robot_dispatcher.discard_order(order_id)
             workstation_manager.release(order_id)
             if not owns_robot:
                 return True
@@ -249,6 +255,7 @@ class OrderManager:
     # 대기 중인 작업을 한 주기 진행한다.
     async def tick(self):
         if scenario_manager.active and not scenario_manager.order_workload:
+            self._robot_dispatcher.discard()
             return
         mode = mode_manager.mode
         preemptions = []
@@ -283,9 +290,22 @@ class OrderManager:
                 for robot_id, failed_id in self.recovering.items():
                     simulation_order_runner.start_recovery(failed_id, robot_id)
             candidates = available_robots(mode, busy, set(self.returning), mode_manager.operation_mode)
+            pending_ids = {row["order_id"] for row in self.orders.values()
+                           if row["mode"] == mode and row["status"] == "PENDING"}
+            dispatcher = self._robot_dispatcher
+            if (dispatcher._request is not None
+                    and (dispatcher._request["mode"] != mode
+                         or dispatcher._request["order_id"] not in pending_ids
+                         or not candidates
+                         or feature_engine("dispatch", mode_manager.operation_mode, mode=mode) != "ai")):
+                dispatcher.discard()
             for row in self.orders.values():
-                if row["mode"] != mode or row["status"] != "PENDING" or not candidates:
+                if row["mode"] != mode or row["status"] != "PENDING":
                     continue
+                if not candidates:
+                    row["dispatch_reason"] = "배차 가능한 로봇 대기 · 로봇 연결·작업·도킹·전압 상태를 확인하세요."
+                    continue
+                row.pop("dispatch_reason", None)
                 blocked_by_earlier_pickup = False
                 if mode == "simulation":
                     for previous in self.orders.values():
@@ -298,27 +318,27 @@ class OrderManager:
                         ):
                             blocked_by_earlier_pickup = True
                             break
-                candidate_index = None
-                def preference(item):
-                    robot_id = item[1]
-                    tier = 0
-                    if mode == "real":
-                        robot = fleet_manager.get_robot(robot_id)
-                        tier = (0 if robot.state == RobotState.IDLE
-                                else 1 if robot.state == RobotState.CHARGING else 2)
-                    return tier, robot_id == row.get("last_robot_id")
-
-                preferred = sorted(enumerate(candidates), key=preference)
-                for index, candidate in preferred:
-                    # A returning robot must leave the workstation before
-                    # waiting behind an earlier order at the same pickup.
-                    if blocked_by_earlier_pickup and candidate in self.returning:
+                ai_dispatch = feature_engine("dispatch", row["operation_mode"], mode=mode) == "ai"
+                if ai_dispatch:
+                    eligible = [candidate for candidate in candidates
+                                if not (blocked_by_earlier_pickup and candidate in self.returning)]
+                    request = prepare_dispatch(row, eligible, mode, self.returning)
+                    robot_id = dispatcher.choose(request)
+                    if request is None:
+                        row["dispatch_reason"] = "픽업까지 이동 가능한 배차 후보 없음"
+                        # 실행 불가능한 앞 주문이 다른 픽업의 실행 가능한 주문까지 막지 않게 한다.
                         continue
-                    candidate_index = index
-                    break
+                    if robot_id is None:
+                        row["dispatch_reason"] = "KEV 로봇 선택 대기"
+                        # FIFO: 응답을 기다리는 주문보다 뒤의 주문을 먼저 배차하지 않는다.
+                        break
+                    candidate_index = candidates.index(robot_id)
+                else:
+                    candidate_index = self._algorithm_candidate_index(row, candidates, mode, blocked_by_earlier_pickup)
                 if candidate_index is None:
                     continue
                 robot_id = candidates.pop(candidate_index)
+                row.pop("dispatch_reason", None)
                 row["robot_id"] = robot_id
                 row["status"] = "IN_PROGRESS"
                 returning = robot_id in self.returning
@@ -358,6 +378,23 @@ class OrderManager:
             for row in active:
                 await self._tick_real(row)
             await self._tick_real_returns()
+
+    def _algorithm_candidate_index(self, row, candidates, mode, blocked_by_earlier_pickup):
+        # 기존 dev 알고리즘 배차 우선순위는 유지한다.
+        def preference(item):
+            robot_id = item[1]
+            tier = 0
+            if mode == "real":
+                robot = fleet_manager.get_robot(robot_id)
+                tier = (0 if robot.state == RobotState.IDLE
+                        else 1 if robot.state == RobotState.CHARGING else 2)
+            return tier, robot_id == row.get("last_robot_id")
+
+        for index, candidate in sorted(enumerate(candidates), key=preference):
+            # 복귀 로봇이 앞 주문과 같은 픽업을 기다리며 작업대 출구를 막지 않게 한다.
+            if not (blocked_by_earlier_pickup and candidate in self.returning):
+                return index
+        return None
 
     # 복귀 주행 정지 후 다음 주문을 시작한다.
     def _start_after_return_stop(self, order_id, robot_id):

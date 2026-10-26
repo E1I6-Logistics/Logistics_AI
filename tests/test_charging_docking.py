@@ -28,7 +28,7 @@ def docking(monkeypatch):
     for i in (1, 2, 3):
         robot = fleet.register_robot(f"robot{i}")
         robot.update_pose(0, 0, 0)
-        robot.update_battery(80)
+        robot.update_battery(80, voltage=12)
         robot.goal_node = robot.occupied_node = robot.current_node = str(i - 1)
         robot.navigation_type = NavigationType.CHARGING
         robot.set_state(RobotState.NAVIGATING)

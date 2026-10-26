@@ -23,6 +23,8 @@ export type ManagedRobot = {
   connected: boolean
   blocked: boolean
   battery: number | null
+  batteryVoltage?: number | null
+  dispatchBatteryBlockReason?: 'battery_unknown' | 'low_battery' | null
   status: string
   occupiedNode: string | null
   occupiedEdge: string | null
@@ -236,6 +238,8 @@ export function useRobotFleet() {
 
         blocked: Boolean(device?.blocked),
         battery: typeof state?.battery === 'number' ? state.battery : null,
+        batteryVoltage: typeof state?.battery_voltage === 'number' ? state.battery_voltage : null,
+        dispatchBatteryBlockReason: state?.dispatch_battery_block_reason,
         status: state?.status ?? (device?.connected ? 'ONLINE' : 'OFFLINE'),
         occupiedNode: state?.occupied_node ?? null,
         occupiedEdge: state?.occupied_edge ?? null,

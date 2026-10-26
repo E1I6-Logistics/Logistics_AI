@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 from enum import Enum
+from collections import deque
+import math
+
+from ..config import BATTERY_VOLTAGE_WINDOW_S
 
 from threading import RLock
 from time import monotonic, strftime
@@ -101,6 +105,8 @@ class Robot:
 
         # 배터리 상태
         self.battery: float | None = None
+        self.battery_voltage: float | None = None
+        self._battery_voltage_samples = deque()
 
         # 현재 동작 상태
         self.state: RobotState = RobotState.OFFLINE
@@ -153,6 +159,10 @@ class Robot:
         was_connected = self.connected
         previous_state = self.state
         self.connected = connected
+        if not connected:
+            with self._lock:
+                self.battery_voltage = None
+                self._battery_voltage_samples.clear()
 
         if connected:
             if self.state == RobotState.OFFLINE:
@@ -265,5 +275,27 @@ class Robot:
         self.order_pickup_index = 0
 
     # 배터리를 갱신한다.
-    def update_battery(self, percentage: float) -> None:
+    def update_battery(self, percentage: float, voltage: float | None = None, now: float | None = None) -> None:
         self.battery = float(percentage)
+        if voltage is None:
+            return
+        voltage = float(voltage)
+        if not math.isfinite(voltage) or voltage <= 0:
+            return
+        now = monotonic() if now is None else now
+        with self._lock:
+            self.battery_voltage = voltage
+            self._battery_voltage_samples.append((now, voltage))
+            self._prune_battery_voltage(now)
+
+    def min_battery_voltage(self, now: float | None = None) -> float | None:
+        now = monotonic() if now is None else now
+        with self._lock:
+            self._prune_battery_voltage(now)
+            if not self._battery_voltage_samples:
+                return None
+            return min(voltage for _, voltage in self._battery_voltage_samples)
+
+    def _prune_battery_voltage(self, now):
+        while self._battery_voltage_samples and self._battery_voltage_samples[0][0] < now - BATTERY_VOLTAGE_WINDOW_S:
+            self._battery_voltage_samples.popleft()
