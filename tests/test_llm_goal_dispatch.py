@@ -56,6 +56,23 @@ class GoalDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["llm_preview"]["path"], ["0", "2", "3"])
         self.assertFalse(commands._llm_requests)
 
+    async def test_simulation_preview_supplies_traffic_and_registers_recovery_context(self):
+        traffic = {"occupied_nodes": {7: "robot2"}, "robot_paths": {"robot2": [7, 9]}}
+        with patch(
+            "backend.app.services.kev_mapf.kev_traffic.live_traffic", return_value=traffic
+        ) as collect, patch(
+            "backend.app.services.llm_route_preview.preview_llm_route", return_value={"path": ["0", "2", "3"]}
+        ) as preview, patch.object(commands, "navigate_to_node", return_value={"success": True}), patch(
+            "backend.app.services.kev_mapf.kev_coordinator.fms_mapf_coordinator.register_preview"
+        ) as register:
+            await commands.send_node_goal(
+                GoalNodeRequest(robot_id="robot1", node_id=3, driving_mode="llm", selector="kev", model="kev-08b")
+            )
+        collect.assert_called_once_with("robot1", graph={"map": 1})
+        self.assertEqual(preview.call_args.kwargs["traffic"], traffic)
+        self.assertEqual(register.call_args.kwargs["order"]["selector"], "kev")
+        self.assertEqual(register.call_args.kwargs["result"]["path"], ["0", "2", "3"])
+
     # HTTP 요청으로 시뮬레이션 로봇이 목적지까지 이동하는지 검증한다.
     async def test_http_request_drives_simulation_to_target(self):
         from backend.app.services.mock_data import MockFmsStore

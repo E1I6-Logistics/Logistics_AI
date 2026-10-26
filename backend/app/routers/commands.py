@@ -65,8 +65,12 @@ async def llm_route_preview(payload: LlmRoutePreviewRequest):
         mode = mode_manager.mode
         start = _preview_start_node(payload.robot_id, mode)
         graph = load_route_graph()
+        from ..services.kev_mapf.kev_traffic import live_traffic
+
+        traffic = {"traffic": live_traffic(normalize_robot_id(payload.robot_id), graph=graph)} if mode == "simulation" else {}
         result = await run_in_threadpool(
-            preview_llm_route, graph, start, payload.node_id, selector=payload.selector, model=payload.model
+            preview_llm_route, graph, start, payload.node_id, selector=payload.selector, model=payload.model,
+            **traffic,
         )
         if mode_manager.mode != mode:
             raise HTTPException(status_code=409, detail="모드가 변경되어 미리보기가 리셋되었습니다.")
@@ -122,9 +126,13 @@ async def send_node_goal(payload: GoalNodeRequest):
             mode = mode_manager.mode
             start = _preview_start_node(payload.robot_id, mode)
             graph = load_route_graph()
+            from ..services.kev_mapf.kev_traffic import live_traffic
+
+            traffic = {"traffic": live_traffic(robot_id, graph=graph)} if mode == "simulation" else {}
             # 모델 호출은 잠금·이벤트 루프 밖에서 수행하고 완성 경로만 예약한다.
             preview = await run_in_threadpool(
-                preview_llm_route, graph, start, payload.node_id, selector=payload.selector, model=payload.model
+                preview_llm_route, graph, start, payload.node_id, selector=payload.selector, model=payload.model,
+                **traffic,
             )
             if _llm_requests.get(robot_id) != token or mode_manager.mode != mode or load_route_graph() != graph:
                 raise HTTPException(
@@ -136,7 +144,18 @@ async def send_node_goal(payload: GoalNodeRequest):
             from ..services.order_manager import order_manager
 
             order_manager.cancel_robot(robot_id, mode)
-            result = navigate_to_node(payload.robot_id, payload.node_id, mode, required_path=preview["path"])
+            if mode == "simulation":
+                from ..services.mock_data import mock_fms
+                from ..services.kev_mapf.kev_coordinator import fms_mapf_coordinator as coordinator
+
+                with coordinator._lock, mock_fms._lock:
+                    result = navigate_to_node(payload.robot_id, payload.node_id, mode, required_path=preview["path"])
+                    coordinator.register_preview(
+                        order={"robot_id": robot_id, "selector": payload.selector, "model": payload.model},
+                        current_node=start, goal_node=payload.node_id, result=preview,
+                    )
+            else:
+                result = navigate_to_node(payload.robot_id, payload.node_id, mode, required_path=preview["path"])
             return dict(result, driving_mode="llm", selector=payload.selector, model=payload.model, llm_preview=preview)
         finally:
             if _llm_requests.get(robot_id) == token:

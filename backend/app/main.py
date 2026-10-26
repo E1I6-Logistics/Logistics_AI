@@ -70,6 +70,7 @@ async def lifespan(app: FastAPI):
     ros_thread.start()
 
     simulation_task = asyncio.create_task(run_mock_simulation(), name="mock-simulation")
+    recovery_task = asyncio.create_task(run_kev_recovery(), name="kev-recovery")
 
     navigation_task = asyncio.create_task(run_real_navigation(), name="real-navigation")
 
@@ -77,6 +78,9 @@ async def lifespan(app: FastAPI):
         yield
 
     finally:
+        recovery_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await recovery_task
         await scenario_manager.shutdown()
         from .services.simulation_order_runner import simulation_order_runner
 
@@ -173,6 +177,21 @@ async def run_mock_simulation() -> None:
         # 갱신 후의 상태를 웹에 전송
         for state in mock_fms.robot_snapshots(mode):
             await manager.broadcast({"type": "telemetry", "data": state})
+
+
+async def run_kev_recovery() -> None:
+    """Slow model inference runs independently of the simulation/telemetry tick."""
+    from .services.mock_data import mock_fms
+    from .services.kev_mapf.kev_coordinator import fms_mapf_coordinator
+    from .services.kev_mapf.kev_recovery import kev_recovery
+
+    logging.getLogger("uvicorn.error").info(
+        "KEV fleet recovery started: robot/action/holding-node/resume decisions use KEV"
+    )
+
+    while True:
+        await asyncio.sleep(0.2)
+        await kev_recovery.run_once(mock_fms, fms_mapf_coordinator, mode_manager)
 
 
 # 실제 주행을 실행한다.

@@ -185,7 +185,11 @@ class FmsMapfCoordinator:
             remaining_path = None
             issue = None
 
-            if occupied_edge is not None:
+            if robot.get("kev_maneuver"):
+                # Temporary route endpoint differs from the business goal.
+                # Defer admission until KEV has installed the resume route.
+                issue = "KEV_MOVE_ASIDE_ACTIVE"
+            elif occupied_edge is not None:
                 issue = "MID_EDGE"
             elif not isinstance(route, dict):
                 issue = "NO_ACTIVE_ROUTE"

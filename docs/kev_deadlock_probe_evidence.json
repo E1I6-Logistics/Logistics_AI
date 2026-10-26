@@ -1,0 +1,1104 @@
+{
+  "investigation_date_kst": "2026-10-26",
+  "live_robot_commands_sent": false,
+  "mode": {
+    "mode": "simulation",
+    "operation_mode": "ai",
+    "feature_engines": {
+      "route": "ai",
+      "dispatch": "algorithm",
+      "workstation": "algorithm"
+    },
+    "real_available": true,
+    "simulation_active": true,
+    "using_mock": true
+  },
+  "robots": [
+    {
+      "robot_id": "robot1",
+      "ui_id": "R-01",
+      "status": "WAITING",
+      "battery": 92.0,
+      "x": 0.8085766434669495,
+      "y": -0.27323633432388306,
+      "yaw": -1.5707963267948966,
+      "current_node": "5",
+      "occupied_node": "5",
+      "occupied_edge": null,
+      "route": {
+        "node_ids": [
+          "5",
+          "7",
+          "11",
+          "3"
+        ],
+        "edge_ids": [
+          "35",
+          "38",
+          "48"
+        ],
+        "waypoint_yaws": [
+          -1.5707963267948966,
+          1.5707963267948966,
+          0.0,
+          0.0
+        ],
+        "segment_index": 0,
+        "phase": "waiting",
+        "departure_at": null,
+        "segment_departures": [
+          949376.794652911,
+          949382.2096678247,
+          949386.1384772887
+        ],
+        "route_source": "llm"
+      },
+      "goal_node": "3",
+      "navigation_id": "e0eff9153062470daa558d8600bf42cd",
+      "request_order": 36,
+      "stop_requested": false,
+      "map_pose_received": true,
+      "connection_state": "ONLINE",
+      "task_priority": 0,
+      "updated_at": "2026-10-26T00:07:39.325307+00:00",
+      "mode": "simulation",
+      "source": "mock",
+      "pixel_x": 54.731532869338984,
+      "pixel_y": 30.524726686477663,
+      "pose_source": "MOCK",
+      "footprint_radius_m": 0.06,
+      "footprint_diameter_m": 0.12
+    },
+    {
+      "robot_id": "robot2",
+      "ui_id": "R-02",
+      "status": "WAITING",
+      "battery": 78.0,
+      "x": 0.8085766434669495,
+      "y": 0.10400475561618805,
+      "yaw": 3.141592653589793,
+      "current_node": "7",
+      "occupied_node": "7",
+      "occupied_edge": null,
+      "route": {
+        "node_ids": [
+          "3",
+          "11",
+          "7",
+          "9",
+          "1"
+        ],
+        "edge_ids": [
+          "49",
+          "39",
+          "31",
+          "23"
+        ],
+        "waypoint_yaws": [
+          0.0,
+          3.141592653589793,
+          3.141592653589793,
+          -2.887413021521144,
+          3.141592653589793
+        ],
+        "segment_index": 2,
+        "phase": "waiting",
+        "departure_at": null,
+        "segment_departures": [
+          949367.761386287,
+          949368.4407272456,
+          949372.3695367096,
+          949374.7251975352
+        ],
+        "route_source": "llm"
+      },
+      "goal_node": "1",
+      "navigation_id": "cbf18b697c1049ce818fe9f63bb27243",
+      "request_order": 34,
+      "stop_requested": false,
+      "map_pose_received": true,
+      "connection_state": "ONLINE",
+      "task_priority": 0,
+      "updated_at": "2026-10-26T00:07:39.325737+00:00",
+      "mode": "simulation",
+      "source": "mock",
+      "pixel_x": 54.731532869338984,
+      "pixel_y": 22.97990488767624,
+      "pose_source": "MOCK",
+      "footprint_radius_m": 0.06,
+      "footprint_diameter_m": 0.12
+    },
+    {
+      "robot_id": "robot3",
+      "ui_id": "R-03",
+      "status": "WAITING",
+      "battery": 64.0,
+      "x": 0.352582,
+      "y": -0.014462126418948174,
+      "yaw": 0.6806019723559302,
+      "current_node": "9",
+      "occupied_node": "9",
+      "occupied_edge": null,
+      "route": {
+        "node_ids": [
+          "2",
+          "9",
+          "7",
+          "11",
+          "6"
+        ],
+        "edge_ids": [
+          "24",
+          "30",
+          "38",
+          "44"
+        ],
+        "waypoint_yaws": [
+          -2.460990681233863,
+          0.6806019723559302,
+          0.2541796320686493,
+          0.0,
+          -1.5707963267948966
+        ],
+        "segment_index": 1,
+        "phase": "waiting",
+        "departure_at": null,
+        "segment_departures": [
+          949372.2588154702,
+          949375.5251975352,
+          949377.8808583608,
+          949381.8096678248
+        ],
+        "route_source": "llm"
+      },
+      "goal_node": "6",
+      "navigation_id": "2c1b8a9067e442ca81061d0ee2592e12",
+      "request_order": 35,
+      "stop_requested": false,
+      "map_pose_received": true,
+      "connection_state": "ONLINE",
+      "task_priority": 0,
+      "updated_at": "2026-10-26T00:07:39.326139+00:00",
+      "mode": "simulation",
+      "source": "mock",
+      "pixel_x": 45.611639999999994,
+      "pixel_y": 25.349242528378966,
+      "pose_source": "MOCK",
+      "footprint_radius_m": 0.06,
+      "footprint_diameter_m": 0.12
+    }
+  ],
+  "graph": {
+    "crs": {
+      "properties": {
+        "name": "urn:ogc:def:crs:EPSG::3857"
+      },
+      "type": "name"
+    },
+    "features": [
+      {
+        "geometry": {
+          "coordinates": [
+            -0.15514054894447327,
+            0.3621615171432495
+          ],
+          "type": "Point"
+        },
+        "properties": {
+          "frame": "map",
+          "id": 0
+        },
+        "type": "Feature"
+      },
+      {
+        "geometry": {
+          "coordinates": [
+            -0.15514054894447327,
+            -0.014462126418948174
+          ],
+          "type": "Point"
+        },
+        "properties": {
+          "frame": "map",
+          "id": 1
+        },
+        "type": "Feature"
+      },
+      {
+        "geometry": {
+          "coordinates": [
+            -0.15514054894447327,
+            -0.42554348707199097
+          ],
+          "type": "Point"
+        },
+        "properties": {
+          "frame": "map",
+          "id": 2
+        },
+        "type": "Feature"
+      },
+      {
+        "geometry": {
+          "coordinates": [
+            1.7302067279815674,
+            0.10400475561618805
+          ],
+          "type": "Point"
+        },
+        "properties": {
+          "frame": "map",
+          "id": 3
+        },
+        "type": "Feature"
+      },
+      {
+        "geometry": {
+          "coordinates": [
+            1.7302067279815674,
+            0.4128017723560333
+          ],
+          "type": "Point"
+        },
+        "properties": {
+          "frame": "map",
+          "id": 4
+        },
+        "type": "Feature"
+      },
+      {
+        "geometry": {
+          "coordinates": [
+            0.8085766434669495,
+            -0.27323633432388306
+          ],
+          "type": "Point"
+        },
+        "properties": {
+          "frame": "map",
+          "id": 5
+        },
+        "type": "Feature"
+      },
+      {
+        "geometry": {
+          "coordinates": [
+            1.5943385362625122,
+            -0.27323633432388306
+          ],
+          "type": "Point"
+        },
+        "properties": {
+          "frame": "map",
+          "id": 6
+        },
+        "type": "Feature"
+      },
+      {
+        "geometry": {
+          "coordinates": [
+            0.8085766434669495,
+            0.10400475561618805
+          ],
+          "type": "Point"
+        },
+        "properties": {
+          "frame": "map",
+          "id": 7
+        },
+        "type": "Feature"
+      },
+      {
+        "geometry": {
+          "coordinates": [
+            0.8085766434669495,
+            0.4128017723560333
+          ],
+          "type": "Point"
+        },
+        "properties": {
+          "frame": "map",
+          "id": 8
+        },
+        "type": "Feature"
+      },
+      {
+        "geometry": {
+          "coordinates": [
+            0.352582,
+            -0.014462126418948174
+          ],
+          "type": "Point"
+        },
+        "properties": {
+          "frame": "map",
+          "id": 9
+        },
+        "type": "Feature"
+      },
+      {
+        "geometry": {
+          "coordinates": [
+            0.352582,
+            0.3621615171432495
+          ],
+          "type": "Point"
+        },
+        "properties": {
+          "frame": "map",
+          "id": 10
+        },
+        "type": "Feature"
+      },
+      {
+        "geometry": {
+          "coordinates": [
+            1.5943385362625122,
+            0.10400475561618805
+          ],
+          "type": "Point"
+        },
+        "properties": {
+          "frame": "map",
+          "id": 11
+        },
+        "type": "Feature"
+      },
+      {
+        "geometry": {
+          "coordinates": [
+            1.5943385362625122,
+            0.4128017723560333
+          ],
+          "type": "Point"
+        },
+        "properties": {
+          "frame": "map",
+          "id": 12
+        },
+        "type": "Feature"
+      },
+      {
+        "geometry": {
+          "type": "MultiLineString"
+        },
+        "properties": {
+          "cost": 0.0,
+          "endid": 10,
+          "id": 20,
+          "overridable": true,
+          "startid": 0,
+          "weight": 0.5077225489444732
+        },
+        "type": "Feature"
+      },
+      {
+        "geometry": {
+          "type": "MultiLineString"
+        },
+        "properties": {
+          "cost": 0.0,
+          "endid": 9,
+          "id": 22,
+          "overridable": true,
+          "startid": 1,
+          "weight": 0.5077225489444732
+        },
+        "type": "Feature"
+      },
+      {
+        "geometry": {
+          "type": "MultiLineString"
+        },
+        "properties": {
+          "cost": 0.0,
+          "endid": 9,
+          "id": 24,
+          "overridable": true,
+          "startid": 2,
+          "weight": 0.6532764130006762
+        },
+        "type": "Feature"
+      },
+      {
+        "geometry": {
+          "type": "MultiLineString"
+        },
+        "properties": {
+          "cost": 0.0,
+          "endid": 11,
+          "id": 49,
+          "overridable": true,
+          "startid": 3,
+          "weight": 0.13586819171905518
+        },
+        "type": "Feature"
+      },
+      {
+        "geometry": {
+          "type": "MultiLineString"
+        },
+        "properties": {
+          "cost": 0.0,
+          "endid": 12,
+          "id": 47,
+          "overridable": true,
+          "startid": 4,
+          "weight": 0.13586819171905518
+        },
+        "type": "Feature"
+      },
+      {
+        "geometry": {
+          "type": "MultiLineString"
+        },
+        "properties": {
+          "cost": 0.0,
+          "endid": 7,
+          "id": 35,
+          "overridable": true,
+          "startid": 5,
+          "weight": 0.3772410899400711
+        },
+        "type": "Feature"
+      },
+      {
+        "geometry": {
+          "type": "MultiLineString"
+        },
+        "properties": {
+          "cost": 0.0,
+          "endid": 6,
+          "id": 40,
+          "overridable": true,
+          "startid": 5,
+          "weight": 0.7857618927955627
+        },
+        "type": "Feature"
+      },
+      {
+        "geometry": {
+          "type": "MultiLineString"
+        },
+        "properties": {
+          "cost": 0.0,
+          "endid": 5,
+          "id": 41,
+          "overridable": true,
+          "startid": 6,
+          "weight": 0.7857618927955627
+        },
+        "type": "Feature"
+      },
+      {
+        "geometry": {
+          "type": "MultiLineString"
+        },
+        "properties": {
+          "cost": 0.0,
+          "endid": 11,
+          "id": 45,
+          "overridable": true,
+          "startid": 6,
+          "weight": 0.3772410899400711
+        },
+        "type": "Feature"
+      },
+      {
+        "geometry": {
+          "type": "MultiLineString"
+        },
+        "properties": {
+          "cost": 0.0,
+          "endid": 9,
+          "id": 31,
+          "overridable": true,
+          "startid": 7,
+          "weight": 0.4711321651189581
+        },
+        "type": "Feature"
+      },
+      {
+        "geometry": {
+          "type": "MultiLineString"
+        },
+        "properties": {
+          "cost": 0.0,
+          "endid": 8,
+          "id": 33,
+          "overridable": true,
+          "startid": 7,
+          "weight": 0.3087970167398453
+        },
+        "type": "Feature"
+      },
+      {
+        "geometry": {
+          "type": "MultiLineString"
+        },
+        "properties": {
+          "cost": 0.0,
+          "endid": 5,
+          "id": 34,
+          "overridable": true,
+          "startid": 7,
+          "weight": 0.3772410899400711
+        },
+        "type": "Feature"
+      },
+      {
+        "geometry": {
+          "type": "MultiLineString"
+        },
+        "properties": {
+          "cost": 0.0,
+          "endid": 11,
+          "id": 38,
+          "overridable": true,
+          "startid": 7,
+          "weight": 0.7857618927955627
+        },
+        "type": "Feature"
+      },
+      {
+        "geometry": {
+          "type": "MultiLineString"
+        },
+        "properties": {
+          "cost": 0.0,
+          "endid": 10,
+          "id": 29,
+          "overridable": true,
+          "startid": 8,
+          "weight": 0.4587979406215401
+        },
+        "type": "Feature"
+      },
+      {
+        "geometry": {
+          "type": "MultiLineString"
+        },
+        "properties": {
+          "cost": 0.0,
+          "endid": 7,
+          "id": 32,
+          "overridable": true,
+          "startid": 8,
+          "weight": 0.3087970167398453
+        },
+        "type": "Feature"
+      },
+      {
+        "geometry": {
+          "type": "MultiLineString"
+        },
+        "properties": {
+          "cost": 0.0,
+          "endid": 12,
+          "id": 36,
+          "overridable": true,
+          "startid": 8,
+          "weight": 0.7857618927955627
+        },
+        "type": "Feature"
+      },
+      {
+        "geometry": {
+          "type": "MultiLineString"
+        },
+        "properties": {
+          "cost": 0.0,
+          "endid": 1,
+          "id": 23,
+          "overridable": true,
+          "startid": 9,
+          "weight": 0.5077225489444732
+        },
+        "type": "Feature"
+      },
+      {
+        "geometry": {
+          "type": "MultiLineString"
+        },
+        "properties": {
+          "cost": 0.0,
+          "endid": 2,
+          "id": 25,
+          "overridable": true,
+          "startid": 9,
+          "weight": 0.6532764130006762
+        },
+        "type": "Feature"
+      },
+      {
+        "geometry": {
+          "type": "MultiLineString"
+        },
+        "properties": {
+          "cost": 0.0,
+          "endid": 10,
+          "id": 27,
+          "overridable": true,
+          "startid": 9,
+          "weight": 0.3766236435621977
+        },
+        "type": "Feature"
+      },
+      {
+        "geometry": {
+          "type": "MultiLineString"
+        },
+        "properties": {
+          "cost": 0.0,
+          "endid": 7,
+          "id": 30,
+          "overridable": true,
+          "startid": 9,
+          "weight": 0.4711321651189581
+        },
+        "type": "Feature"
+      },
+      {
+        "geometry": {
+          "type": "MultiLineString"
+        },
+        "properties": {
+          "cost": 0.0,
+          "endid": 0,
+          "id": 21,
+          "overridable": true,
+          "startid": 10,
+          "weight": 0.5077225489444732
+        },
+        "type": "Feature"
+      },
+      {
+        "geometry": {
+          "type": "MultiLineString"
+        },
+        "properties": {
+          "cost": 0.0,
+          "endid": 9,
+          "id": 26,
+          "overridable": true,
+          "startid": 10,
+          "weight": 0.3766236435621977
+        },
+        "type": "Feature"
+      },
+      {
+        "geometry": {
+          "type": "MultiLineString"
+        },
+        "properties": {
+          "cost": 0.0,
+          "endid": 8,
+          "id": 28,
+          "overridable": true,
+          "startid": 10,
+          "weight": 0.4587979406215401
+        },
+        "type": "Feature"
+      },
+      {
+        "geometry": {
+          "type": "MultiLineString"
+        },
+        "properties": {
+          "cost": 0.0,
+          "endid": 7,
+          "id": 39,
+          "overridable": true,
+          "startid": 11,
+          "weight": 0.7857618927955627
+        },
+        "type": "Feature"
+      },
+      {
+        "geometry": {
+          "type": "MultiLineString"
+        },
+        "properties": {
+          "cost": 0.0,
+          "endid": 12,
+          "id": 43,
+          "overridable": true,
+          "startid": 11,
+          "weight": 0.3087970167398453
+        },
+        "type": "Feature"
+      },
+      {
+        "geometry": {
+          "type": "MultiLineString"
+        },
+        "properties": {
+          "cost": 0.0,
+          "endid": 6,
+          "id": 44,
+          "overridable": true,
+          "startid": 11,
+          "weight": 0.3772410899400711
+        },
+        "type": "Feature"
+      },
+      {
+        "geometry": {
+          "type": "MultiLineString"
+        },
+        "properties": {
+          "cost": 0.0,
+          "endid": 3,
+          "id": 48,
+          "overridable": true,
+          "startid": 11,
+          "weight": 0.13586819171905518
+        },
+        "type": "Feature"
+      },
+      {
+        "geometry": {
+          "type": "MultiLineString"
+        },
+        "properties": {
+          "cost": 0.0,
+          "endid": 8,
+          "id": 37,
+          "overridable": true,
+          "startid": 12,
+          "weight": 0.7857618927955627
+        },
+        "type": "Feature"
+      },
+      {
+        "geometry": {
+          "type": "MultiLineString"
+        },
+        "properties": {
+          "cost": 0.0,
+          "endid": 11,
+          "id": 42,
+          "overridable": true,
+          "startid": 12,
+          "weight": 0.3087970167398453
+        },
+        "type": "Feature"
+      },
+      {
+        "geometry": {
+          "type": "MultiLineString"
+        },
+        "properties": {
+          "cost": 0.0,
+          "endid": 4,
+          "id": 46,
+          "overridable": true,
+          "startid": 12,
+          "weight": 0.13586819171905518
+        },
+        "type": "Feature"
+      }
+    ],
+    "name": "graph",
+    "type": "FeatureCollection"
+  },
+  "retry_result": {
+    "retries": 600,
+    "simulated_seconds": 120,
+    "unchanged": true,
+    "paths": {
+      "robot1": [
+        "5",
+        "7",
+        "11",
+        "3"
+      ],
+      "robot2": [
+        "7",
+        "9",
+        "1"
+      ],
+      "robot3": [
+        "9",
+        "7",
+        "11",
+        "6"
+      ]
+    },
+    "pending": [
+      "robot1",
+      "robot2",
+      "robot3"
+    ],
+    "reservation_count": 0
+  },
+  "route_preview_result": {
+    "traffic": {
+      "occupied_nodes": {
+        "5": "robot1",
+        "7": "robot2"
+      },
+      "robot_paths": {
+        "robot1": [
+          5,
+          7,
+          11,
+          3
+        ],
+        "robot2": [
+          7,
+          9,
+          1
+        ]
+      }
+    },
+    "result": {
+      "path": [
+        "9",
+        "10",
+        "8",
+        "12",
+        "11",
+        "6"
+      ],
+      "model": "kev-08b",
+      "total_weight": 2.307221583659217,
+      "calls": 0,
+      "baseline_path": [
+        "9",
+        "7",
+        "11",
+        "6"
+      ],
+      "baseline_weight": 1.634135147854592,
+      "same_path": false,
+      "same_distance": false,
+      "distance_difference": 0.6730864358046251
+    }
+  },
+  "kev_action_result": {
+    "state": {
+      "robots": [
+        {
+          "id": "robot1",
+          "current_node": "5",
+          "goal_node": "3",
+          "remaining_path": [
+            "5",
+            "7",
+            "11",
+            "3"
+          ],
+          "status": "WAITING"
+        },
+        {
+          "id": "robot2",
+          "current_node": "7",
+          "goal_node": "1",
+          "remaining_path": [
+            "7",
+            "9",
+            "1"
+          ],
+          "status": "WAITING"
+        },
+        {
+          "id": "robot3",
+          "current_node": "9",
+          "goal_node": "6",
+          "remaining_path": [
+            "9",
+            "7",
+            "11",
+            "6"
+          ],
+          "status": "WAITING"
+        }
+      ],
+      "wait_dependencies": {
+        "robot1": [
+          "robot2"
+        ],
+        "robot2": [
+          "robot3"
+        ],
+        "robot3": [
+          "robot2"
+        ]
+      },
+      "candidate_reroute": {
+        "robot_id": "robot3",
+        "path": [
+          "9",
+          "10",
+          "8",
+          "12",
+          "11",
+          "6"
+        ],
+        "path_valid": true,
+        "avoids_other_current_nodes": true
+      },
+      "external_clearance_event_expected": false,
+      "time_prediction_used": false
+    },
+    "result": {
+      "model": "kev-08b",
+      "api_model": "kev-latest",
+      "routing": null,
+      "usage": {
+        "input_tokens": 352,
+        "output_tokens": 61
+      },
+      "state_truncated": null,
+      "total_duration_seconds": 0.09180785098578781,
+      "load_duration_seconds": 0.0,
+      "eval_duration_seconds": 0.0895,
+      "runtime": {
+        "name": "kev-latest",
+        "description": "Kev pointer head on Qwen/Qwen3.5-0.8B-Base, serving jaredpalmer/kev-0.8b@v1.0 at temperature 2.35",
+        "release_date": "2026-10-01",
+        "run": "jaredpalmer/kev-0.8b@v1.0",
+        "base": "Qwen/Qwen3.5-0.8B-Base",
+        "lora": 16,
+        "device": "cuda",
+        "backend": "torch",
+        "dtype": "bfloat16",
+        "temperature": 2.3510958125672174,
+        "max_state_tokens": 65536,
+        "truncate_states": false,
+        "cuda_graphs": null,
+        "prefix_cache": {
+          "size": 0,
+          "min_state_tokens": 0,
+          "max_tokens": 65536,
+          "hits": 0,
+          "misses": 0,
+          "cached_states": 0,
+          "oom_retries": 0
+        },
+        "batches": {
+          "count": 55,
+          "requests": 55,
+          "queued": 0
+        }
+      },
+      "raw": {
+        "model": "kev-latest",
+        "answers": {
+          "deadlock_recovery_probe": {
+            "type": "choice",
+            "choice": "reroute_robot3",
+            "confidence": 0.6354,
+            "probabilities": {
+              "wait": 0.1823,
+              "reroute_robot3": 0.8177
+            }
+          }
+        },
+        "usage": {
+          "input_tokens": 352,
+          "output_tokens": 61
+        },
+        "latency_ms": 89.5
+      },
+      "choice": "reroute_robot3",
+      "confidence": 0.6354,
+      "answer_confidence": 0.8177,
+      "probabilities": {
+        "wait": 0.1823,
+        "reroute_robot3": 0.8177
+      }
+    }
+  },
+  "existing_engine_result": {
+    "error": "KeyError: 'yield_robot'",
+    "decisions": [
+      {
+        "zone": "zone:edge:7:11",
+        "robots": [
+          "robot1",
+          "robot3"
+        ],
+        "priority_robot": "robot1",
+        "yield_robot": "robot3",
+        "occupied_by": null,
+        "action": "WAIT",
+        "wait_node": 9,
+        "needs_fms_approval": true,
+        "priority_robot_action": "PROCEED",
+        "wait_node_verified": false,
+        "note": "FMS must reserve the wait node and stop robot before the conflict zone",
+        "wait_path_overlaps": [
+          "robot2"
+        ]
+      },
+      {
+        "zone": "node:7",
+        "robots": [
+          "robot1",
+          "robot3"
+        ],
+        "action": "HOLD",
+        "reason": "occupied by robot2"
+      },
+      {
+        "zone": "node:7",
+        "robots": [
+          "robot2",
+          "robot3"
+        ],
+        "priority_robot": "robot2",
+        "yield_robot": "robot3",
+        "occupied_by": "robot2",
+        "action": "WAIT",
+        "wait_node": 9,
+        "needs_fms_approval": true,
+        "priority_robot_action": "PROCEED",
+        "wait_node_verified": false,
+        "note": "FMS must reserve the wait node and stop robot before the conflict zone",
+        "wait_path_overlaps": [
+          "robot2"
+        ]
+      },
+      {
+        "zone": "zone:edge:7:9",
+        "robots": [
+          "robot2",
+          "robot3"
+        ],
+        "action": "HOLD",
+        "reason": "all priority choices create cycles"
+      }
+    ]
+  },
+  "replay_result": {
+    "completed_at_seconds": {
+      "robot2": 4.9,
+      "robot1": 6.5,
+      "robot3": 11.6
+    },
+    "minimum_sampled_separation_m": 0.13623426802035185,
+    "robots": [
+      {
+        "robot_id": "robot1",
+        "status": "IDLE",
+        "occupied_node": "3",
+        "goal_node": null
+      },
+      {
+        "robot_id": "robot2",
+        "status": "IDLE",
+        "occupied_node": "1",
+        "goal_node": null
+      },
+      {
+        "robot_id": "robot3",
+        "status": "IDLE",
+        "occupied_node": "6",
+        "goal_node": null
+      }
+    ]
+  },
+  "graph_sha256_canonical_json": "ba85a37fe0410c6d01f97a342767ae392a055901f978f9b7663fc819b8b2dc6a"
+}

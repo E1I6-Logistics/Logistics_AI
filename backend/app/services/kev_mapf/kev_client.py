@@ -119,8 +119,7 @@ class LiveKEV:
             self.model_seconds += float(result.get("total_duration_seconds") or 0.0)
             return score
         except Exception as exc:
-            self.warnings.append(f"KEV score offline fallback: {exc}")
-            return float(state.get("task_priority", 0.0))
+            raise RuntimeError(f"KEV priority inference failed: {exc}") from exc
 
     def score_many(self, state: dict[str, Any], robot_ids: list[str]) -> dict[str, float]:
         """여러 로봇의 우선순위를 KEV API 요청 1회로 일괄 평가한다."""
@@ -150,12 +149,7 @@ class LiveKEV:
             self.model_seconds += float(response.get("total_duration_seconds") or 0.0)
             return scores
         except Exception as exc:
-            self.warnings.append(f"KEV score_many offline fallback: {exc}")
-            robots_lookup = {r.get("id"): r for r in state.get("robots", []) if isinstance(r, dict)}
-            return {
-                rid: float(robots_lookup.get(rid, {}).get("task_priority", 0.0))
-                for rid in robot_ids
-            }
+            raise RuntimeError(f"KEV priority inference failed: {exc}") from exc
 
     def pick(
         self,
@@ -181,8 +175,7 @@ class LiveKEV:
                 raise RuntimeError(f"KEV returned an invalid choice {choice!r}")
             return choice
         except Exception as exc:
-            self.warnings.append(f"KEV pick offline fallback: {exc}")
-            return next(iter(candidates))
+            raise RuntimeError(f"KEV choice inference failed: {exc}") from exc
 
     def route(
         self,
@@ -203,28 +196,17 @@ class LiveKEV:
             }
             if traffic is not None:
                 kwargs["traffic"] = traffic
-            try:
-                result = self.preview_llm_route(
-                    graph_data,
-                    str(start),
-                    str(goal),
-                    **kwargs,
-                )
-                if not isinstance(result, dict) or not isinstance(result.get("path"), list):
-                    raise ValueError("preview_llm_route() must return a dict with a path list")
-                path = [_node(n) for n in result["path"]]
-                Graph(graph_data).check_path(path, start=start, goal=goal)
-                self.calls += int(result.get("calls", 0))
-                return path
-            except FileNotFoundError:
-                raise
-            except Exception as exc:
-                self.warnings.append(f"KEV route fallback to A*: {exc}")
-                from backend.app.services.pathfinding import DistanceAStar
-
-                plan_res = DistanceAStar(graph_data).plan(str(start), str(goal))
-                path = [_node(n) for n in getattr(plan_res, "route", getattr(plan_res, "node_ids", []))]
-                Graph(graph_data).check_path(path, start=start, goal=goal)
-                return path
+            result = self.preview_llm_route(
+                graph_data,
+                str(start),
+                str(goal),
+                **kwargs,
+            )
+            if not isinstance(result, dict) or not isinstance(result.get("path"), list):
+                raise ValueError("preview_llm_route() must return a dict with a path list")
+            path = [_node(n) for n in result["path"]]
+            Graph(graph_data).check_path(path, start=start, goal=goal)
+            self.calls += int(result.get("calls", 0))
+            return path
         finally:
             self.model_seconds += time.perf_counter() - started

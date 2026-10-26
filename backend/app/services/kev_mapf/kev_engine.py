@@ -589,8 +589,11 @@ class KevMAPF:
         if any(d["action"] == "HOLD" for d in self.decisions):
             status = "BLOCKED"
 
+        # 구역 전체 HOLD에는 단일 양보 로봇이 없으므로 참여 로봇 모두 보류한다.
         yield_robots = {
-            d["yield_robot"] for d in self.decisions if d.get("action") in ("WAIT", "HOLD")
+            rid
+            for d in self.decisions if d.get("action") in ("WAIT", "HOLD")
+            for rid in ([d["yield_robot"]] if d.get("yield_robot") else d.get("robots", []))
         }
         proceed_robots = sorted(set(self.robots) - yield_robots)
 

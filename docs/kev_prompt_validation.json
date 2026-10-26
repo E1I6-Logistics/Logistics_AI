@@ -1,0 +1,932 @@
+{
+  "live_robot_commands_sent": false,
+  "results": [
+    {
+      "case": "photo_n5_n7_n9",
+      "completed": true,
+      "goals": {
+        "robot1": "3",
+        "robot2": "1",
+        "robot3": "6"
+      },
+      "actual_nodes": {
+        "robot1": "3",
+        "robot2": "1",
+        "robot3": "6"
+      },
+      "simulated_seconds": 12.8,
+      "minimum_sampled_separation_m": 0.13623426799408855,
+      "kev_decisions": [
+        {
+          "simulated_seconds": 1.2,
+          "state": {
+            "all_robots_stationary": true,
+            "waiting_will_clear_blockage": false,
+            "blocked_by": {
+              "robot1": [
+                "robot2"
+              ],
+              "robot2": [
+                "robot3"
+              ],
+              "robot3": [
+                "robot2"
+              ]
+            },
+            "robots": [
+              {
+                "id": "robot1",
+                "current_node": "5",
+                "original_goal": "3",
+                "remaining_path": [
+                  "5",
+                  "7",
+                  "11",
+                  "3"
+                ],
+                "temporary_maneuver": null
+              },
+              {
+                "id": "robot2",
+                "current_node": "7",
+                "original_goal": "1",
+                "remaining_path": [
+                  "7",
+                  "9",
+                  "1"
+                ],
+                "temporary_maneuver": null
+              },
+              {
+                "id": "robot3",
+                "current_node": "9",
+                "original_goal": "6",
+                "remaining_path": [
+                  "9",
+                  "7",
+                  "11",
+                  "6"
+                ],
+                "temporary_maneuver": null
+              }
+            ],
+            "valid_maneuvers": [
+              {
+                "id": "reroute_robot1",
+                "robot_id": "robot1",
+                "path": [
+                  5,
+                  6,
+                  11,
+                  3
+                ],
+                "original_goal": 3,
+                "directed_path_valid": true,
+                "avoids_current_occupancy": true,
+                "temporary_move_complete": false,
+                "action": "REROUTE"
+              },
+              {
+                "id": "reroute_robot3",
+                "robot_id": "robot3",
+                "path": [
+                  9,
+                  10,
+                  8,
+                  12,
+                  11,
+                  6
+                ],
+                "original_goal": 6,
+                "directed_path_valid": true,
+                "avoids_current_occupancy": true,
+                "temporary_move_complete": false,
+                "action": "REROUTE"
+              },
+              {
+                "id": "move_aside_robot2_8",
+                "robot_id": "robot2",
+                "path": [
+                  7,
+                  8
+                ],
+                "original_goal": 1,
+                "directed_path_valid": true,
+                "avoids_current_occupancy": true,
+                "temporary_move_complete": false,
+                "action": "MOVE_ASIDE"
+              },
+              {
+                "id": "move_aside_robot2_11",
+                "robot_id": "robot2",
+                "path": [
+                  7,
+                  11
+                ],
+                "original_goal": 1,
+                "directed_path_valid": true,
+                "avoids_current_occupancy": true,
+                "temporary_move_complete": false,
+                "action": "MOVE_ASIDE"
+              },
+              {
+                "id": "move_aside_robot3_10",
+                "robot_id": "robot3",
+                "path": [
+                  9,
+                  10
+                ],
+                "original_goal": 6,
+                "directed_path_valid": true,
+                "avoids_current_occupancy": true,
+                "temporary_move_complete": false,
+                "action": "MOVE_ASIDE"
+              }
+            ],
+            "previous_decisions": {},
+            "full_detours_available": true,
+            "rejected_attempts": [
+              {
+                "action": "reroute_robot2",
+                "reason": "순환 방지 조건을 만족하는 이동 후보가 없습니다: current=6"
+              }
+            ]
+          },
+          "criteria": {
+            "reroute_robot1": "REROUTE robot1 via ['5', '6', '11', '3']; original goal=3",
+            "reroute_robot3": "REROUTE robot3 via ['9', '10', '8', '12', '11', '6']; original goal=6",
+            "move_aside_robot2_8": "MOVE_ASIDE robot2 via ['7', '8']; original goal=1",
+            "move_aside_robot2_11": "MOVE_ASIDE robot2 via ['7', '11']; original goal=1",
+            "move_aside_robot3_10": "MOVE_ASIDE robot3 via ['9', '10']; original goal=6",
+            "wait": "Wait without moving; the mutual blockage remains."
+          },
+          "instructions": "You are the fleet recovery planner. Decide WHICH robot should move and WHERE it should go using the supplied current nodes, original goals and remaining paths. Infer which robots block one another. Prefer releasing a node needed by another robot in a mutual blockage. Moving a follower that blocks nobody may leave the actual deadlock unresolved. MOVE_ASIDE selects a temporary neighboring node and preserves the task. REROUTE follows a new route to the original goal. All supplied actions are topologically valid and avoid current occupancy, but their usefulness is YOUR decision. Compare them using the full fleet state. Avoid repeating unproductive maneuvers shown in previous_decisions. RESUME completes a temporary maneuver by following a validated path to the original goal. Prefer RESUME over further displacement when its path is available. A temporary stop is not task completion. Waiting cannot free stationary mutual blockers. FMS checks reservations and collision safety before execution. Return one supplied action ID.",
+          "choice": "reroute_robot3",
+          "confidence": 0.1581,
+          "probabilities": {
+            "reroute_robot1": 0.1563,
+            "reroute_robot3": 0.2984,
+            "move_aside_robot2_8": 0.0828,
+            "move_aside_robot2_11": 0.0909,
+            "move_aside_robot3_10": 0.2227,
+            "wait": 0.1489
+          }
+        }
+      ]
+    },
+    {
+      "case": "photo_n8_n9_n7",
+      "completed": true,
+      "goals": {
+        "robot1": "6",
+        "robot2": "5",
+        "robot3": "2"
+      },
+      "actual_nodes": {
+        "robot1": "6",
+        "robot2": "5",
+        "robot3": "2"
+      },
+      "simulated_seconds": 29.1,
+      "minimum_sampled_separation_m": 0.30703190468618957,
+      "kev_decisions": [
+        {
+          "simulated_seconds": 1.2,
+          "state": {
+            "all_robots_stationary": true,
+            "waiting_will_clear_blockage": false,
+            "blocked_by": {
+              "robot1": [
+                "robot3"
+              ],
+              "robot2": [
+                "robot3"
+              ],
+              "robot3": [
+                "robot2"
+              ]
+            },
+            "robots": [
+              {
+                "id": "robot1",
+                "current_node": "8",
+                "original_goal": "6",
+                "remaining_path": [
+                  "8",
+                  "7",
+                  "11",
+                  "6"
+                ],
+                "temporary_maneuver": null
+              },
+              {
+                "id": "robot2",
+                "current_node": "9",
+                "original_goal": "5",
+                "remaining_path": [
+                  "9",
+                  "7",
+                  "5"
+                ],
+                "temporary_maneuver": null
+              },
+              {
+                "id": "robot3",
+                "current_node": "7",
+                "original_goal": "2",
+                "remaining_path": [
+                  "7",
+                  "9",
+                  "2"
+                ],
+                "temporary_maneuver": null
+              }
+            ],
+            "valid_maneuvers": [
+              {
+                "id": "reroute_robot1",
+                "robot_id": "robot1",
+                "path": [
+                  8,
+                  12,
+                  11,
+                  6
+                ],
+                "original_goal": 6,
+                "directed_path_valid": true,
+                "avoids_current_occupancy": true,
+                "temporary_move_complete": false,
+                "action": "REROUTE"
+              },
+              {
+                "id": "move_aside_robot1_10",
+                "robot_id": "robot1",
+                "path": [
+                  8,
+                  10
+                ],
+                "original_goal": 6,
+                "directed_path_valid": true,
+                "avoids_current_occupancy": true,
+                "temporary_move_complete": false,
+                "action": "MOVE_ASIDE"
+              },
+              {
+                "id": "move_aside_robot1_12",
+                "robot_id": "robot1",
+                "path": [
+                  8,
+                  12
+                ],
+                "original_goal": 6,
+                "directed_path_valid": true,
+                "avoids_current_occupancy": true,
+                "temporary_move_complete": false,
+                "action": "MOVE_ASIDE"
+              },
+              {
+                "id": "move_aside_robot2_10",
+                "robot_id": "robot2",
+                "path": [
+                  9,
+                  10
+                ],
+                "original_goal": 5,
+                "directed_path_valid": true,
+                "avoids_current_occupancy": true,
+                "temporary_move_complete": false,
+                "action": "MOVE_ASIDE"
+              },
+              {
+                "id": "move_aside_robot3_11",
+                "robot_id": "robot3",
+                "path": [
+                  7,
+                  11
+                ],
+                "original_goal": 2,
+                "directed_path_valid": true,
+                "avoids_current_occupancy": true,
+                "temporary_move_complete": false,
+                "action": "MOVE_ASIDE"
+              }
+            ],
+            "previous_decisions": {},
+            "full_detours_available": true,
+            "rejected_attempts": [
+              {
+                "action": "reroute_robot2",
+                "reason": "순환 방지 조건을 만족하는 이동 후보가 없습니다: current=1"
+              },
+              {
+                "action": "reroute_robot3",
+                "reason": "순환 방지 조건을 만족하는 이동 후보가 없습니다: current=5"
+              }
+            ]
+          },
+          "criteria": {
+            "reroute_robot1": "REROUTE robot1 via ['8', '12', '11', '6']; original goal=6",
+            "move_aside_robot1_10": "MOVE_ASIDE robot1 via ['8', '10']; original goal=6",
+            "move_aside_robot1_12": "MOVE_ASIDE robot1 via ['8', '12']; original goal=6",
+            "move_aside_robot2_10": "MOVE_ASIDE robot2 via ['9', '10']; original goal=5",
+            "move_aside_robot3_11": "MOVE_ASIDE robot3 via ['7', '11']; original goal=2",
+            "wait": "Wait without moving; the mutual blockage remains."
+          },
+          "instructions": "You are the fleet recovery planner. Decide WHICH robot should move and WHERE it should go using the supplied current nodes, original goals and remaining paths. Infer which robots block one another. Prefer releasing a node needed by another robot in a mutual blockage. Moving a follower that blocks nobody may leave the actual deadlock unresolved. MOVE_ASIDE selects a temporary neighboring node and preserves the task. REROUTE follows a new route to the original goal. All supplied actions are topologically valid and avoid current occupancy, but their usefulness is YOUR decision. Compare them using the full fleet state. Avoid repeating unproductive maneuvers shown in previous_decisions. RESUME completes a temporary maneuver by following a validated path to the original goal. Prefer RESUME over further displacement when its path is available. A temporary stop is not task completion. Waiting cannot free stationary mutual blockers. FMS checks reservations and collision safety before execution. Return one supplied action ID.",
+          "choice": "move_aside_robot3_11",
+          "confidence": 0.0844,
+          "probabilities": {
+            "reroute_robot1": 0.1916,
+            "move_aside_robot1_10": 0.1405,
+            "move_aside_robot1_12": 0.1202,
+            "move_aside_robot2_10": 0.155,
+            "move_aside_robot3_11": 0.237,
+            "wait": 0.1556
+          }
+        },
+        {
+          "simulated_seconds": 6.6,
+          "state": {
+            "all_robots_stationary": true,
+            "waiting_will_clear_blockage": false,
+            "blocked_by": {
+              "robot1": [
+                "robot3"
+              ],
+              "robot3": []
+            },
+            "robots": [
+              {
+                "id": "robot1",
+                "current_node": "8",
+                "original_goal": "6",
+                "remaining_path": [
+                  "8",
+                  "7",
+                  "11",
+                  "6"
+                ],
+                "temporary_maneuver": null
+              },
+              {
+                "id": "robot2",
+                "current_node": "5",
+                "original_goal": null,
+                "remaining_path": [],
+                "temporary_maneuver": null
+              },
+              {
+                "id": "robot3",
+                "current_node": "11",
+                "original_goal": "2",
+                "remaining_path": [
+                  "11"
+                ],
+                "temporary_maneuver": {
+                  "target_node": "11",
+                  "phase": "ASIDE"
+                }
+              }
+            ],
+            "valid_maneuvers": [
+              {
+                "id": "resume_robot3",
+                "robot_id": "robot3",
+                "path": [
+                  11,
+                  7,
+                  9,
+                  2
+                ],
+                "original_goal": 2,
+                "directed_path_valid": true,
+                "avoids_current_occupancy": true,
+                "temporary_move_complete": true,
+                "action": "RESUME"
+              },
+              {
+                "id": "move_aside_robot1_10",
+                "robot_id": "robot1",
+                "path": [
+                  8,
+                  10
+                ],
+                "original_goal": 6,
+                "directed_path_valid": true,
+                "avoids_current_occupancy": true,
+                "temporary_move_complete": false,
+                "action": "MOVE_ASIDE"
+              },
+              {
+                "id": "move_aside_robot1_7",
+                "robot_id": "robot1",
+                "path": [
+                  8,
+                  7
+                ],
+                "original_goal": 6,
+                "directed_path_valid": true,
+                "avoids_current_occupancy": true,
+                "temporary_move_complete": false,
+                "action": "MOVE_ASIDE"
+              },
+              {
+                "id": "move_aside_robot1_12",
+                "robot_id": "robot1",
+                "path": [
+                  8,
+                  12
+                ],
+                "original_goal": 6,
+                "directed_path_valid": true,
+                "avoids_current_occupancy": true,
+                "temporary_move_complete": false,
+                "action": "MOVE_ASIDE"
+              }
+            ],
+            "previous_decisions": {
+              "robot3": {
+                "action": "MOVE_ASIDE",
+                "path": [
+                  "7",
+                  "11"
+                ],
+                "choice": "move_aside_robot3_11",
+                "confidence": 0.0844
+              }
+            },
+            "full_detours_available": false,
+            "rejected_attempts": [
+              {
+                "action": "reroute_robot1",
+                "reason": "순환 방지 조건을 만족하는 이동 후보가 없습니다: current=12"
+              }
+            ]
+          },
+          "criteria": {
+            "resume_robot3": "RESUME robot3 via ['11', '7', '9', '2']; original goal=2",
+            "move_aside_robot1_10": "MOVE_ASIDE robot1 via ['8', '10']; original goal=6",
+            "move_aside_robot1_7": "MOVE_ASIDE robot1 via ['8', '7']; original goal=6",
+            "move_aside_robot1_12": "MOVE_ASIDE robot1 via ['8', '12']; original goal=6",
+            "wait": "Wait without moving; the mutual blockage remains."
+          },
+          "instructions": "You are the fleet recovery planner. Decide WHICH robot should move and WHERE it should go using the supplied current nodes, original goals and remaining paths. Infer which robots block one another. Prefer releasing a node needed by another robot in a mutual blockage. Moving a follower that blocks nobody may leave the actual deadlock unresolved. MOVE_ASIDE selects a temporary neighboring node and preserves the task. REROUTE follows a new route to the original goal. All supplied actions are topologically valid and avoid current occupancy, but their usefulness is YOUR decision. Compare them using the full fleet state. Avoid repeating unproductive maneuvers shown in previous_decisions. RESUME completes a temporary maneuver by following a validated path to the original goal. Prefer RESUME over further displacement when its path is available. A temporary stop is not task completion. Waiting cannot free stationary mutual blockers. FMS checks reservations and collision safety before execution. Return one supplied action ID.",
+          "choice": "move_aside_robot1_7",
+          "confidence": 0.0804,
+          "probabilities": {
+            "resume_robot3": 0.1836,
+            "move_aside_robot1_10": 0.1839,
+            "move_aside_robot1_7": 0.2643,
+            "move_aside_robot1_12": 0.2032,
+            "wait": 0.1649
+          }
+        },
+        {
+          "simulated_seconds": 9.2,
+          "state": {
+            "all_robots_stationary": true,
+            "waiting_will_clear_blockage": false,
+            "blocked_by": {
+              "robot1": [],
+              "robot3": []
+            },
+            "robots": [
+              {
+                "id": "robot1",
+                "current_node": "7",
+                "original_goal": "6",
+                "remaining_path": [
+                  "7"
+                ],
+                "temporary_maneuver": {
+                  "target_node": "7",
+                  "phase": "ASIDE"
+                }
+              },
+              {
+                "id": "robot2",
+                "current_node": "5",
+                "original_goal": null,
+                "remaining_path": [],
+                "temporary_maneuver": null
+              },
+              {
+                "id": "robot3",
+                "current_node": "11",
+                "original_goal": "2",
+                "remaining_path": [
+                  "11"
+                ],
+                "temporary_maneuver": {
+                  "target_node": "11",
+                  "phase": "ASIDE"
+                }
+              }
+            ],
+            "valid_maneuvers": [
+              {
+                "id": "resume_robot3",
+                "robot_id": "robot3",
+                "path": [
+                  11,
+                  12,
+                  8,
+                  10,
+                  9,
+                  2
+                ],
+                "original_goal": 2,
+                "directed_path_valid": true,
+                "avoids_current_occupancy": true,
+                "temporary_move_complete": true,
+                "action": "RESUME"
+              }
+            ],
+            "previous_decisions": {
+              "robot1": {
+                "action": "MOVE_ASIDE",
+                "path": [
+                  "8",
+                  "7"
+                ],
+                "choice": "move_aside_robot1_7",
+                "confidence": 0.0804
+              },
+              "robot3": {
+                "action": "MOVE_ASIDE",
+                "path": [
+                  "7",
+                  "11"
+                ],
+                "choice": "move_aside_robot3_11",
+                "confidence": 0.0844
+              }
+            },
+            "full_detours_available": false,
+            "rejected_attempts": [
+              {
+                "action": "resume_robot1",
+                "reason": "순환 방지 조건을 만족하는 이동 후보가 없습니다: current=10"
+              }
+            ]
+          },
+          "criteria": {
+            "resume_robot3": "RESUME robot3 via ['11', '12', '8', '10', '9', '2']; original goal=2",
+            "wait": "Wait without moving; the mutual blockage remains."
+          },
+          "instructions": "You are the fleet recovery planner. Decide WHICH robot should move and WHERE it should go using the supplied current nodes, original goals and remaining paths. Infer which robots block one another. Prefer releasing a node needed by another robot in a mutual blockage. Moving a follower that blocks nobody may leave the actual deadlock unresolved. MOVE_ASIDE selects a temporary neighboring node and preserves the task. REROUTE follows a new route to the original goal. All supplied actions are topologically valid and avoid current occupancy, but their usefulness is YOUR decision. Compare them using the full fleet state. Avoid repeating unproductive maneuvers shown in previous_decisions. RESUME completes a temporary maneuver by following a validated path to the original goal. Prefer RESUME over further displacement when its path is available. A temporary stop is not task completion. Waiting cannot free stationary mutual blockers. FMS checks reservations and collision safety before execution. Return one supplied action ID.",
+          "choice": "resume_robot3",
+          "confidence": 0.4595,
+          "probabilities": {
+            "resume_robot3": 0.7297,
+            "wait": 0.2703
+          }
+        },
+        {
+          "simulated_seconds": 23.2,
+          "state": {
+            "all_robots_stationary": true,
+            "waiting_will_clear_blockage": false,
+            "blocked_by": {
+              "robot1": []
+            },
+            "robots": [
+              {
+                "id": "robot1",
+                "current_node": "7",
+                "original_goal": "6",
+                "remaining_path": [
+                  "7"
+                ],
+                "temporary_maneuver": {
+                  "target_node": "7",
+                  "phase": "ASIDE"
+                }
+              },
+              {
+                "id": "robot2",
+                "current_node": "5",
+                "original_goal": null,
+                "remaining_path": [],
+                "temporary_maneuver": null
+              },
+              {
+                "id": "robot3",
+                "current_node": "2",
+                "original_goal": null,
+                "remaining_path": [],
+                "temporary_maneuver": null
+              }
+            ],
+            "valid_maneuvers": [
+              {
+                "id": "resume_robot1",
+                "robot_id": "robot1",
+                "path": [
+                  7,
+                  11,
+                  6
+                ],
+                "original_goal": 6,
+                "directed_path_valid": true,
+                "avoids_current_occupancy": true,
+                "temporary_move_complete": true,
+                "action": "RESUME"
+              }
+            ],
+            "previous_decisions": {
+              "robot1": {
+                "action": "MOVE_ASIDE",
+                "path": [
+                  "8",
+                  "7"
+                ],
+                "choice": "move_aside_robot1_7",
+                "confidence": 0.0804
+              },
+              "robot3": {
+                "action": "RESUME",
+                "path": [
+                  "11",
+                  "12",
+                  "8",
+                  "10",
+                  "9",
+                  "2"
+                ],
+                "choice": "resume_robot3",
+                "confidence": 0.4595
+              }
+            },
+            "full_detours_available": false,
+            "rejected_attempts": []
+          },
+          "criteria": {
+            "resume_robot1": "RESUME robot1 via ['7', '11', '6']; original goal=6",
+            "wait": "Wait without moving; the mutual blockage remains."
+          },
+          "instructions": "You are the fleet recovery planner. Decide WHICH robot should move and WHERE it should go using the supplied current nodes, original goals and remaining paths. Infer which robots block one another. Prefer releasing a node needed by another robot in a mutual blockage. Moving a follower that blocks nobody may leave the actual deadlock unresolved. MOVE_ASIDE selects a temporary neighboring node and preserves the task. REROUTE follows a new route to the original goal. All supplied actions are topologically valid and avoid current occupancy, but their usefulness is YOUR decision. Compare them using the full fleet state. Avoid repeating unproductive maneuvers shown in previous_decisions. RESUME completes a temporary maneuver by following a validated path to the original goal. Prefer RESUME over further displacement when its path is available. A temporary stop is not task completion. Waiting cannot free stationary mutual blockers. FMS checks reservations and collision safety before execution. Return one supplied action ID.",
+          "choice": "resume_robot1",
+          "confidence": 0.3844,
+          "probabilities": {
+            "resume_robot1": 0.6922,
+            "wait": 0.3078
+          }
+        }
+      ]
+    },
+    {
+      "case": "three_robot_cycle",
+      "completed": true,
+      "goals": {
+        "robot1": "1",
+        "robot2": "5",
+        "robot3": "4"
+      },
+      "actual_nodes": {
+        "robot1": "1",
+        "robot2": "5",
+        "robot3": "4"
+      },
+      "simulated_seconds": 14.2,
+      "minimum_sampled_separation_m": 0.24436330739678772,
+      "kev_decisions": [
+        {
+          "simulated_seconds": 1.2,
+          "state": {
+            "all_robots_stationary": true,
+            "waiting_will_clear_blockage": false,
+            "blocked_by": {
+              "robot1": [
+                "robot3"
+              ],
+              "robot2": [
+                "robot1"
+              ],
+              "robot3": [
+                "robot2"
+              ]
+            },
+            "robots": [
+              {
+                "id": "robot1",
+                "current_node": "7",
+                "original_goal": "1",
+                "remaining_path": [
+                  "7",
+                  "9",
+                  "1"
+                ],
+                "temporary_maneuver": null
+              },
+              {
+                "id": "robot2",
+                "current_node": "8",
+                "original_goal": "5",
+                "remaining_path": [
+                  "8",
+                  "7",
+                  "5"
+                ],
+                "temporary_maneuver": null
+              },
+              {
+                "id": "robot3",
+                "current_node": "9",
+                "original_goal": "4",
+                "remaining_path": [
+                  "9",
+                  "10",
+                  "8",
+                  "12",
+                  "4"
+                ],
+                "temporary_maneuver": null
+              }
+            ],
+            "valid_maneuvers": [
+              {
+                "id": "reroute_robot2",
+                "robot_id": "robot2",
+                "path": [
+                  8,
+                  12,
+                  11,
+                  6,
+                  5
+                ],
+                "original_goal": 5,
+                "directed_path_valid": true,
+                "avoids_current_occupancy": true,
+                "temporary_move_complete": false,
+                "action": "REROUTE"
+              },
+              {
+                "id": "move_aside_robot1_11",
+                "robot_id": "robot1",
+                "path": [
+                  7,
+                  11
+                ],
+                "original_goal": 1,
+                "directed_path_valid": true,
+                "avoids_current_occupancy": true,
+                "temporary_move_complete": false,
+                "action": "MOVE_ASIDE"
+              },
+              {
+                "id": "move_aside_robot2_10",
+                "robot_id": "robot2",
+                "path": [
+                  8,
+                  10
+                ],
+                "original_goal": 5,
+                "directed_path_valid": true,
+                "avoids_current_occupancy": true,
+                "temporary_move_complete": false,
+                "action": "MOVE_ASIDE"
+              },
+              {
+                "id": "move_aside_robot2_12",
+                "robot_id": "robot2",
+                "path": [
+                  8,
+                  12
+                ],
+                "original_goal": 5,
+                "directed_path_valid": true,
+                "avoids_current_occupancy": true,
+                "temporary_move_complete": false,
+                "action": "MOVE_ASIDE"
+              },
+              {
+                "id": "move_aside_robot3_10",
+                "robot_id": "robot3",
+                "path": [
+                  9,
+                  10
+                ],
+                "original_goal": 4,
+                "directed_path_valid": true,
+                "avoids_current_occupancy": true,
+                "temporary_move_complete": false,
+                "action": "MOVE_ASIDE"
+              }
+            ],
+            "previous_decisions": {},
+            "full_detours_available": true,
+            "rejected_attempts": [
+              {
+                "action": "reroute_robot1",
+                "reason": "순환 방지 조건을 만족하는 이동 후보가 없습니다: current=5"
+              },
+              {
+                "action": "reroute_robot3",
+                "reason": "순환 방지 조건을 만족하는 이동 후보가 없습니다: current=1"
+              }
+            ]
+          },
+          "criteria": {
+            "reroute_robot2": "REROUTE robot2 via ['8', '12', '11', '6', '5']; original goal=5",
+            "move_aside_robot1_11": "MOVE_ASIDE robot1 via ['7', '11']; original goal=1",
+            "move_aside_robot2_10": "MOVE_ASIDE robot2 via ['8', '10']; original goal=5",
+            "move_aside_robot2_12": "MOVE_ASIDE robot2 via ['8', '12']; original goal=5",
+            "move_aside_robot3_10": "MOVE_ASIDE robot3 via ['9', '10']; original goal=4",
+            "wait": "Wait without moving; the mutual blockage remains."
+          },
+          "instructions": "You are the fleet recovery planner. Decide WHICH robot should move and WHERE it should go using the supplied current nodes, original goals and remaining paths. Infer which robots block one another. Prefer releasing a node needed by another robot in a mutual blockage. Moving a follower that blocks nobody may leave the actual deadlock unresolved. MOVE_ASIDE selects a temporary neighboring node and preserves the task. REROUTE follows a new route to the original goal. All supplied actions are topologically valid and avoid current occupancy, but their usefulness is YOUR decision. Compare them using the full fleet state. Avoid repeating unproductive maneuvers shown in previous_decisions. RESUME completes a temporary maneuver by following a validated path to the original goal. Prefer RESUME over further displacement when its path is available. A temporary stop is not task completion. Waiting cannot free stationary mutual blockers. FMS checks reservations and collision safety before execution. Return one supplied action ID.",
+          "choice": "move_aside_robot3_10",
+          "confidence": 0.0479,
+          "probabilities": {
+            "reroute_robot2": 0.1791,
+            "move_aside_robot1_11": 0.1198,
+            "move_aside_robot2_10": 0.1753,
+            "move_aside_robot2_12": 0.1776,
+            "move_aside_robot3_10": 0.2066,
+            "wait": 0.1417
+          }
+        },
+        {
+          "simulated_seconds": 7.2,
+          "state": {
+            "all_robots_stationary": true,
+            "waiting_will_clear_blockage": false,
+            "blocked_by": {
+              "robot3": []
+            },
+            "robots": [
+              {
+                "id": "robot1",
+                "current_node": "1",
+                "original_goal": null,
+                "remaining_path": [],
+                "temporary_maneuver": null
+              },
+              {
+                "id": "robot2",
+                "current_node": "5",
+                "original_goal": null,
+                "remaining_path": [],
+                "temporary_maneuver": null
+              },
+              {
+                "id": "robot3",
+                "current_node": "10",
+                "original_goal": "4",
+                "remaining_path": [
+                  "10"
+                ],
+                "temporary_maneuver": {
+                  "target_node": "10",
+                  "phase": "ASIDE"
+                }
+              }
+            ],
+            "valid_maneuvers": [
+              {
+                "id": "resume_robot3",
+                "robot_id": "robot3",
+                "path": [
+                  10,
+                  8,
+                  12,
+                  4
+                ],
+                "original_goal": 4,
+                "directed_path_valid": true,
+                "avoids_current_occupancy": true,
+                "temporary_move_complete": true,
+                "action": "RESUME"
+              }
+            ],
+            "previous_decisions": {
+              "robot3": {
+                "action": "MOVE_ASIDE",
+                "path": [
+                  "9",
+                  "10"
+                ],
+                "choice": "move_aside_robot3_10",
+                "confidence": 0.0479
+              }
+            },
+            "full_detours_available": false,
+            "rejected_attempts": []
+          },
+          "criteria": {
+            "resume_robot3": "RESUME robot3 via ['10', '8', '12', '4']; original goal=4",
+            "wait": "Wait without moving; the mutual blockage remains."
+          },
+          "instructions": "You are the fleet recovery planner. Decide WHICH robot should move and WHERE it should go using the supplied current nodes, original goals and remaining paths. Infer which robots block one another. Prefer releasing a node needed by another robot in a mutual blockage. Moving a follower that blocks nobody may leave the actual deadlock unresolved. MOVE_ASIDE selects a temporary neighboring node and preserves the task. REROUTE follows a new route to the original goal. All supplied actions are topologically valid and avoid current occupancy, but their usefulness is YOUR decision. Compare them using the full fleet state. Avoid repeating unproductive maneuvers shown in previous_decisions. RESUME completes a temporary maneuver by following a validated path to the original goal. Prefer RESUME over further displacement when its path is available. A temporary stop is not task completion. Waiting cannot free stationary mutual blockers. FMS checks reservations and collision safety before execution. Return one supplied action ID.",
+          "choice": "resume_robot3",
+          "confidence": 0.5752,
+          "probabilities": {
+            "resume_robot3": 0.7876,
+            "wait": 0.2124
+          }
+        }
+      ]
+    }
+  ]
+}

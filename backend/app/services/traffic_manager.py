@@ -173,6 +173,8 @@ class TrafficManager:
             robot["request_order"] = None
             robot["task_priority"] = 0
             robot["stop_requested"] = True
+            robot.pop("kev_recovery", None)
+            robot.pop("kev_maneuver", None)
             self._required_paths.pop(robot_id, None)
             self._concession.pop(robot_id, None)
             self._pending.pop(robot_id, None)
@@ -183,6 +185,59 @@ class TrafficManager:
     def wait_for_reservation_after_stop(self, robot_id):
         with self.lock:
             self._wait_for_reservation(self._robots[robot_id])
+
+    def replace_required_path_after_stop(self, robot_id, path, *, now, graph, temporary_goal=None):
+        """노드 위 정지가 확인된 AI 요청의 작업 ID를 보존하며 경로·예약을 교체한다.
+
+        후보는 사본에서 예약하고, 실패 시 기존 경로와 예약을 그대로 남긴다.
+        호출자는 추론 중 위치/주문/지도 변경 여부를 먼저 확인해야 한다.
+        """
+        with self.lock:
+            self._validate_time(now)
+            robot = self._robots[robot_id]
+            if (
+                robot_id not in self._required_paths
+                or robot["status"] != "WAITING"
+                or robot.get("stop_requested")
+                or robot.get("connection_state", "ONLINE") != "ONLINE"
+                or robot.get("occupied_node") is None
+                or robot.get("occupied_edge") is not None
+                or robot.get("goal_node") is None
+            ):
+                raise ValueError("AI 경로 교체는 노드 위에서 대기 중인 요청에만 가능합니다.")
+            from .kev_mapf.kev_graph import Graph
+
+            fixed = tuple(str(n) for n in path)
+            target = robot["goal_node"] if temporary_goal is None else str(temporary_goal)
+            Graph(graph).check_path(
+                list(fixed), start=int(robot["occupied_node"]), goal=int(target)
+            )
+            if temporary_goal is not None and (len(fixed) < 2 or target == robot["occupied_node"]):
+                raise ValueError("임시 대피는 다른 노드로 이동해야 합니다.")
+            if fixed == self._required_paths[robot_id]:
+                return False
+            trial = self._planning_copy()
+            mover = trial._robots[robot_id]
+            trial._release_schedule(mover)
+            mover["route"] = None
+            if temporary_goal is None:
+                mover.pop("kev_maneuver", None)
+            else:
+                mover["kev_maneuver"] = {"target_node": target, "phase": "MOVING_ASIDE"}
+            trial._required_paths[robot_id] = fixed
+            if not trial._try_schedule(mover, now, graph, DistanceAStar(graph)):
+                return False
+            rows = [r for r in trial._reservations.snapshot() if r.robot_id == robot_id]
+            if rows:
+                if not self._reservations.replace_request(robot_id, robot["navigation_id"], rows):
+                    return False
+            else:
+                self._release_schedule(robot)
+            self._required_paths[robot_id] = fixed
+            robot.pop("kev_maneuver", None)
+            robot.update(mover)
+            self._pending.pop(robot_id, None)
+            return True
 
     def retry_waiting(self, now, graph, planner=None):
         """정지 중인 대기 요청을 재계획한다. 양보 종료 시 실행 정지는 호출자 책임."""
@@ -321,7 +376,10 @@ class TrafficManager:
                     other_goal = str(other.get("goal_node")) if other.get("goal_node") is not None else None
                     other_occ = str(other.get("occupied_node")) if other.get("occupied_node") is not None else None
                     o_route = other.get("route")
-                    if o_route and o_route.get("node_ids"):
+                    # An unscheduled blocked route is not an approaching robot.
+                    # Yielding to its hypothetical next node can prevent the
+                    # KEV-selected departure from ever clearing the blockage.
+                    if o_route and o_route.get("node_ids") and o_route.get("departure_at") is not None:
                         o_idx = o_route.get("segment_index", 0)
                         o_nodes = [str(n) for n in o_route["node_ids"]]
                         if o_idx + 1 < len(o_nodes) and o_nodes[o_idx + 1] == target_node:
@@ -365,6 +423,10 @@ class TrafficManager:
 
     # 로봇의 경로 예약을 시도한다.
     def _try_schedule(self, robot, now, graph, planner, *, vacating_nodes=None):
+        maneuver = robot.get("kev_maneuver")
+        if maneuver and maneuver["phase"] == "ASIDE":
+            # KEV must generate and approve the route back to the original goal.
+            return False
         others = [row for row in self._reservations.snapshot() if row.robot_id != robot["robot_id"]]
         blocked = {}
         for row in others:
@@ -398,6 +460,7 @@ class TrafficManager:
 
         resource = occupied_resource(robot, graph)
         plan = planner.plan_timed(
+            maneuver["target_node"] if maneuver else
             self._concession.get(robot["robot_id"], {}).get("node", robot["goal_node"]),
             (robot["x"], robot["y"]),
             robot["occupied_node"],
@@ -457,7 +520,11 @@ class TrafficManager:
     def _finish_route(self, robot):
         robot["route"] = None
         self._release_schedule(robot)
-        if robot["robot_id"] in self._concession:
+        if robot.get("kev_maneuver"):
+            robot["kev_maneuver"]["phase"] = "ASIDE"
+            robot["status"] = "WAITING"
+            self._pending.pop(robot["robot_id"], None)
+        elif robot["robot_id"] in self._concession:
             robot["status"] = "WAITING"
             self._pending.setdefault(robot["robot_id"], None)
         else:
@@ -674,6 +741,7 @@ class TrafficManager:
             rid
             for rid in self._pending
             if rid in self._required_paths
+            and not self._robots[rid].get("kev_maneuver")
             and self._robots[rid]["goal_node"] is not None
             and self._robots[rid]["route"] is None
         ]
@@ -711,4 +779,3 @@ class TrafficManager:
                     self._reservations.replace_request(rid, self._robots[rid]["navigation_id"], batch_rows)
                     self._pending.pop(rid, None)
                 return
-
