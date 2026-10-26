@@ -56,6 +56,10 @@ def _kev_dispatch_eta_speed_mps():
     return speed_mps
 
 
+class KevDispatchEtaRejected(RuntimeError):
+    """KEV가 유효 후보를 골랐지만 ETA 상한을 넘어 코드가 거부한 경우. 서버 오류가 아니므로 cooldown을 걸지 않는다."""
+
+
 # KEV가 비교할 후보 범위. near_eta는 최단 ETA + 근소 범위 안의 후보만, all_eligible은 안전 검사를 통과한 후보 전체.
 KEV_DISPATCH_CANDIDATE_SCOPES = {"near_eta", "all_eligible"}
 
@@ -894,6 +898,10 @@ class OrderManager:
             "rule_baseline_choice": rule_baseline_choice,
             "candidate_scope": candidate_scope,
             "eta_winner": eta_winner,
+            # all_eligible은 KEV가 근소 범위 밖 후보를 고를 수 있으므로 같은 범위(초)를 상한으로 다시 검증한다.
+            # near_eta는 후보가 이미 범위 안이라 검증하지 않는다.
+            "max_eta_delta_seconds": eta_tie_window_seconds if candidate_scope == "all_eligible" else None,
+            "eta_delta_by_robot": {profile["robot_id"]: profile["eta_delta_seconds"] for profile in profiles},
             "debug_record": debug_record,
         }
 
@@ -953,6 +961,22 @@ class OrderManager:
         chosen_robot = result.get("choice")
         if chosen_robot not in candidates:
             raise RuntimeError(f"KEV가 후보 목록에 없는 로봇을 선택했습니다: {chosen_robot}")
+        max_eta_delta_seconds = request.get("max_eta_delta_seconds")
+        if max_eta_delta_seconds is not None:
+            eta_delta_seconds = request["eta_delta_by_robot"][chosen_robot]
+            if eta_delta_seconds > max_eta_delta_seconds + 1e-9:
+                logger.warning(
+                    "KEV dispatch rejected (ETA guard): robot=%s order=%s eta_delta=%.3fs limit=%.3fs eta_winner=%s",
+                    chosen_robot,
+                    request["order_id"],
+                    eta_delta_seconds,
+                    max_eta_delta_seconds,
+                    request.get("eta_winner"),
+                )
+                raise KevDispatchEtaRejected(
+                    f"KEV 선택 {chosen_robot}의 ETA가 최단보다 {eta_delta_seconds:.3f}초 길어 상한 "
+                    f"{max_eta_delta_seconds:.3f}초를 넘었습니다."
+                )
         # 기존 로그. 후보 범위와 최단 ETA 로봇을 함께 남기도록 바꾼다.
         # logger.info(
         #     "KEV dispatch selected robot=%s order=%s candidates=%s rule_baseline=%s",
@@ -1280,7 +1304,15 @@ class OrderManager:
                         # KEV 실패·cooldown에서도 ETA 정책은 유지하기 위해 같은 후보군으로 fallback한다.
                         fallback_candidates = [candidate for candidate in candidates if candidate in value["candidates"]]
                         rule_baseline_choice = value["rule_baseline_choice"]
-                        if kev_failure is not None:
+                        if isinstance(kev_failure, KevDispatchEtaRejected):
+                            # 정상 응답이지만 ETA 정책을 어긴 선택이다. 서버 문제가 아니므로 cooldown 없이 기준선으로 배정한다.
+                            logger.warning(
+                                "KEV dispatch falling back to rule baseline (ETA guard): order=%s baseline=%s error=%s",
+                                row["order_id"],
+                                rule_baseline_choice,
+                                kev_failure,
+                            )
+                        elif kev_failure is not None:
                             # KEV 서버 오류나 잘못된 응답은 주문 실패가 아니라 ETA 후보군 안의 기존 배차로 복구한다.
                             # 실패가 반복되면 tick마다 timeout을 기다리지 않도록 잠시 KEV 호출을 멈춘다.
                             self._kev_dispatch_retry_at = monotonic() + KEV_DISPATCH_COOLDOWN_SECONDS

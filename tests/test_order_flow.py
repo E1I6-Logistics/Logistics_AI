@@ -1500,7 +1500,9 @@ def test_kev_dispatch_all_eligible_sends_every_candidate(monkeypatch):
         order_manager._kev_dispatch_selector = FakeKevSelector()
         order = order_manager.create_order(items={"A": 1, "B": 0, "C": 0, "D": 0}, total_quantity=1)
         await order_manager.tick()
-        assert order_manager.get_order(order["order_id"])["robot_id"] == "robot3"
+        # 기존 기대값. ETA 상한 검증을 넣은 뒤에는 근소 범위(0초) 밖의 robot3 선택을 코드가 거부한다.
+        # assert order_manager.get_order(order["order_id"])["robot_id"] == "robot3"
+        assert order_manager.get_order(order["order_id"])["robot_id"] == "robot2"
         await asyncio.gather(*list(simulation_order_runner.tasks.values()))
 
     try:
@@ -1778,3 +1780,58 @@ def test_record_dispatch_prunes_expired_workload(monkeypatch):
     order_manager._record_dispatch("robot2", order_manager.orders[order["order_id"]], "simulation")
 
     assert [entry[1] for entry in order_manager._dispatch_history] == ["robot2"]
+
+
+# all_eligible에서 KEV가 ETA 상한을 넘는 로봇을 고르면 코드가 거부하고 기준선으로 배정하는지 검증한다(D-9 D 조건).
+def test_kev_dispatch_all_eligible_rejects_choice_beyond_eta_limit(monkeypatch, caplog):
+    _reset(monkeypatch)
+    monkeypatch.setenv("KEV_DISPATCH_CANDIDATE_SCOPE", "all_eligible")
+    caplog.set_level(logging.WARNING, logger="backend.app.services.order_manager")
+    # robot1을 N5에 두면 robot1 ETA 0초, robot2·robot3는 2초보다 길다.
+    mock_fms._robots["robot1"].update(occupied_node="5", current_node="5")
+
+    class FarKevSelector:
+        def select_choice(self, **kwargs):
+            return {"choice": "robot3"}
+
+    async def scenario():
+        mode_manager.set_mode("simulation", "ai")
+        order_manager._kev_dispatch_selector = FarKevSelector()
+        order = order_manager.create_order(items={"A": 1, "B": 0, "C": 0, "D": 0}, total_quantity=1)
+        await order_manager.tick()
+        assert order_manager.get_order(order["order_id"])["robot_id"] == "robot1"
+        await asyncio.gather(*list(simulation_order_runner.tasks.values()))
+
+    try:
+        asyncio.run(scenario())
+    finally:
+        mode_manager.set_mode("simulation", "algorithm")
+
+    # 정책 거부는 서버 오류가 아니므로 cooldown을 걸지 않는다.
+    assert order_manager._kev_dispatch_retry_at == 0.0
+    messages = [record.getMessage() for record in caplog.records]
+    assert any("KEV dispatch rejected (ETA guard): robot=robot3" in message for message in messages)
+
+
+# all_eligible에서 ETA 상한 안의 KEV 선택은 그대로 받아들이는지 검증한다.
+def test_kev_dispatch_all_eligible_accepts_choice_within_eta_limit(monkeypatch):
+    _reset(monkeypatch)
+    monkeypatch.setenv("KEV_DISPATCH_CANDIDATE_SCOPE", "all_eligible")
+
+    class NearKevSelector:
+        def select_choice(self, **kwargs):
+            # 기본 배치(N0/N1/N2)에서 N5 ETA는 robot1 8.26초, robot2 6.78초, robot3 7.51초다.
+            return {"choice": "robot3"}
+
+    async def scenario():
+        mode_manager.set_mode("simulation", "ai")
+        order_manager._kev_dispatch_selector = NearKevSelector()
+        order = order_manager.create_order(items={"A": 1, "B": 0, "C": 0, "D": 0}, total_quantity=1)
+        await order_manager.tick()
+        assert order_manager.get_order(order["order_id"])["robot_id"] == "robot3"
+        await asyncio.gather(*list(simulation_order_runner.tasks.values()))
+
+    try:
+        asyncio.run(scenario())
+    finally:
+        mode_manager.set_mode("simulation", "algorithm")
