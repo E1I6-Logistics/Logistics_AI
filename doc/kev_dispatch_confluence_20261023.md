@@ -48,7 +48,8 @@ KEV로 코드 배차 전체를 대체하지 않습니다. KEV가 판단할 수 �
 | `pickup_distance_m` | route graph 기준 픽업 최단 거리 | 입력됨 |
 | `pickup_eta_seconds` | 거리 ÷ `KEV_DISPATCH_ETA_SPEED_MPS`(기본 0.2 m/s) | 입력됨 |
 | `eta_delta_seconds` | 최단 ETA와의 차이 | 입력됨 |
-| `recent_dispatch_count` | 최근 배차 횟수 | 미입력. 작업량 기준 결정 후 추가 |
+| `recent_dispatch_count` | 최근 집계 기간 내 배차 횟수 | `KEV_DISPATCH_RECENT_WORKLOAD=1`일 때 입력됨 |
+| `recent_pickup_distance_m` | 최근 배정 시점 픽업까지 예상 거리의 합 | `KEV_DISPATCH_RECENT_WORKLOAD=1`일 때 입력됨 |
 | `post_task_battery` | 주문 처리 후 예상 배터리 | 미입력. 소모율 측정 후 추가 |
 
 거리와 ETA는 코드가 계산해 제공합니다. KEV가 계산하지 않습니다.
@@ -63,7 +64,7 @@ KEV로 코드 배차 전체를 대체하지 않습니다. KEV가 판단할 수 �
 - 배터리를 안전 기준으로 판단하지 않습니다. 배터리 하한은 코드가 담당합니다.
 - `IDLE` / `RETURNING`, 현재 배터리, 최근 작업량처럼 서로 충돌할 수 있는 보조 조건을 비교합니다.
 
-현재 지시문은 상태와 현재 배터리만 보조 조건으로 사용합니다. 작업량과 예상 배터리는 입력이 추가된 뒤 지시문에 반영합니다.
+`KEV_DISPATCH_RECENT_WORKLOAD=1`이면 현재 지시문은 최근 배차 횟수와 최근 픽업 거리 합도 보조 조건으로 사용합니다. ETA와 상태가 비슷할 때만 작업량이 적은 로봇을 우선하며, 작업량 때문에 ETA가 확실히 짧은 로봇을 뒤집지 않도록 지시합니다. 기본값 `0`에서는 D-6~D-8과 동일한 입력을 유지하고, 기록도 남기지 않습니다. 작업 후 예상 배터리는 아직 입력하지 않습니다.
 
 ## 5. 대기 주문 우선순위 KEV
 
