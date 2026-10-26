@@ -470,8 +470,8 @@ class KevTrafficRouteTests(unittest.TestCase):
         self.assertEqual(planner.plan("0", "6").route, ("0", "10", "8", "7", "11", "6"))
         self.assertEqual(planner.plan("5", "6").route, ("5", "6"))
 
-    def test_kev_mapf_reroute_failure_falls_back_to_wait(self) -> None:
-        """KEV-MAPF에서 REROUTE가 실패하더라도 대기 가능 노드가 있으면 WAIT로 폴백하는지 검증한다."""
+    def test_kev_mapf_reroute_failure_holds_without_changing_kev_action(self) -> None:
+        """KEV가 고른 REROUTE 실패 시 코드가 WAIT를 대신 고르지 않고 HOLD하는지 검증한다."""
         from backend.app.services.kev_mapf.kev_engine import KevMAPF
         from backend.app.services.kev_mapf.kev_graph import Graph
         from backend.app.services.route_service import load_route_graph
@@ -522,12 +522,13 @@ class KevTrafficRouteTests(unittest.TestCase):
             {"priority_mode": "score", "wait_allowed_nodes": [5, 6]},
         )
         advisory = engine.resolve()
-        self.assertIn(advisory["status"], ("PROPOSED", "REVIEW_REQUIRED"))
+        self.assertEqual(advisory["status"], "BLOCKED")
         self.assertEqual(len(advisory["decisions"]), 1)
-        self.assertEqual(advisory["decisions"][0]["action"], "WAIT")
+        self.assertEqual(advisory["decisions"][0]["action"], "HOLD")
         self.assertEqual(advisory["decisions"][0]["yield_robot"], "robot2")
-        self.assertEqual(advisory["decisions"][0]["wait_node"], 6)
-        self.assertIn("no detour available", advisory["decisions"][0]["reroute_fallback_reason"])
+        self.assertIsNone(advisory["decisions"][0]["wait_node"])
+        self.assertEqual(advisory["decisions"][0]["reason"], "REROUTE_FAILED")
+        self.assertIn("no detour available", advisory["decisions"][0]["details"])
 
     def test_bottleneck_occupied_node_and_start_major_reentry_prevent_dead_end(self) -> None:
         """병목 노드(N11)가 점유 중일 때 목적지(N6) 도달 불능 우회 및 출발 주요 노드(N4) 재진입 막다른 길을 방지하는지 검증한다."""

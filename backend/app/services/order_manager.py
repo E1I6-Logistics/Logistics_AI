@@ -38,8 +38,8 @@ class OrderManager:
         return nodes
 
     # 주문 내용을 검증하고 대기열에 등록한다.
-    def create_order(self, items, total_quantity, order_name=None, driving_mode=None, selector=None, model=None):
-        scenario_manager.ensure_available()
+    def create_order(self, items, total_quantity, order_name=None, driving_mode=None, selector=None, model=None, *, scenario_run_id=None):
+        scenario_manager.ensure_order_available(scenario_run_id)
         operation_mode = mode_manager.operation_mode
         if driving_mode is None:
             driving_mode = "llm" if feature_engine("route", operation_mode) == "ai" else "standard"
@@ -61,7 +61,7 @@ class OrderManager:
                 raise ValueError("AI 경로 모델을 선택하세요.")
             require_enabled_model(selector, model)
         with scenario_manager.lock, self.lock:
-            scenario_manager.ensure_available()
+            scenario_manager.ensure_order_available(scenario_run_id)
             order_id = str(uuid4())
             row = {
                 "order_id": order_id,
@@ -247,7 +247,7 @@ class OrderManager:
 
     # 대기 중인 작업을 한 주기 진행한다.
     async def tick(self):
-        if scenario_manager.active:
+        if scenario_manager.active and not scenario_manager.order_workload:
             return
         mode = mode_manager.mode
         preemptions = []

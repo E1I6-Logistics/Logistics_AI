@@ -93,7 +93,7 @@ class MapfIntegrationTests(unittest.TestCase):
     def test_every_decision_receives_full_graph_and_robot_neighbors(self):
         planner = Decisions()
         self.plan(planner=planner, config={"wait_allowed_nodes": [5]})
-        self.assertEqual(len(planner.states), 4)  # zone, priority, action, wait
+        self.assertEqual(len(planner.states), 2)  # KEV score and action only
         for state in planner.states:
             json.dumps(state)
             self.assertEqual(state["route_graph"]["nodes"], list(range(1, 8)))
@@ -142,7 +142,10 @@ class MapfIntegrationTests(unittest.TestCase):
         self.requests[1].update(current_node="3", node="3", result={"path": ["3"]})
         planner = Decisions(action="action_hold")
         result = self.plan(planner=planner, config={"zone_occupancy": {"node:3": "b"}})
-        self.assertEqual(result["decisions"][0]["priority_robot"], "b")
+        self.assertEqual(result["decisions"][0]["priority_robot"], "a")
+        self.assertEqual(result["decisions"][0]["occupied_by"], "b")
+        self.assertEqual(result["decisions"][0]["priority_robot_action"], "HOLD")
+        self.assertNotIn("a", result["proceed_robots"])
         self.assertEqual(result["status"], "BLOCKED")
 
     def test_node_ids_reject_lossy_conversion(self):

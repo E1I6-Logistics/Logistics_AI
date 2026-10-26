@@ -276,6 +276,8 @@ export type ScenarioStatus = {
   description?: string
   elapsed?: number
   message: string
+  record_url?: string
+  metrics?: OrderStressRecord
   robots: { robot_id: string; status: string; current_node: string | null; goal: string | null }[]
 }
 
@@ -292,5 +294,49 @@ export function runScenario(name: string) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name }),
+  })
+}
+
+
+export type OrderStressRecord = {
+  run_id: string
+  state: string
+  elapsed: number
+  seed: number
+  created: number
+  completed: number
+  failed: number
+  open_orders: number
+  failures?: { order_id: string; robot_id: string | null; phase: string | null; reason: string | null; node: string | null; edge: string | null; destination: string | null }[]
+}
+
+export function stopScenario() {
+  return request<ScenarioStatus>('/api/scenarios/stop', { method: 'POST' })
+}
+
+export function scenarioRecordUrl(runId: string) {
+  return `${API_BASE}/api/scenarios/records/${encodeURIComponent(runId)}`
+}
+
+
+export async function downloadScenarioRecord(runId: string) {
+  const response = await fetch(scenarioRecordUrl(runId))
+  if (!response.ok) throw new Error('시험 기록 다운로드에 실패했습니다. 다시 시도하세요.')
+  const blob = await response.blob()
+  const record: { file_name?: string; started_at: string } = JSON.parse(await blob.text())
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = record.file_name ?? `자동배차테스트[${new Date(record.started_at)
+    .toLocaleString('sv-SE', { timeZone: 'Asia/Seoul', hour12: false }).replace(/:/g, '-')}].json`
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
+}
+
+export function resetScenario(runId: string) {
+  return request<ScenarioStatus>('/api/scenarios/reset', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ run_id: runId }),
   })
 }

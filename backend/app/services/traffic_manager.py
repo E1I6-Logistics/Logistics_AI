@@ -96,6 +96,15 @@ class TrafficManager:
             return (deepcopy(self._robots), dict(self._required_paths),
                     deepcopy(self._protected_resources))
 
+    def planning_wait_reservations(self):
+        """MAPF에는 예약 소유자만 전달하고 FMS 시간표는 노출하지 않는다."""
+        with self.lock:
+            owners = {}
+            for row in self._reservations.snapshot():
+                if row.resource[0] == "node":
+                    owners.setdefault(row.resource[1], set()).add(row.robot_id)
+            return {node: sorted(robots) for node, robots in owners.items()}
+
     def commit_required_routes(self, graph, pending, paths, waits, ordered, *, now):
         with self.lock:
             previous_rows = self._reservations.snapshot()

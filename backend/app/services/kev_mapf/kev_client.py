@@ -1,7 +1,7 @@
 """[모듈: kev_client.py - Kev AI 의사결정 클라이언트 및 지침 정의]
-- 역할: Kev 의사결정 API(/v1/systemone)를 호출하는 실시간 클라이언트(`LiveKEV`)와 4단계 프롬프트 지침을 관리한다.
+- 역할: Kev 의사결정 API(/v1/systemone)를 호출하는 실시간 클라이언트(`LiveKEV`)와 Score·행동 프롬프트 지침을 관리한다.
 - 기능:
-  1. 1~4단계(Zone 선택, 우선순위 평가, 행동 선택, 대기 노드 선택) 프롬프트 지침 상수 정의
+  1. 우선순위 평가와 양보 행동 선택 프롬프트 지침 상수 정의
   2. 다중 로봇 우선순위 일괄 점수 평가 (score_many)
   3. 선택지 기반 판단 (pick) - 후보 1개 시 API 호출 생략(forced)
   4. 우회 경로 탐색 (route) - preview_llm_route 재사용
@@ -15,17 +15,6 @@ import time
 from typing import Any, Protocol
 
 from .kev_graph import Graph, _node
-
-# [1단계 지침] 다중 로봇 경로에서 발견된 물리적 공유 노드/간선 중 가장 먼저 해결할 충돌 구간 선택
-KEV_ZONE_INSTRUCTIONS = (
-    "You are the MAPF conflict-zone selection component. "
-    "Each candidate represents one shared resource or a connected group "
-    "of shared nodes and edges. "
-    "Choose ONE candidate zone to resolve first, preferably one that "
-    "blocks imminent progress. "
-    "Do not invent IDs, arrival times, or occupancy. "
-    "Return only a supplied criteria ID."
-)
 
 # [2단계 지침 - Score 방식 (AX 표준)] 충돌 구간에서 로봇들의 상대적 우선순위 점수 평가 (score_many 일괄 평가)
 KEV_PRIORITY_SCORE_INSTRUCTIONS = (
@@ -57,15 +46,6 @@ KEV_ACTION_INSTRUCTIONS = (
     "WAIT applies only at the selected shared zone, not until the priority "
     "robot completes its entire job. Unrelated robots may proceed in parallel. "
     "Return only a supplied action ID."
-)
-
-# [4단계 지침] WAIT 선택 시 충돌 구간 진입 전 안전하게 정차할 상류 대기 노드(wait_node) 선택
-KEV_WAIT_INSTRUCTIONS = (
-    "You are the MAPF waiting-position selection component. Choose one "
-    "upstream node before the shared resource where the yielding robot should "
-    "wait. Consider path continuity and whether another robot would be "
-    "blocked. Physical clearance is verified separately by FMS. Return "
-    "only a supplied criteria ID."
 )
 
 _PRIORITY_LEVELS = [

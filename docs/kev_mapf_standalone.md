@@ -13,7 +13,7 @@
 | `kev_recovery.KevRecovery` / `KevRecoveryPlanner` | 주행 감시와 주입 가능한 KEV 복구 판단 |
 | `services.mapf_execution.MapfExecution` | 실제·모의 실행 공통 상태·예약 반영·복구 계약 |
 
-우선순위는 `score` 전용이다. `LiveKEV(model="kev-08b")`가 관련 로봇을 요청 한 번으로 점수 평가하며, 구역·행동·대기 위치·경로 선택은 필요한 선택 호출을 사용한다. 기존 독립 실행용 `repo`, `deadline`, `max_steps` 초기화 인자는 제거했다.
+우선순위는 `score` 전용이다. `LiveKEV(model="kev-08b")`가 관련 로봇을 요청 한 번으로 점수 평가하며, 구역과 WAIT 위치는 코드로 선택하며, 양보 행동·우회 경로는 필요한 KEV 선택 호출을 사용한다. 기존 독립 실행용 `repo`, `deadline`, `max_steps` 초기화 인자는 제거했다.
 
 테스트 전용 직접 출발 함수와 별도 주문 preview 래퍼도 제거했다. 주문·수동 이동은 공통 운용 진입점을 사용하고, 초기 경로 생성은 기존 `llm_route_preview.preview_llm_route()`를 사용한다.
 
@@ -22,3 +22,8 @@
 - 회귀 테스트: `tests/test_kev_mapf_integration.py`, `tests/test_kev_parallel_admission.py`, `tests/test_kev_recovery.py`.
 - 실제 KEV와 실행 중 시뮬레이션 FMS 검증: `tools/verify_kev_mapf_fms.py`.
 - 검증 도구는 시뮬레이션 로봇의 위치와 주문을 변경하므로 시험할 FMS에서 명시적으로 실행한다.
+
+우선순위는 계획 내 모든 로봇의 점수와 ID로 한 번 고정한다. 우회 후 새 충돌에도 같은 순서를 사용하며, 점유·대기 불가를 이유로 순위를 뒤집지 않는다. 점유 해제와 실제 이동 허가는 FMS가 검사하며 안전한 해결이 없으면 HOLD한다. 엔진의 중복 우선순위 순환 검사는 제거했지만 FMS 대기 의존성과 물리 교착 복구 검사는 유지한다.
+
+
+`wait_node_reservations`는 노드 ID → 예약 소유자 ID 목록의 설정이다. FMS는 공개 `MapfExecution.wait_reservations()`를 통해 예약 소유자만 전달하며 MAPF에 시간표·ETA를 넘기지 않는다. `_can_reroute()`는 위상 연결 가능성만 검사하고 경로 생성은 KEV가 수행한다. 우회 생성 실패 시 HOLD한다.

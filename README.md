@@ -88,7 +88,7 @@ bash scripts/verify_env.sh robot
 
 AI 모드에서 선택할 모델은 백엔드 설정에 활성화되어 있어야 합니다. Ollama 모델을 사용한다면 Ollama 서버와 모델을 별도로 준비해야 합니다. Laya와 Kev 로컬 실행에는 해당 모델에 맞는 GPU·메모리가 필요할 수 있습니다.
 
-실제·시뮬레이션의 주문·수동 AI 목적지 이동은 출발 전에 **PBS를 벤치마킹한 KEV MAPF**를 거칩니다. KEV가 공유 충돌 구역, 통과 우선순위, WAIT·REROUTE·HOLD 및 대기 노드·우회 경로를 판단하고 FMS가 예약을 검사합니다. `FMS_SIM_MAPF_ENABLED=1`이 기본이며, 우선순위는 `FMS_MAPF_PRIORITY_MODE=score`만 지원합니다. 관련 로봇 모두를 한 MAPF 계획에서 KEV 요청 1회로 점수 평가하고 재사용합니다. 우선순위 choice 분기·프롬프트는 제거했으며 잘못된 choice 설정은 거부합니다. 코드는 점유·순환 제약 안에서 높은 점수를 우선하며, 동점은 기존 로봇 ID 규칙으로 처리합니다. 구역·양보 행동·대기 위치·경로·복구 행동처럼 후보를 고르는 판단에는 choice를 유지합니다. 각 선택 질문은 후보들을 한 요청에 담으므로 점수로 바꾸어도 호출 수가 줄어드는 구조가 아니며, 후보 하나인 경로와 MAPF 선택은 API를 호출하지 않습니다. 전체 MAPF가 1회 호출로 끝나는 의미는 아닙니다. `/api/mode`의 `simulation_mapf_enabled`, `mapf_priority_mode`와 이동 응답의 `mapf.priority_scores`, `metrics.kev_api_calls`·`kev_score_calls`·`kev_choice_calls`로 적용 여부와 호출 수를 확인할 수 있습니다. 단독 요청이고 다른 점유와 충돌하지 않으면 불필요한 다중 로봇 KEV 판단을 호출하지 않습니다.
+실제·시뮬레이션의 주문·수동 AI 목적지 이동은 출발 전에 **PBS를 벤치마킹한 KEV MAPF**를 거칩니다. 코드가 충돌 구역과 안전 WAIT 위치를 선택하고, KEV가 우선순위 Score·WAIT/REROUTE/HOLD·우회 경로를 판단하며 FMS가 예약·점유를 검사합니다. `FMS_SIM_MAPF_ENABLED=1`이 기본이며, 우선순위는 `FMS_MAPF_PRIORITY_MODE=score`만 지원합니다. 관련 로봇 모두를 한 MAPF 계획에서 KEV 요청 1회로 점수 평가하고 재사용합니다. 우선순위 choice 분기·프롬프트는 제거했으며 잘못된 choice 설정은 거부합니다. 코드는 높은 점수 우선·동점 ID 오름차순의 계획 전체 순서를 고정합니다. 점유나 대기 가능 여부로 순위를 뒤집지 않으며, 점유 해제·예약 확인 전에는 높은 Score도 진입하지 않습니다. 양보 행동·경로·별도 교착 복구에는 choice를 유지하며 구역·WAIT 위치의 KEV 호출은 제거했습니다. 각 선택 질문은 후보들을 한 요청에 담으므로 점수로 바꾸어도 호출 수가 줄어드는 구조가 아니며, 후보 하나인 경로와 MAPF 선택은 API를 호출하지 않습니다. 전체 MAPF가 1회 호출로 끝나는 의미는 아닙니다. `/api/mode`의 `simulation_mapf_enabled`, `mapf_priority_mode`와 이동 응답의 `mapf.priority_scores`, `metrics.kev_api_calls`·`kev_score_calls`·`kev_choice_calls`로 적용 여부와 호출 수를 확인할 수 있습니다. 단독 요청이고 다른 점유와 충돌하지 않으면 불필요한 다중 로봇 KEV 판단을 호출하지 않습니다.
 
 주문에서 픽업·작업대 도착을 확인하기 위해 정지한 로봇도 다음 요청의 병렬 MAPF 판단에 포함합니다. 준비 당시의 `command_epoch`를 저장하므로 추론 중 추가 정지·취소가 오면 오래된 요청은 거부합니다. 같은 픽업은 현재 작업과 실제 노드 점유가 해제될 때까지 기다리며, 앞 주문의 작업대 작업·복귀 완료까지 기다리지 않습니다.
 
@@ -173,3 +173,6 @@ python -m tests.manual_omx_server
 - Kev 서버 실행 실패: `logs/kev.log`, 모델 이름, GPU 메모리와 `FMS_KEV_DIR`를 확인합니다.
 - 실제 로봇이 보이지 않음: `logs/zenoh_bridge.log`, Zenoh Router·로봇 Bridge, ROS domain과 namespace를 확인합니다.
 - 주문이 대기 중: 로봇 연결·점유·복귀 상태와 픽업대 예약을 하단 주문 패널에서 확인합니다.
+
+
+FMS 시나리오의 **무작위 주문 연속 배차**는 사람이 시작·중지하는 시뮬레이션 AI 스트레스 시험입니다. 주문당 1~5개, N5만/N6만/양쪽 방문을 3건마다 무작위 순서로 편성하며 미완료 최대 6건을 계속 보충합니다. 중지 시 총 주문·성공·실패 수와 실패 위치를 JSON으로 다운로드한 뒤 시험 상태를 초기화합니다. 상세 사용법과 적용 상태는 [구조 문서 17번](docs/kev_mapf_flowchart.md#17-사람이-실행하는-무작위-주문-스트레스-시나리오)을 참조하세요.

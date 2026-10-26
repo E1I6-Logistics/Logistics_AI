@@ -23,6 +23,9 @@ class MapfExecution:
     def snapshot(self):
         return self._traffic.planning_snapshot()
 
+    def wait_reservations(self):
+        return self._traffic.planning_wait_reservations()
+
     def _published_responses(self, goals):
         if self._publish is not None:
             self._publish(goals)

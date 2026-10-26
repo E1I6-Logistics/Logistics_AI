@@ -6,13 +6,14 @@
     -> 충돌 없음: 기존 경로 유지 (PROCEED)
     -> 충돌 발생:
        1단계 (_select_zone): 충돌 구역 선정
-       2단계 (_resolve_priority): KEV 로봇 간 우선순위 평가 (score_many) -> High 로봇 PROCEED 확정
+       2단계 (_resolve_priority): KEV 점수 일괄 평가 (score_many) -> 고정된 선행·양보 관계
        3단계 (_select_action): KEV 양보(Low) 로봇 행동 선택 (WAIT / REROUTE / HOLD)
        4단계 (_apply_wait / _reroute): 상류 안전 대기 노드(wait_node) 배정 또는 KEV 우회 경로 생성
 """
 
 from __future__ import annotations
 
+import math
 import time
 from typing import Any
 
@@ -20,14 +21,11 @@ from backend.app.services import route_service
 
 from .kev_client import (
     KEV_ACTION_INSTRUCTIONS,
-    KEV_WAIT_INSTRUCTIONS,
-    KEV_ZONE_INSTRUCTIONS,
     KevPlanner,
 )
 from .kev_conflict import (
     first_zone_index,
     group_conflict_zones,
-    would_cycle,
     zone_candidates,
 )
 from .kev_graph import Graph, _node
@@ -55,6 +53,7 @@ class KevMAPF:
             raise ValueError("MAPF priority_mode supports only score")
 
         self.priority_scores: dict[str, float] = {}
+        self._priority_rank: dict[str, int] = {}
         self.priority_score_calls = 0
         self.allow_proactive_hold = bool(config.get("allow_proactive_hold", False))
         self.occupied: dict[str, str] = {
@@ -77,6 +76,10 @@ class KevMAPF:
         self.warnings: list[str] = []
         self.reroute_count = 0
         self.processed: set[tuple[str, str, str]] = set()
+        self.reserved_wait_nodes = {
+            _node(node): set(owners)
+            for node, owners in (config.get("wait_node_reservations") or {}).items()
+        }
         self.wait_reservations: dict[int, str] = {}
         self.robot_wait_nodes: dict[str, int] = {}
         self._cached_graph_state: dict | None = None
@@ -132,7 +135,7 @@ class KevMAPF:
             None,
         )
 
-    def _wait_candidates(self, robot: dict, info: dict) -> list[int]:
+    def _wait_candidates(self, robot: dict, info: dict, priority_robot: str | None = None) -> list[int]:
         """충돌 구역 진입 전 대기 가능하며 현재 점유되지 않은 노드를 반환한다."""
         path = robot["path"]
         before = first_zone_index(path, info)
@@ -152,6 +155,8 @@ class KevMAPF:
                 or (self.has_wait_policy and n not in self.certified_wait)
                 or self.occupied.get(f"node:{n}") not in (None, robot_id)
                 or n in other_current_nodes
+                or bool(self.reserved_wait_nodes.get(n, set()) - {robot_id})
+                or (priority_robot is not None and n in self.robots[priority_robot]["path"])
                 or self.wait_reservations.get(n) not in (None, robot_id)
                 or (assigned_node is not None and n != assigned_node)
             ):
@@ -160,10 +165,8 @@ class KevMAPF:
                 result.append(n)
         return result
 
-    def _reroute(
-        self, robot: dict, zid: str, info: dict
-    ) -> tuple[list[int] | None, str | None]:
-        """충돌 구간(`info`)과 차단 노드를 제외한 임시 가상 그래프에서 양보 로봇의 우회 경로를 탐색·검증한다."""
+    def _reroute_constraints(self, robot: dict, info: dict):
+        """우회 가능성 검사와 KEV 경로 검증에 같은 제외 자원을 사용한다."""
         forbid_nodes = set(self.blocked_nodes)
         forbid_edges: set[tuple[int, int]] = set()
 
@@ -181,7 +184,7 @@ class KevMAPF:
                 forbid_nodes.add(info["node"])
             else:
                 return (
-                    None,
+                    None, None,
                     "reroute cannot exclude current/goal node; use HOLD or change a task",
                 )
         elif info["kind"] == "edge":
@@ -196,10 +199,37 @@ class KevMAPF:
 
         if curr in forbid_nodes or goal in forbid_nodes:
             return (
-                None,
+                None, None,
                 "reroute cannot exclude current/goal node; use HOLD or change a task",
             )
 
+        return forbid_nodes, forbid_edges, None
+
+    def _can_reroute(self, robot: dict, info: dict) -> bool:
+        if self.reroute_count >= self.reroutes or robot.get("occupied_edge"):
+            return False
+        nodes, edges, error = self._reroute_constraints(robot, info)
+        if error:
+            return False
+        # Reachability only: Python never supplies a replacement route to KEV/FMS.
+        seen, pending = {robot["current_node"]}, [robot["current_node"]]
+        while pending:
+            current = pending.pop()
+            if current == robot["goal_node"]:
+                return True
+            for neighbor in self.graph.compact["adjacency"].get(str(current), []):
+                target = neighbor["to"]
+                if target not in seen and target not in nodes and (current, target) not in edges:
+                    seen.add(target)
+                    pending.append(target)
+        return False
+
+    def _reroute(self, robot: dict, zid: str, info: dict) -> tuple[list[int] | None, str | None]:
+        """KEV가 생성한 우회 경로를 제외 자원과 원본 그래프에 대조한다."""
+        forbid_nodes, forbid_edges, error = self._reroute_constraints(robot, info)
+        if error:
+            return None, error
+        curr, goal = robot["current_node"], robot["goal_node"]
         virtual = self.graph.virtual_graph(forbid_nodes, forbid_edges)
         traffic = mapf_traffic(self.robots, robot["id"], occupied=self.occupied)
         try:
@@ -238,119 +268,68 @@ class KevMAPF:
         except Exception as exc:
             return None, f"{type(exc).__name__}: {exc}"
 
-    def _select_zone(self, it: int, available_zones: dict[str, dict]) -> tuple[str, dict]:
-        """[1단계] 해결할 공유 충돌 구간(zone)을 선택한다."""
-        zchoices = {
-            f"z{i}": (
-                f"zone={zid}, "
-                f"sharing={','.join(info['robots'])}, "
-                f"occupant={','.join(self._zone_occupants(zid, info)) or 'FREE'}"
+    def _select_zone(self, available_zones: dict[str, dict]) -> tuple[str, dict]:
+        """조정 순서만 결정한다. 진입 단계는 ETA나 통과 우선순위가 아니다."""
+        current_resources = set()
+        for robot in self.robots.values():
+            if robot.get("occupied_edge") and len(robot["path"]) > 1:
+                a, b = sorted(robot["path"][:2])
+                current_resources.add(f"edge:{a}:{b}")
+            elif not robot.get("occupied_edge"):
+                current_resources.add(f"node:{robot['current_node']}")
+
+        def key(item):
+            zid, info = item
+            occupied = bool(self._zone_occupants(zid, info)) or bool(
+                current_resources.intersection([zid] + info.get("resources", []))
             )
-            for i, (zid, info) in enumerate(available_zones.items())
-        }
-        zkey = self.live.pick(
-            {**self._graph_state(), "zones": available_zones},
-            zchoices,
-            KEV_ZONE_INSTRUCTIONS,
-            f"mapf_zone_{it}",
-        )
-        return list(available_zones.items())[int(zkey.removeprefix("z"))]
+            entries = [first_zone_index(self.robots[rid]["path"], info) for rid in info["robots"]]
+            return (not occupied, min(entries), zid)
+
+        return min(available_zones.items(), key=key)
 
     def _resolve_priority(
-        self,
-        it: int,
-        zid: str,
-        info: dict,
-        pair: tuple[str, str],
-        occupant: str | None,
-        potential_conflict_zones: dict[str, dict],
-    ) -> tuple[str, str] | None:
-        """[2단계] 우선순위 사이클을 만들지 않는 후보 중 먼저 통과할 로봇(high)과 양보 로봇(low)을 선택한다."""
-        a, b = pair
-        possible = [
-            p for p in ((a, b), (b, a)) if not would_cycle(self.priorities, p[0], p[1])
-        ]
-        if occupant in pair:
-            other = b if occupant == a else a
-            possible = (
-                []
-                if would_cycle(self.priorities, occupant, other)
-                else [(occupant, other)]
-            )
-        if not possible:
-            self.decisions.append(
-                {
-                    "zone": zid,
-                    "robots": [a, b],
-                    "action": "HOLD",
-                    "reason": "all priority choices create cycles",
-                }
-            )
-            return None
-
-        if self.reroutes == 0:
-            feasible = []
-            for hi, lo in possible:
-                if not self._wait_candidates(self.robots[lo], info):
-                    continue
-                high_path = set(self.robots[hi]["path"])
-                low_curr = self.robots[lo]["path"][0]
-                if low_curr not in high_path:
-                    feasible.append((hi, lo))
-            if not feasible:
-                self.decisions.append(
-                    {
-                        "zone": zid,
-                        "robots": [a, b],
-                        "action": "HOLD",
-                        "reason": "NO_FEASIBLE_WAIT_OR_REROUTE",
-                    }
-                )
-                return None
-            possible = feasible
-
-        if not self.priority_scores:
+        self, pair: tuple[str, str], potential_conflict_zones: dict[str, dict],
+    ) -> tuple[str, str]:
+        """계획당 한 번 고정한 (-score, robot ID) 전체 순서로만 관계를 만든다."""
+        if not self._priority_rank:
             common_state = {
                 **self._graph_state(),
                 "conflict_zones": potential_conflict_zones,
                 "current_occupancy": self.occupied,
             }
-            involved = sorted(
-                {rid for z in potential_conflict_zones.values() for rid in z["robots"]}
-            )
-            self.priority_scores.update(self.live.score_many(common_state, involved))
+            # A reroute may introduce a conflict with an initially unrelated robot.
+            involved = sorted(self.robots)
+            scores = self.live.score_many(common_state, involved)
+            if not isinstance(scores, dict) or set(scores) != set(involved) or any(
+                isinstance(value, bool) or not isinstance(value, (int, float))
+                or not math.isfinite(value) for value in scores.values()
+            ):
+                raise ValueError("KEV must return one finite priority score for every planned robot")
+            self.priority_scores = dict(scores)
             self.priority_score_calls += 1
+            ordered = sorted(involved, key=lambda rid: (-scores[rid], rid))
+            self._priority_rank = {rid: rank for rank, rid in enumerate(ordered)}
 
-        return min(possible, key=lambda p: (-self.priority_scores[p[0]], p[0]))
+        high, low = sorted(pair, key=self._priority_rank.__getitem__)
+        return high, low
 
     def _apply_wait(
         self,
-        it: int,
-        zid: str,
-        info: dict,
-        pair: tuple[str, str],
         low: str,
         wait_nodes: list[int],
         result: dict[str, Any],
         status: str,
     ) -> str:
         """[4단계 - WAIT] 상류 대기 노드를 선택하고 예약 및 경로 중첩 여부를 검증한다."""
-        wait_map = {f"w{i}": n for i, n in enumerate(wait_nodes)}
-        wc = {
-            k: f"Wait at node {n} (on remaining route before {zid})"
-            for k, n in wait_map.items()
-        }
-        select = self.live.pick(
-            {
-                **self._state(zid, info, list(pair)),
-                "wait_robot": low,
-                "wait_nodes": wait_nodes,
-            },
-            wc,
-            KEV_WAIT_INSTRUCTIONS,
-            f"wait_node_{it}",
-        )
-        selected = wait_map[select]
+        if not wait_nodes:
+            result.update(action="HOLD", reason="NO_SAFE_WAIT_NODE")
+            return "BLOCKED"
+        path = self.robots[low]["path"]
+        selected = min(wait_nodes, key=lambda node: (
+            sum(node in other["path"] for rid, other in self.robots.items() if rid != low),
+            -path.index(node), node,
+        ))
         reserved_by = self.wait_reservations.get(selected)
         assigned_node = self.robot_wait_nodes.get(low)
 
@@ -392,7 +371,7 @@ class KevMAPF:
         return status
 
     def _is_vacating_pair(self, node: int, a: str, b: str) -> bool:
-        """한 로봇이 해당 노드를 출발하여 즉시 비워주고(t=0), 다른 로봇이 이후 단계(t>=1)에 도착하는 무충돌 통과인지 판정한다."""
+        """출발 노드를 비우는 경로인지 확인한다. 실제 점유 해제·진입 허가는 FMS가 검사한다."""
         rA, rB = self.robots.get(a), self.robots.get(b)
         if not rA or not rB:
             return False
@@ -412,7 +391,7 @@ class KevMAPF:
         return False
 
     def resolve(self) -> dict:
-        """최대 `self.rounds` 동안 공유 구간 충돌을 탐색하고 Kev 4단계 질의로 조정 계획을 수립한다."""
+        """최대 `self.rounds` 동안 공유 구간 충돌을 탐색하고 코드 선택과 KEV 판단으로 조정 계획을 수립한다."""
         start = time.perf_counter()
         status = "PROPOSED"
         routes = {r: x["path"] for r, x in self.robots.items()}
@@ -423,10 +402,10 @@ class KevMAPF:
             available_zones: dict[str, dict] = {}
             for zid, info in potential_conflict_zones.items():
                 pair = self._pair_for(zid, info)
+                while pair is not None and info.get("kind") == "node" and self._is_vacating_pair(info["node"], *pair):
+                    self.processed.add((zid, *pair))
+                    pair = self._pair_for(zid, info)
                 if pair is not None:
-                    if info.get("kind") == "node" and self._is_vacating_pair(info["node"], pair[0], pair[1]):
-                        self.processed.add((zid, pair[0], pair[1]))
-                        continue
                     zone_pairs[zid] = pair
                     available_zones[zid] = info
 
@@ -434,7 +413,7 @@ class KevMAPF:
                 break
 
             # [1단계] 충돌 구간 선택
-            zid, info = self._select_zone(it, available_zones)
+            zid, info = self._select_zone(available_zones)
             pair = zone_pairs.get(zid) or self._pair_for(zid, info)
             if pair is None:
                 continue
@@ -469,28 +448,17 @@ class KevMAPF:
                 continue
 
             # [2단계] 우선순위 결정
-            pri_pair = self._resolve_priority(
-                it, zid, info, pair, occupant, potential_conflict_zones
-            )
-            if pri_pair is None:
-                status = "BLOCKED"
-                if (
-                    self.decisions
-                    and self.decisions[-1].get("reason") == "NO_FEASIBLE_WAIT_OR_REROUTE"
-                ):
-                    break
-                continue
-            high, low = pri_pair
+            high, low = self._resolve_priority(pair, potential_conflict_zones)
 
-            # [3단계] 양보 로봇의 행동 선택
+            # [3단계] 점유는 순위를 바꾸지 않으며, 구역 안에서 상류 WAIT를 할 수 없다.
             waiter = self.robots[low]
-            wait_nodes = self._wait_candidates(waiter, info)
+            wait_nodes = [] if occupant == low or waiter.get("occupied_edge") else self._wait_candidates(waiter, info, high)
             action_choices = {}
             if wait_nodes:
                 action_choices["action_wait"] = (
                     "WAIT: Stop at a permitted upstream node and allow the priority robot to proceed."
                 )
-            if self.reroute_count < self.reroutes:
+            if self._can_reroute(waiter, info):
                 action_choices["action_reroute"] = (
                     "REROUTE: Attempt to generate a valid alternative route around the shared zone."
                 )
@@ -520,13 +488,13 @@ class KevMAPF:
                 "action": "HOLD",
                 "wait_node": None,
                 "needs_fms_approval": True,
-                "priority_robot_action": "PROCEED",
+                "priority_robot_action": "WAIT" if occupant == low else "PROCEED",
             }
 
             # [4단계] 선택한 행동 적용
             if action == "action_wait":
                 status = self._apply_wait(
-                    it, zid, info, pair, low, wait_nodes, result, status
+                    low, wait_nodes, result, status
                 )
             elif action == "action_reroute":
                 self.reroute_count += 1
@@ -538,11 +506,7 @@ class KevMAPF:
                     result.update(action="REROUTE", new_path=new_route)
                     routes = {r: x["path"] for r, x in self.robots.items()}
                     potential_conflict_zones = group_conflict_zones(zone_candidates(routes))
-                elif self.has_wait_policy and wait_nodes:
-                    result["reroute_fallback_reason"] = error
-                    status = self._apply_wait(
-                        it, zid, info, pair, low, wait_nodes, result, status
-                    )
+                    self.processed = {entry for entry in self.processed if low not in entry[1:]}
                 else:
                     result.update(action="HOLD", reason="REROUTE_FAILED", details=error)
                     status = "BLOCKED"
@@ -551,11 +515,10 @@ class KevMAPF:
                 status = "BLOCKED"
 
             if result["action"] == "WAIT":
-                if not would_cycle(self.priorities, high, low):
-                    self.priorities.add((high, low))
-                else:
-                    result.update(action="HOLD", reason="PRIORITY_CYCLE_DETECTED")
-                    status = "BLOCKED"
+                # Every edge increases the same frozen rank, so a cycle is impossible.
+                self.priorities.add((high, low))
+            elif result["action"] == "HOLD":
+                result["priority_robot_action"] = "HOLD"
 
             self.decisions.append(result)
         else:
@@ -581,6 +544,10 @@ class KevMAPF:
             for d in self.decisions if d.get("action") in ("WAIT", "HOLD")
             for rid in ([d["yield_robot"]] if d.get("yield_robot") else d.get("robots", []))
         }
+        yield_robots.update(
+            d["priority_robot"] for d in self.decisions
+            if d.get("priority_robot_action") in ("WAIT", "HOLD")
+        )
         proceed_robots = sorted(set(self.robots) - yield_robots)
 
         return {

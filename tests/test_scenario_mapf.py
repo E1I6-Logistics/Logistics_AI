@@ -16,7 +16,7 @@ class ScenarioMapfTests(unittest.TestCase):
         self.scenarios = {s["name"]: s for s in self.config["scenarios"]}
 
     def test_scenario_config_schema(self):
-        """traffic_scenarios.json에 5쌍(총 10개)의 알고리즘과 AI/MAPF 시나리오가 올바르게 정의되어 있는지 검증."""
+        """traffic_scenarios.json에 5쌍의 알고리즘·AI/MAPF 시나리오와 주문 스트레스 시험가 올바르게 정의되어 있는지 검증."""
         expected_pairs = [
             ("corridor_head_on", "corridor_head_on_ai"),
             ("junction_contention", "junction_contention_ai"),
@@ -25,7 +25,7 @@ class ScenarioMapfTests(unittest.TestCase):
             ("priority_yield", "priority_yield_ai"),
         ]
 
-        self.assertEqual(len(self.scenarios), 10)
+        self.assertEqual(len(self.scenarios), 11)
         for algo_name, ai_name in expected_pairs:
             self.assertIn(algo_name, self.scenarios, f"{algo_name} 누락")
             self.assertIn(ai_name, self.scenarios, f"{ai_name} 누락")

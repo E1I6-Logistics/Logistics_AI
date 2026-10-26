@@ -1,10 +1,10 @@
-"""[모듈: kev_conflict.py - 다중 로봇 충돌 구역 감지 및 데드락 검사]
+"""[모듈: kev_conflict.py - 다중 로봇 공유 구역 및 임의 우선순위 관계 검사]
 - 역할: 여러 로봇의 예정 경로에서 공유 노드·간선을 식별하고, 우선순위 그래프의 순환(Cycle) 여부를 검증한다.
 - 기능:
   1. 공유 노드 및 양방향 물리 간선 추출 (zone_candidates)
   2. 동일 로봇 집합이 연속 공유하는 노드/간선 그룹화 (group_conflict_zones)
   3. 경로 내 충돌 구역 최초 진입 인덱스 계산 (first_zone_index)
-  4. 우선순위 관계 추가 시 순환(데드락) 발생 여부 DFS 검사 (would_cycle)
+  4. 외부의 임의 우선순위 관계에 대한 그래프 순환 DFS 검사 (would_cycle)
 """
 
 from __future__ import annotations
@@ -114,7 +114,7 @@ def first_zone_index(path: list[int], zone: dict[str, Any]) -> int | None:
 
 
 def would_cycle(priorities: set[tuple[str, str]], high: str, low: str) -> bool:
-    """기존 우선순위 관계 집합(`priorities`)에 `(high, low)`를 추가했을 때 순환(Deadlock)이 생기는지 DFS로 검사한다."""
+    """임의의 외부 관계를 검사하는 공개 유틸리티. 고정 Score 순서의 MAPF 엔진은 사용하지 않는다."""
     if high == low:
         return True
     outgoing: dict[str, set[str]] = defaultdict(set)

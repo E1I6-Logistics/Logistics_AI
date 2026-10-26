@@ -286,6 +286,11 @@
           "task_priority": 3
         }
       ]
+    },
+    {
+      "name": "random_order_stress",
+      "kind": "random_orders",
+      "description": "[AI/MAPF] 무작위 주문 연속 배차 · 주문당 1~5개 · 수동 중지 · 기록 저장"
     }
   ]
 }

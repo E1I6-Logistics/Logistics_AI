@@ -1,7 +1,7 @@
 """[모듈: Kev MAPF 패키지 통합 진입점]
 - 구성 모듈:
   1. kev_graph.py: GeoJSON 그래프 래퍼 및 경로 유효성 검증
-  2. kev_client.py: Kev AI 서버 통신 클라이언트(LiveKEV) 및 4단계 지침 상수
+  2. kev_client.py: Kev AI 서버 통신 클라이언트(LiveKEV) 및 Score·행동 지침 상수
   3. kev_conflict.py: 다중 로봇 공유 구간 탐색 및 우선순위 순환(Cycle) 감지
   4. kev_engine.py: 4단계 의사결정 기반 MAPF 충돌 해결 코어 엔진(KevMAPF)
   5. kev_adapter.py: FMS/Dispatcher 연동 DTO 변환 및 통합 계획 함수
@@ -17,8 +17,6 @@ from .kev_adapter import (
 from .kev_client import (
     KEV_ACTION_INSTRUCTIONS,
     KEV_PRIORITY_SCORE_INSTRUCTIONS,
-    KEV_WAIT_INSTRUCTIONS,
-    KEV_ZONE_INSTRUCTIONS,
     LiveKEV,
 )
 from .kev_conflict import (
@@ -48,10 +46,8 @@ __all__ = [
     "_node",
     "_node_sort",
     "LiveKEV",
-    "KEV_ZONE_INSTRUCTIONS",
     "KEV_PRIORITY_SCORE_INSTRUCTIONS",
     "KEV_ACTION_INSTRUCTIONS",
-    "KEV_WAIT_INSTRUCTIONS",
     "zone_candidates",
     "group_conflict_zones",
     "first_zone_index",

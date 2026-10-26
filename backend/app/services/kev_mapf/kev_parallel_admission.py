@@ -59,7 +59,7 @@ def fleet_snapshot(execution, c):
                     idle_nodes.append(int(r["occupied_node"]))
         return {"robots": robots, "pending": pending, "requests": requests,
                 "identity": identity, "blocked_nodes": idle_nodes,
-                "protected": protected}
+                "protected": protected, "wait_node_reservations": execution.wait_reservations()}
 
 
 def wait_resources(info):
@@ -140,6 +140,9 @@ class ParallelAdmission:
             latest = fleet_snapshot(execution, c)
             if latest is None or latest["identity"] != snapshot["identity"] or latest["protected"] != snapshot["protected"]:
                 return False
+            for d in advisory["decisions"]:
+                if d["action"] == "WAIT" and set(latest["wait_node_reservations"].get(str(d["wait_node"]), [])) - {d["yield_robot"]}:
+                    return False
             for req in pending.values():
                 valid = self._validators.get(req["request_id"])
                 try:
@@ -188,7 +191,8 @@ class ParallelAdmission:
             if cached and cached[0] == key and monotonic() < cached[1]:
                 return None
             settings = {**config, "wait_allowed_nodes": [int(req["current_node"]) for req in snapshot["pending"].values()],
-                        "blocked_nodes": snapshot["blocked_nodes"]}
+                        "blocked_nodes": snapshot["blocked_nodes"],
+                        "wait_node_reservations": snapshot["wait_node_reservations"]}
             advisory = await asyncio.to_thread(plan_mapf_from_route_results, graph, snapshot["requests"], config=settings)
             from ..route_graph import load_route_graph
             from ..mode_service import mode_manager

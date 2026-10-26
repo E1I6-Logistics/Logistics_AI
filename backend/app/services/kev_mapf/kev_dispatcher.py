@@ -390,6 +390,7 @@ async def dispatch_mapf(
                     prepared["graph"],
                     config={
                         "wait_allowed_nodes": wait_nodes,
+                        "wait_node_reservations": store.mapf.wait_reservations(),
                         "max_rounds": 20,
                         "max_reroutes": max_reroutes,
                         "priority_mode": mapf_priority_mode(),

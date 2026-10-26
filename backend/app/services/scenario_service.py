@@ -10,6 +10,8 @@ from threading import RLock
 from time import monotonic
 from uuid import uuid4
 
+from .order_stress_test import OrderStressTest, STRESS_NAME, MAX_OPEN_ORDERS, unfinished_order
+
 logger = logging.getLogger(__name__)
 
 from ..config import BASE_DIR, REAL_OCCUPANCY_TOLERANCE_M, REAL_POSE_TIMEOUT_S
@@ -20,6 +22,7 @@ from .pathfinding import DistanceAStar
 from .route_graph import load_route_graph, locate_current_node
 
 SCENARIO_PATH = BASE_DIR / "tests/traffic_scenarios.json"
+RECORD_DIR = BASE_DIR / "logs/scenarios"
 
 
 # 설정을 불러온다.
@@ -34,6 +37,8 @@ def load_config():
             names.add(name)
             if not isinstance(scenario["description"], str):
                 raise ValueError("description은 문자열이어야 합니다.")
+            if scenario.get("kind") == "random_orders" and name == STRESS_NAME:
+                continue
             ids, starts = set(), set()
             for robot in scenario["robots"]:
                 robot["id"] = normalize_robot_id(robot["id"])
@@ -118,6 +123,17 @@ class ScenarioManager:
             if self.active and (robot_id is None or normalize_robot_id(robot_id) in self._status["robot_ids"]):
                 raise ValueError("시나리오 실행 중입니다. 완료 또는 정지 후 다시 시도하세요.")
 
+    @property
+    def order_workload(self):
+        return self.active and self._status["name"] == STRESS_NAME
+
+    def ensure_order_available(self, run_id=None):
+        with self.lock:
+            if (self._status["state"] == "running" and self.order_workload
+                    and run_id == self._status["run_id"]):
+                return
+            self.ensure_available()
+
     # 명령을 보호한다.
     def protect_command(self, method):
         # 보호된 작업을 실행한다.
@@ -145,6 +161,8 @@ class ScenarioManager:
             scenario = next((s for s in config["scenarios"] if s["name"] == name), None)
             if scenario is None:
                 raise ValueError(f"알 수 없는 시나리오: {name}")
+            if scenario.get("kind") == "random_orders":
+                return self._start_order_stress(scenario)
             mode = mode_manager.mode
             graph = load_route_graph()
             expected = json.loads((BASE_DIR / "routes/test.geojson").read_text())
@@ -203,6 +221,54 @@ class ScenarioManager:
                 self._run(scenario, graph, planner.nodes, float(config["timeout_seconds"][mode]))
             )
             return self.status()
+
+    def _start_order_stress(self, scenario):
+        from .kev_mapf.kev_dispatcher import mapf_enabled
+        if mode_manager.mode != "simulation" or mode_manager.operation_mode != "ai" or not mapf_enabled("simulation"):
+            raise ValueError("주문 스트레스 시험은 시뮬레이션 AI/MAPF 모드에서 실행하세요.")
+        states = robot_states("simulation")
+        if not states or any(not r["connected"] or not r["fresh"] or r["status"] != "IDLE"
+                             or r["active"] or r.get("order_id") for r in states.values()):
+            raise ValueError("연결된 모든 로봇이 작업 없는 IDLE 상태여야 합니다.")
+        run_id = uuid4().hex
+        graph = load_route_graph()
+        recorder = OrderStressTest(run_id, RECORD_DIR, seed=int(run_id[:8], 16))
+        self._status = dict(state="running", name=STRESS_NAME, run_id=run_id,
+            description=scenario["description"], mode="simulation", robot_ids=list(states),
+            robots=[], elapsed=0.0, message="주문당 1~5개, 미완료 최대 6개를 유지하며 수동 중지까지 배차",
+            record_url=f"/api/scenarios/records/{run_id}")
+        self._task = asyncio.create_task(self._run_order_stress(recorder, graph))
+        return self.status()
+
+    async def _run_order_stress(self, recorder, graph):
+        from .order_manager import order_manager
+        try:
+            while True:
+                with self.lock:
+                    summary, rows = recorder.sample(order_manager.list_orders(), robot_states("simulation"))
+                    self._status.update(metrics=summary, robots=rows, elapsed=summary["elapsed"])
+                    if self._status["state"] == "stopping":
+                        message = "새 배차 중지. 접수된 주문은 FMS에서 계속 처리합니다."
+                        recorder.finish("stopped", message)
+                        self._status.update(state="completed", metrics=recorder.summary, message=message)
+                        return
+                    if (mode_manager.mode != "simulation" or mode_manager.operation_mode != "ai"
+                            or load_route_graph() != graph):
+                        raise ValueError("운용 모드 또는 그래프 변경으로 새 배차를 중지했습니다.")
+                    open_count = sum(unfinished_order(o) for o in order_manager.list_orders())
+                    for _ in range(max(0, MAX_OPEN_ORDERS-open_count)):
+                        items = recorder.next_items()
+                        order = order_manager.create_order(items, sum(items.values()),
+                            order_name=f"STRESS-{recorder.run_id[:8]}-{len(recorder.orders)+1:05d}",
+                            driving_mode="llm", selector="kev", model="kev-08b", scenario_run_id=recorder.run_id)
+                        recorder.created(order)
+                await asyncio.sleep(1)
+        except (Exception, asyncio.CancelledError) as exc:
+            message = str(exc) or "서버 종료로 새 배차 중지; 마지막 기록을 확인하세요."
+            try:
+                recorder.finish("interrupted" if isinstance(exc, asyncio.CancelledError) else "failed", message)
+            finally:
+                self._status.update(state="failed", message=message, metrics=recorder.summary)
 
     # 관련을 실행한다.
     async def _run(self, scenario, graph, nodes, timeout):
@@ -353,6 +419,20 @@ class ScenarioManager:
                     except Exception as stop_error:
                         errors.append(f"{spec['id']} 정지 요청 실패: {stop_error}")
             self._status.update(state="failed", message="\n".join([reason, *errors]))
+
+    async def stop(self):
+        self.interrupt()
+        if self.order_workload and self._task is not None:
+            await asyncio.shield(self._task)
+        return self.status()
+
+    def reset(self, run_id):
+        with self.lock:
+            if self.active or self._status.get("run_id") != run_id:
+                raise ValueError("종료된 현재 시험만 초기화할 수 있습니다.")
+            self._status = {"state": "idle", "name": None, "run_id": None, "robots": [], "message": ""}
+            self._task = None
+            return self.status()
 
     # 실행 중인 시나리오를 중단한다.
     def interrupt(self, robot_id=None):

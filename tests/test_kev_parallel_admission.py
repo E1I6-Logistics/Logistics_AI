@@ -3,14 +3,16 @@
 from copy import deepcopy
 import math
 import os
+from time import monotonic
 import unittest
 from unittest.mock import patch
 
 from backend.app.services.kev_mapf.kev_adapter import plan_mapf_from_route_results
 from backend.app.services.kev_mapf.kev_coordinator import FmsMapfCoordinator
-from backend.app.services.kev_mapf.kev_parallel_admission import fleet_snapshot
+from backend.app.services.kev_mapf.kev_parallel_admission import dispatch_order, fleet_snapshot
 from backend.app.services.mock_data import MockFmsStore
-from backend.app.services.reservation import ReservationTable, node_key
+from backend.app.services.pathfinding import DistanceAStar
+from backend.app.services.reservation import Reservation, ReservationTable, node_key
 from tests.mock.kev_mock import MockKEV
 
 
@@ -33,7 +35,8 @@ def network(shared=False):
 class ParallelAdmissionTests(unittest.TestCase):
     def setup_fleet(self, shared=False):
         self.graph = network(shared)
-        self.store = MockFmsStore(ReservationTable())
+        self.reservations = ReservationTable()
+        self.store = MockFmsStore(self.reservations)
         self.c = FmsMapfCoordinator(self.store)
         points = {f["properties"]["id"]: f["geometry"]["coordinates"] for f in self.graph["features"] if f["geometry"]["type"] == "Point"}
         for i in range(3):
@@ -48,8 +51,31 @@ class ParallelAdmissionTests(unittest.TestCase):
         snapshot = fleet_snapshot(self.store.mapf, self.c)
         advisory = plan_mapf_from_route_results(self.graph, snapshot["requests"], planner=planner or MockKEV(), config={
             "wait_allowed_nodes": [r["current_node"] for r in snapshot["pending"].values()],
+            "wait_node_reservations": snapshot["wait_node_reservations"],
         })
         return snapshot, advisory
+
+    def test_wait_reservation_snapshot_contains_owners_without_timestamps(self):
+        self.setup_fleet(shared=True)
+        self.stage("robot1", [0, 3, 6])
+        self.stage("robot2", [1, 3, 4])
+        self.reservations.try_commit("external", "nav", [Reservation(node_key(1), "external", "nav", 0, 100., 200.)])
+        snapshot, advisory = self.plan()
+        self.assertEqual(snapshot["wait_node_reservations"], {"1": ["external"]})
+        self.assertEqual(advisory["status"], "BLOCKED")
+        self.assertEqual(advisory["decisions"][0]["action"], "HOLD")
+
+    def test_reservation_added_during_inference_prevents_wait_commit(self):
+        self.setup_fleet(shared=True)
+        self.stage("robot1", [0, 3, 6])
+        self.stage("robot2", [1, 3, 4])
+        snapshot, advisory = self.plan()
+        self.assertEqual(advisory["decisions"][0]["wait_node"], 1)
+        self.reservations.try_commit("external", "nav", [Reservation(node_key(1), "external", "nav", 0, 100., 200.)])
+        before = self.store.mapf.snapshot()
+        self.assertFalse(self.c.admission.apply(self.store.mapf, self.graph, snapshot, advisory))
+        self.assertEqual(self.store.mapf.snapshot(), before)
+        self.assertEqual(len(self.c.pending_snapshot()), 2)
 
     def test_fms_priority_is_score_only_and_rejects_choice_setting(self):
         from backend.app.services.kev_mapf.kev_dispatcher import mapf_priority_mode
@@ -183,6 +209,48 @@ class ParallelAdmissionTests(unittest.TestCase):
         self.assertEqual(high["goal_node"], "6")
         self.assertFalse(self.store._traffic._mapf_zone_waiting(low))
 
+    def test_score_priority_does_not_grant_entry_before_low_occupant_clears(self):
+        self.setup_fleet(shared=True)
+        self.graph["features"].append({"geometry": {"type": "MultiLineString"}, "properties": {
+            "id": "exit", "startid": "6", "endid": "4", "weight": 1,
+        }})
+        self.store._robots["robot2"].update(x=1., y=0., current_node="3", occupied_node="3")
+        self.stage("robot1", [0, 3, 6])
+        self.stage("robot2", [3, 6, 4])
+        snapshot = fleet_snapshot(self.store.mapf, self.c)
+        advisory = plan_mapf_from_route_results(self.graph, snapshot["requests"], planner=MockKEV(), config={
+            "wait_allowed_nodes": [0], "zone_occupancy": {"node:3": "robot2"},
+        })
+        self.assertEqual(advisory["decisions"][0]["priority_robot"], "robot1")
+        self.assertEqual(advisory["decisions"][0]["priority_robot_action"], "WAIT")
+        self.assertTrue(self.c.admission.apply(self.store.mapf, self.graph, snapshot, advisory))
+        high, low = self.store._robots["robot1"], self.store._robots["robot2"]
+        now = monotonic()
+        with patch("backend.app.services.mock_data.load_route_graph", return_value=self.graph):
+            # A lower-score occupant can stall beyond its reserved departure.
+            nodes = DistanceAStar(self.graph).nodes
+            for tick in range(1, 101):
+                at = now+tick*.1
+                self.store._traffic.retry_waiting(at, self.graph)
+                self.store.advance_mock_robot("robot1", .1, now=at, graph=self.graph, nodes=nodes)
+                self.assertEqual(low["occupied_node"], "3")
+                self.assertNotEqual(high["occupied_node"], "3")
+                self.assertGreaterEqual(math.dist((high["x"], high["y"]), (low["x"], low["y"])), .12-1e-4)
+            for tick in range(101, 801):
+                self.store.advance_simulation(.1, now=now+tick*.1)
+                self.assertFalse(high["occupied_node"] == low["occupied_node"] == "3")
+                self.assertGreaterEqual(math.dist((high["x"], high["y"]), (low["x"], low["y"])), .12-1e-4)
+                if high["goal_node"] is None and low["goal_node"] is None:
+                    break
+        self.assertEqual((high["occupied_node"], low["occupied_node"]), ("6", "4"))
+
+    def test_fms_rejects_cyclic_external_wait_dependencies(self):
+        with self.assertRaisesRegex(ValueError, "cycle"):
+            dispatch_order(["robot1", "robot2"], [
+                {"action": "WAIT", "priority_robot": "robot1", "yield_robot": "robot2"},
+                {"action": "WAIT", "priority_robot": "robot2", "yield_robot": "robot1"},
+            ])
+
     def test_wait_does_not_block_nonshared_upstream_segment(self):
         self.setup_fleet(shared=True)
         traffic = self.store._traffic
@@ -280,6 +348,7 @@ class ParallelAdmissionTests(unittest.TestCase):
             mode = "simulation"
             transaction = execution.transaction
             snapshot = execution.snapshot
+            wait_reservations = execution.wait_reservations
             commit_routes = execution.commit_routes
 
         boundary = PublicExecution()
