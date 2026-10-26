@@ -126,6 +126,29 @@ async def send_node_goal(payload: GoalNodeRequest):
             mode = mode_manager.mode
             start = _preview_start_node(payload.robot_id, mode)
             graph = load_route_graph()
+            from ..services.kev_mapf.kev_dispatcher import dispatch_mapf, mapf_enabled
+
+            if mapf_enabled(mode):
+                from ..services.order_manager import order_manager
+
+                def valid():
+                    if (
+                        _llm_requests.get(robot_id) != token
+                        or mode_manager.mode != mode
+                        or load_route_graph() != graph
+                    ):
+                        raise HTTPException(409, "정지·새 요청·모드 또는 맵 변경으로 MAPF 요청을 취소했습니다.")
+                    scenario_manager.ensure_available(payload.robot_id)
+                    return True
+
+                order_manager.cancel_robot(robot_id, mode)
+                result = await dispatch_mapf(
+                    {"robot_id": robot_id, "mode": mode, "operation_mode": "ai",
+                     "driving_mode": "llm", "selector": payload.selector, "model": payload.model},
+                    payload.node_id, start, valid=valid,
+                )
+                return dict(result, driving_mode="llm", selector=payload.selector, model=payload.model)
+
             from ..services.kev_mapf.kev_traffic import live_traffic
 
             traffic = {"traffic": live_traffic(robot_id, graph=graph)} if mode == "simulation" else {}
@@ -146,9 +169,10 @@ async def send_node_goal(payload: GoalNodeRequest):
             order_manager.cancel_robot(robot_id, mode)
             if mode == "simulation":
                 from ..services.mock_data import mock_fms
-                from ..services.kev_mapf.kev_coordinator import fms_mapf_coordinator as coordinator
+                from ..services.kev_mapf.kev_dispatcher import runtime_for
+                _, coordinator = runtime_for(mode)
 
-                with coordinator._lock, mock_fms._lock:
+                with coordinator.transaction(mock_fms.mapf):
                     result = navigate_to_node(payload.robot_id, payload.node_id, mode, required_path=preview["path"])
                     coordinator.register_preview(
                         order={"robot_id": robot_id, "selector": payload.selector, "model": payload.model},

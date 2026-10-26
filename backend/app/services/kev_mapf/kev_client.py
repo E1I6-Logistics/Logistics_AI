@@ -2,7 +2,7 @@
 - 역할: Kev 의사결정 API(/v1/systemone)를 호출하는 실시간 클라이언트(`LiveKEV`)와 4단계 프롬프트 지침을 관리한다.
 - 기능:
   1. 1~4단계(Zone 선택, 우선순위 평가, 행동 선택, 대기 노드 선택) 프롬프트 지침 상수 정의
-  2. 단일/다중 로봇 우선순위 점수 평가 (score, score_many)
+  2. 다중 로봇 우선순위 일괄 점수 평가 (score_many)
   3. 선택지 기반 판단 (pick) - 후보 1개 시 API 호출 생략(forced)
   4. 우회 경로 탐색 (route) - preview_llm_route 재사용
 """
@@ -11,10 +11,8 @@ from __future__ import annotations
 
 import math
 import os
-import sys
 import time
-from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 from .kev_graph import Graph, _node
 
@@ -37,16 +35,10 @@ KEV_PRIORITY_SCORE_INSTRUCTIONS = (
     "task priority, occupancy, and shared conflict zones. "
     "Use the same evaluation criteria for every robot. "
     "Higher scores indicate higher priority to proceed. "
+    "Robots marked execution_committed are already following an approved route; "
+    "consider that a yielding plan must not stop or reroute them mid-edge. "
     "Do not invent arrival times or occupancy. "
     "Do not treat the score as movement permission."
-)
-
-# [2단계 지침 - Legacy Fallback (Choice 방식)] 충돌 구간에서 두 로봇 중 먼저 통과할 우선순위 로봇(priority_robot) 결정
-KEV_PRIORITY_INSTRUCTIONS = (
-    "You are the MAPF priority-decision component. Choose ONE robot to have "
-    "priority at the indicated shared resource, considering current position, "
-    "progress, task priority and occupancy. Avoid deadlocks and repeated "
-    "unnecessary concessions. Return only the criteria ID."
 )
 
 # [3단계 지침] 후순위(양보) 로봇이 상류에서 대기(WAIT)할지, 충돌 구간을 피해 우회(REROUTE)할지 결정
@@ -62,6 +54,8 @@ KEV_ACTION_INSTRUCTIONS = (
     "The controller validates all generated paths and falls back "
     "to HOLD if rerouting fails. "
     "All movement needs independent FMS permission. "
+    "WAIT applies only at the selected shared zone, not until the priority "
+    "robot completes its entire job. Unrelated robots may proceed in parallel. "
     "Return only a supplied action ID."
 )
 
@@ -83,21 +77,35 @@ _PRIORITY_LEVELS = [
 ]
 
 
+class KevPlanner(Protocol):
+    """MAPF 엔진이 요구하는 판단·경로 생성 계약. 실행 권한은 없다."""
+
+    calls: int
+    model_seconds: float
+    forced: int
+    warnings: list[str]
+    path_source: str
+    reroute_source: str
+
+    def score_many(self, state: dict, robot_ids: list[str]) -> dict[str, float]: ...
+
+    def pick(self, state: dict, candidates: dict[str, str], instructions: str, question_id: str) -> str: ...
+
+    def route(self, graph_data: dict, start: int, goal: int, *, selector: str = "kev",
+              model: str | None = None, traffic: dict | None = None) -> list[int]: ...
+
+
 class LiveKEV:
     """기존 Logistics_AI의 경로 preview(`preview_llm_route`)와 `KevSelector`를 재사용하는 실시간 판단 클라이언트."""
 
-    def __init__(self, repo: Path, *, model: str, deadline: float, max_steps: int | None):
-        repo = repo.expanduser().resolve()
-        target = repo / "backend/app/services/llm_route_preview.py"
-        if not target.is_file():
-            raise FileNotFoundError(f"Not a Logistics_AI checkout: {target}")
-        if str(repo) not in sys.path:
-            sys.path.insert(0, str(repo))
+    path_source = "kev_preview"
+    reroute_source = "kev_rerouted"
 
-        from backend.app.services.llm_route_preview import preview_llm_route
-        from backend.app.services.route_selector.kev_selector import KevSelector
+    def __init__(self, *, model: str):
+        from ..llm_route_preview import preview_llm_route
+        from ..route_selector.kev_selector import KevSelector
 
-        timeout = float(os.getenv("KEV_MAPF_TIMEOUT_SECONDS", "1.5"))
+        timeout = float(os.getenv("KEV_MAPF_TIMEOUT_SECONDS", "20"))
         self.selector = KevSelector(model=model, timeout_seconds=timeout)
         self.model = model
         self.preview_llm_route = preview_llm_route
@@ -105,21 +113,6 @@ class LiveKEV:
         self.model_seconds = 0.0
         self.forced = 0
         self.warnings: list[str] = []
-
-    def score(self, state: dict[str, Any], question_id: str) -> float:
-        """단일 로봇의 우선순위 점수를 평가한다."""
-        try:
-            result = self.selector.evaluate_score(
-                state, _PRIORITY_LEVELS, KEV_PRIORITY_SCORE_INSTRUCTIONS, question_id=question_id
-            )
-            score = float(result["score"])
-            if not math.isfinite(score):
-                raise ValueError("Invalid KEV priority score")
-            self.calls += 1
-            self.model_seconds += float(result.get("total_duration_seconds") or 0.0)
-            return score
-        except Exception as exc:
-            raise RuntimeError(f"KEV priority inference failed: {exc}") from exc
 
     def score_many(self, state: dict[str, Any], robot_ids: list[str]) -> dict[str, float]:
         """여러 로봇의 우선순위를 KEV API 요청 1회로 일괄 평가한다."""

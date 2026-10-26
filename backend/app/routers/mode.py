@@ -24,13 +24,19 @@ class ModeRequest(BaseModel):
 
 # 현재 상태의 복사본을 만든다.
 def _snapshot() -> dict[str, object]:
+    from ..services.kev_mapf.kev_dispatcher import mapf_enabled, mapf_priority_mode
+
     return {
         "mode": mode_manager.mode,
         "operation_mode": mode_manager.operation_mode,
         "feature_engines": FEATURE_ENGINES[mode_manager.operation_mode],
-        "real_available": True,
+        "real_available": ros_gateway._ros_node is not None,
         "simulation_active": mode_manager.mode == "simulation",
         "using_mock": mode_manager.mode == "simulation",
+        "mapf_enabled": mapf_enabled(),
+        "simulation_mapf_enabled": mapf_enabled("simulation"),
+        "real_mapf_enabled": mapf_enabled("real"),
+        "mapf_priority_mode": mapf_priority_mode(),
     }
 
 

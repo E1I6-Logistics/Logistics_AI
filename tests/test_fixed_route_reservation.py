@@ -199,12 +199,15 @@ class FixedReservationTests(unittest.TestCase):
             0.1,
             reservations=ReservationTable(),
             clock=lambda: 1,
+            mapf_ready=lambda rid: True,
         )
         with patch("backend.app.services.real_navigation.load_route_graph", return_value=graph()):
             nav.request("robot1", "3", NavigationType.GOAL, required_path=["0", "2", "3"])
             self.assertEqual(nav._robots["robot1"]["route"]["node_ids"], ["0", "2", "3"])
             nav._send("robot1", "3", 0, DistanceAStar(graph()))
-        self.assertEqual([xy[:2] for xy in sent[0]["waypoints"]], [(0.0, 1.0), (2.0, 0.0)])
+        self.assertEqual([xy[:2] for xy in sent[0]["waypoints"]], [(0.0, 1.0)])
+        self.assertEqual(nav._executing["robot1"][1], "2")
+        self.assertFalse(nav._executing["robot1"][3])
 
     def test_turtlebot3_footprint_constants(self):
         """TurtleBot3 Burger 표준 풋프린트 반경(0.06m) 상수가 정의되어 있는지 검증."""
@@ -261,4 +264,3 @@ class FixedReservationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

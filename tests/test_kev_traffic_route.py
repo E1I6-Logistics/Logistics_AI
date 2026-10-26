@@ -319,7 +319,7 @@ class KevTrafficRouteTests(unittest.TestCase):
                     traffic={"occupied_nodes": {2: "robot1"}, "robot_paths": {"robot1": [2, 4]}},
                 )
             finally:
-                kev_dispatcher.fms_mapf_coordinator.discard_pending("robot2")
+                kev_dispatcher.runtime_for("simulation")[1].discard_pending("robot2")
 
     def test_direction_cues_guide_shortest_path_selection(self) -> None:
         """방향 정보(dist_to_target, progress, direction)가 1-hop 가중치 함정을 피해 최단 경로로 유도하는지 검증한다."""

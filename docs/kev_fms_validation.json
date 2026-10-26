@@ -1,0 +1,5662 @@
+{
+  "checked_at": "2026-10-26T06:10:12.956954+00:00",
+  "scope": "KEV MAPF ownership, common execution contract, and parallel order regression fix",
+  "unit_and_integration_tests": {
+    "passed": 151,
+    "warning": "Existing Paho MQTT callback API deprecation"
+  },
+  "physical_robot_tested": false,
+  "live_simulation": {
+    "mode": {
+      "mode": "simulation",
+      "operation_mode": "ai",
+      "feature_engines": {
+        "route": "ai",
+        "dispatch": "algorithm",
+        "workstation": "algorithm"
+      },
+      "real_available": true,
+      "simulation_active": true,
+      "using_mock": true,
+      "mapf_enabled": true,
+      "simulation_mapf_enabled": true,
+      "real_mapf_enabled": true,
+      "mapf_priority_mode": "score"
+    },
+    "real_robot_commands_sent": false,
+    "results": [
+      {
+        "case": "parallel_disjoint",
+        "completed": true,
+        "elapsed_seconds": 3.16,
+        "expected": {
+          "robot1": "10",
+          "robot2": "9",
+          "robot3": "11"
+        },
+        "actual": {
+          "robot1": "10",
+          "robot2": "9",
+          "robot3": "11"
+        },
+        "minimum_sampled_separation_m": 0.3766236435621977,
+        "responses": [
+          {
+            "robot_id": "robot1",
+            "http_status": 200,
+            "response": {
+              "success": true,
+              "status": "SUCCESS",
+              "robot_id": "robot1",
+              "ui_id": "R-01",
+              "command": "goal-node",
+              "target": {
+                "node_id": 10
+              },
+              "message": "Mock command accepted",
+              "mock": true,
+              "route": {
+                "node_ids": [
+                  "0",
+                  "10"
+                ],
+                "edge_ids": [
+                  "20"
+                ],
+                "waypoint_yaws": [
+                  3.141592653589793,
+                  0.0
+                ],
+                "segment_index": 0,
+                "phase": "ready",
+                "departure_at": 971213.902998252,
+                "segment_departures": [
+                  971213.902998252
+                ],
+                "route_source": "llm"
+              },
+              "llm_preview": {
+                "path": [
+                  "0",
+                  "10"
+                ],
+                "model": "kev-08b",
+                "total_weight": 0.5077225489444732,
+                "calls": 0,
+                "baseline_path": [
+                  "0",
+                  "10"
+                ],
+                "baseline_weight": 0.5077225489444732,
+                "same_path": true,
+                "same_distance": true,
+                "distance_difference": 0.0
+              },
+              "mapf": {
+                "enabled": true,
+                "analysis_source": "MIXED_ACTIVE_PENDING_PARALLEL",
+                "plan_id": "04ad7bc22181426a8a52a48bfa1c0600",
+                "robot_count": 3,
+                "decisions": [],
+                "input_paths": {
+                  "robot1": [
+                    "0",
+                    "10"
+                  ],
+                  "robot2": [
+                    "1",
+                    "9"
+                  ],
+                  "robot3": [
+                    "6",
+                    "11"
+                  ]
+                },
+                "priority_mode": "score",
+                "priority_scores": {},
+                "metrics": {
+                  "kev_api_calls": 0,
+                  "kev_score_calls": 0,
+                  "kev_choice_calls": 0,
+                  "kev_forced_choices": 0,
+                  "kev_estimated_total_wall_seconds": 0.0,
+                  "reroutes": 0,
+                  "script_wall_seconds": 4e-05
+                },
+                "zone_wait_for": []
+              },
+              "driving_mode": "llm",
+              "selector": "kev",
+              "model": "kev-08b"
+            }
+          },
+          {
+            "robot_id": "robot2",
+            "http_status": 200,
+            "response": {
+              "success": true,
+              "status": "SUCCESS",
+              "robot_id": "robot2",
+              "ui_id": "R-02",
+              "command": "goal-node",
+              "target": {
+                "node_id": 9
+              },
+              "message": "Mock command accepted",
+              "mock": true,
+              "route": {
+                "node_ids": [
+                  "1",
+                  "9"
+                ],
+                "edge_ids": [
+                  "22"
+                ],
+                "waypoint_yaws": [
+                  3.141592653589793,
+                  0.0
+                ],
+                "segment_index": 0,
+                "phase": "ready",
+                "departure_at": 971213.902998252,
+                "segment_departures": [
+                  971213.902998252
+                ],
+                "route_source": "llm"
+              },
+              "llm_preview": {
+                "path": [
+                  "1",
+                  "9"
+                ],
+                "model": "kev-08b",
+                "total_weight": 0.5077225489444732,
+                "calls": 0,
+                "baseline_path": [
+                  "1",
+                  "9"
+                ],
+                "baseline_weight": 0.5077225489444732,
+                "same_path": true,
+                "same_distance": true,
+                "distance_difference": 0.0
+              },
+              "mapf": {
+                "enabled": true,
+                "analysis_source": "MIXED_ACTIVE_PENDING_PARALLEL",
+                "plan_id": "04ad7bc22181426a8a52a48bfa1c0600",
+                "robot_count": 3,
+                "decisions": [],
+                "input_paths": {
+                  "robot1": [
+                    "0",
+                    "10"
+                  ],
+                  "robot2": [
+                    "1",
+                    "9"
+                  ],
+                  "robot3": [
+                    "6",
+                    "11"
+                  ]
+                },
+                "priority_mode": "score",
+                "priority_scores": {},
+                "metrics": {
+                  "kev_api_calls": 0,
+                  "kev_score_calls": 0,
+                  "kev_choice_calls": 0,
+                  "kev_forced_choices": 0,
+                  "kev_estimated_total_wall_seconds": 0.0,
+                  "reroutes": 0,
+                  "script_wall_seconds": 4e-05
+                },
+                "zone_wait_for": []
+              },
+              "driving_mode": "llm",
+              "selector": "kev",
+              "model": "kev-08b"
+            }
+          },
+          {
+            "robot_id": "robot3",
+            "http_status": 200,
+            "response": {
+              "success": true,
+              "status": "SUCCESS",
+              "robot_id": "robot3",
+              "ui_id": "R-03",
+              "command": "goal-node",
+              "target": {
+                "node_id": 11
+              },
+              "message": "Mock command accepted",
+              "mock": true,
+              "route": {
+                "node_ids": [
+                  "6",
+                  "11"
+                ],
+                "edge_ids": [
+                  "45"
+                ],
+                "waypoint_yaws": [
+                  -2.460990681233863,
+                  1.5707963267948966
+                ],
+                "segment_index": 0,
+                "phase": "ready",
+                "departure_at": 971213.902998252,
+                "segment_departures": [
+                  971213.902998252
+                ],
+                "route_source": "llm"
+              },
+              "llm_preview": {
+                "path": [
+                  "6",
+                  "11"
+                ],
+                "model": "kev-08b",
+                "total_weight": 0.3772410899400711,
+                "calls": 0,
+                "baseline_path": [
+                  "6",
+                  "11"
+                ],
+                "baseline_weight": 0.3772410899400711,
+                "same_path": true,
+                "same_distance": true,
+                "distance_difference": 0.0
+              },
+              "mapf": {
+                "enabled": true,
+                "analysis_source": "MIXED_ACTIVE_PENDING_PARALLEL",
+                "plan_id": "04ad7bc22181426a8a52a48bfa1c0600",
+                "robot_count": 3,
+                "decisions": [],
+                "input_paths": {
+                  "robot1": [
+                    "0",
+                    "10"
+                  ],
+                  "robot2": [
+                    "1",
+                    "9"
+                  ],
+                  "robot3": [
+                    "6",
+                    "11"
+                  ]
+                },
+                "priority_mode": "score",
+                "priority_scores": {},
+                "metrics": {
+                  "kev_api_calls": 0,
+                  "kev_score_calls": 0,
+                  "kev_choice_calls": 0,
+                  "kev_forced_choices": 0,
+                  "kev_estimated_total_wall_seconds": 0.0,
+                  "reroutes": 0,
+                  "script_wall_seconds": 4e-05
+                },
+                "zone_wait_for": []
+              },
+              "driving_mode": "llm",
+              "selector": "kev",
+              "model": "kev-08b"
+            }
+          }
+        ],
+        "in_flight_submission": null,
+        "first_n7_entry_seconds": {},
+        "junction_violations": [],
+        "three_robot_shared_zone_decisions": [],
+        "junction_priority_respected": true,
+        "max_simultaneously_moving": 3,
+        "overlapping_motion_seconds": 2.31,
+        "three_robot_motion_seconds": 1.68
+      },
+      {
+        "case": "parallel_staggered",
+        "completed": true,
+        "elapsed_seconds": 3.99,
+        "expected": {
+          "robot1": "10",
+          "robot2": "9",
+          "robot3": "11"
+        },
+        "actual": {
+          "robot1": "10",
+          "robot2": "9",
+          "robot3": "11"
+        },
+        "minimum_sampled_separation_m": 0.3766236435621977,
+        "responses": [
+          {
+            "robot_id": "robot1",
+            "http_status": 200,
+            "response": {
+              "success": true,
+              "status": "SUCCESS",
+              "robot_id": "robot1",
+              "ui_id": "R-01",
+              "command": "goal-node",
+              "target": {
+                "node_id": 10
+              },
+              "message": "Mock command accepted",
+              "mock": true,
+              "route": {
+                "node_ids": [
+                  "0",
+                  "10"
+                ],
+                "edge_ids": [
+                  "20"
+                ],
+                "waypoint_yaws": [
+                  0.0,
+                  0.0
+                ],
+                "segment_index": 0,
+                "phase": "ready",
+                "departure_at": 971217.067431266,
+                "segment_departures": [
+                  971217.067431266
+                ],
+                "route_source": "llm"
+              },
+              "llm_preview": {
+                "path": [
+                  "0",
+                  "10"
+                ],
+                "model": "kev-08b",
+                "total_weight": 0.5077225489444732,
+                "calls": 0,
+                "baseline_path": [
+                  "0",
+                  "10"
+                ],
+                "baseline_weight": 0.5077225489444732,
+                "same_path": true,
+                "same_distance": true,
+                "distance_difference": 0.0
+              },
+              "mapf": {
+                "enabled": true,
+                "analysis_source": "MIXED_ACTIVE_PENDING_PARALLEL",
+                "plan_id": "596c8e5924924d6ba8dd598ef91bd3b0",
+                "robot_count": 1,
+                "decisions": [],
+                "input_paths": {
+                  "robot1": [
+                    "0",
+                    "10"
+                  ]
+                },
+                "priority_mode": "score",
+                "priority_scores": {},
+                "metrics": {
+                  "kev_api_calls": 0,
+                  "kev_score_calls": 0,
+                  "kev_choice_calls": 0,
+                  "kev_forced_choices": 0,
+                  "kev_estimated_total_wall_seconds": 0.0,
+                  "reroutes": 0,
+                  "script_wall_seconds": 0.0001
+                },
+                "zone_wait_for": []
+              },
+              "driving_mode": "llm",
+              "selector": "kev",
+              "model": "kev-08b"
+            }
+          },
+          {
+            "robot_id": "robot2",
+            "http_status": 200,
+            "response": {
+              "success": true,
+              "status": "SUCCESS",
+              "robot_id": "robot2",
+              "ui_id": "R-02",
+              "command": "goal-node",
+              "target": {
+                "node_id": 9
+              },
+              "message": "Mock command accepted",
+              "mock": true,
+              "route": {
+                "node_ids": [
+                  "1",
+                  "9"
+                ],
+                "edge_ids": [
+                  "22"
+                ],
+                "waypoint_yaws": [
+                  0.0,
+                  0.0
+                ],
+                "segment_index": 0,
+                "phase": "ready",
+                "departure_at": 971217.692144336,
+                "segment_departures": [
+                  971217.692144336
+                ],
+                "route_source": "llm"
+              },
+              "llm_preview": {
+                "path": [
+                  "1",
+                  "9"
+                ],
+                "model": "kev-08b",
+                "total_weight": 0.5077225489444732,
+                "calls": 0,
+                "baseline_path": [
+                  "1",
+                  "9"
+                ],
+                "baseline_weight": 0.5077225489444732,
+                "same_path": true,
+                "same_distance": true,
+                "distance_difference": 0.0
+              },
+              "mapf": {
+                "enabled": true,
+                "analysis_source": "MIXED_ACTIVE_PENDING_PARALLEL",
+                "plan_id": "9c82af49972c4b4e8309cd5b96d6f6fe",
+                "robot_count": 3,
+                "decisions": [],
+                "input_paths": {
+                  "robot1": [
+                    "0",
+                    "10"
+                  ],
+                  "robot2": [
+                    "1",
+                    "9"
+                  ],
+                  "robot3": [
+                    "6",
+                    "11"
+                  ]
+                },
+                "priority_mode": "score",
+                "priority_scores": {},
+                "metrics": {
+                  "kev_api_calls": 0,
+                  "kev_score_calls": 0,
+                  "kev_choice_calls": 0,
+                  "kev_forced_choices": 0,
+                  "kev_estimated_total_wall_seconds": 0.0,
+                  "reroutes": 0,
+                  "script_wall_seconds": 6e-05
+                },
+                "zone_wait_for": []
+              },
+              "driving_mode": "llm",
+              "selector": "kev",
+              "model": "kev-08b"
+            }
+          },
+          {
+            "robot_id": "robot3",
+            "http_status": 200,
+            "response": {
+              "success": true,
+              "status": "SUCCESS",
+              "robot_id": "robot3",
+              "ui_id": "R-03",
+              "command": "goal-node",
+              "target": {
+                "node_id": 11
+              },
+              "message": "Mock command accepted",
+              "mock": true,
+              "route": {
+                "node_ids": [
+                  "6",
+                  "11"
+                ],
+                "edge_ids": [
+                  "45"
+                ],
+                "waypoint_yaws": [
+                  1.5707963267948966,
+                  1.5707963267948966
+                ],
+                "segment_index": 0,
+                "phase": "ready",
+                "departure_at": 971217.692144336,
+                "segment_departures": [
+                  971217.692144336
+                ],
+                "route_source": "llm"
+              },
+              "llm_preview": {
+                "path": [
+                  "6",
+                  "11"
+                ],
+                "model": "kev-08b",
+                "total_weight": 0.3772410899400711,
+                "calls": 0,
+                "baseline_path": [
+                  "6",
+                  "11"
+                ],
+                "baseline_weight": 0.3772410899400711,
+                "same_path": true,
+                "same_distance": true,
+                "distance_difference": 0.0
+              },
+              "mapf": {
+                "enabled": true,
+                "analysis_source": "MIXED_ACTIVE_PENDING_PARALLEL",
+                "plan_id": "9c82af49972c4b4e8309cd5b96d6f6fe",
+                "robot_count": 3,
+                "decisions": [],
+                "input_paths": {
+                  "robot1": [
+                    "0",
+                    "10"
+                  ],
+                  "robot2": [
+                    "1",
+                    "9"
+                  ],
+                  "robot3": [
+                    "6",
+                    "11"
+                  ]
+                },
+                "priority_mode": "score",
+                "priority_scores": {},
+                "metrics": {
+                  "kev_api_calls": 0,
+                  "kev_score_calls": 0,
+                  "kev_choice_calls": 0,
+                  "kev_forced_choices": 0,
+                  "kev_estimated_total_wall_seconds": 0.0,
+                  "reroutes": 0,
+                  "script_wall_seconds": 6e-05
+                },
+                "zone_wait_for": []
+              },
+              "driving_mode": "llm",
+              "selector": "kev",
+              "model": "kev-08b"
+            }
+          }
+        ],
+        "in_flight_submission": {
+          "robot_id": "robot1",
+          "occupied_edge": "20",
+          "goal_node": "10",
+          "status": "NAVIGATING"
+        },
+        "first_n7_entry_seconds": {},
+        "junction_violations": [],
+        "three_robot_shared_zone_decisions": [],
+        "junction_priority_respected": true,
+        "max_simultaneously_moving": 3,
+        "overlapping_motion_seconds": 1.69,
+        "three_robot_motion_seconds": 1.69
+      },
+      {
+        "case": "three_way_n7",
+        "completed": true,
+        "elapsed_seconds": 20.19,
+        "expected": {
+          "robot1": "0",
+          "robot2": "1",
+          "robot3": "2"
+        },
+        "actual": {
+          "robot1": "0",
+          "robot2": "1",
+          "robot3": "2"
+        },
+        "minimum_sampled_separation_m": 0.13606728179451957,
+        "responses": [
+          {
+            "robot_id": "robot1",
+            "http_status": 200,
+            "response": {
+              "success": true,
+              "status": "SUCCESS",
+              "robot_id": "robot1",
+              "ui_id": "R-01",
+              "command": "goal-node",
+              "target": {
+                "node_id": 0
+              },
+              "message": "Mock command accepted",
+              "mock": true,
+              "route": null,
+              "llm_preview": {
+                "path": [
+                  "5",
+                  "7",
+                  "8",
+                  "10",
+                  "0"
+                ],
+                "model": "kev-08b",
+                "total_weight": 1.6525585962459297,
+                "calls": 1,
+                "baseline_path": [
+                  "5",
+                  "7",
+                  "8",
+                  "10",
+                  "0"
+                ],
+                "baseline_weight": 1.6525585962459297,
+                "same_path": true,
+                "same_distance": true,
+                "distance_difference": 0.0
+              },
+              "mapf": {
+                "enabled": true,
+                "analysis_source": "MIXED_ACTIVE_PENDING_PARALLEL",
+                "plan_id": "0a146ddde4c64c81b7df88eefde86e7c",
+                "robot_count": 3,
+                "decisions": [
+                  {
+                    "zone": "zone:edge:7:11",
+                    "robots": [
+                      "robot2",
+                      "robot3"
+                    ],
+                    "priority_robot": "robot2",
+                    "yield_robot": "robot3",
+                    "occupied_by": null,
+                    "shared_resource_details": {
+                      "kind": "group",
+                      "robots": [
+                        "robot2",
+                        "robot3"
+                      ],
+                      "nodes": [
+                        9,
+                        11
+                      ],
+                      "edges": [
+                        [
+                          7,
+                          9
+                        ],
+                        [
+                          7,
+                          11
+                        ]
+                      ],
+                      "resources": [
+                        "edge:7:11",
+                        "edge:7:9",
+                        "node:11",
+                        "node:9"
+                      ]
+                    },
+                    "action": "WAIT",
+                    "wait_node": 3,
+                    "needs_fms_approval": true,
+                    "priority_robot_action": "PROCEED",
+                    "wait_node_verified": true,
+                    "note": "FMS must reserve the wait node and stop robot before the conflict zone",
+                    "wait_path_overlaps": []
+                  },
+                  {
+                    "zone": "node:7",
+                    "robots": [
+                      "robot1",
+                      "robot2"
+                    ],
+                    "priority_robot": "robot2",
+                    "yield_robot": "robot1",
+                    "occupied_by": null,
+                    "shared_resource_details": {
+                      "kind": "node",
+                      "node": 7,
+                      "robots": [
+                        "robot1",
+                        "robot2",
+                        "robot3"
+                      ]
+                    },
+                    "action": "WAIT",
+                    "wait_node": 5,
+                    "needs_fms_approval": true,
+                    "priority_robot_action": "PROCEED",
+                    "wait_node_verified": true,
+                    "note": "FMS must reserve the wait node and stop robot before the conflict zone",
+                    "wait_path_overlaps": []
+                  },
+                  {
+                    "zone": "node:7",
+                    "robots": [
+                      "robot1",
+                      "robot3"
+                    ],
+                    "priority_robot": "robot3",
+                    "yield_robot": "robot1",
+                    "occupied_by": null,
+                    "shared_resource_details": {
+                      "kind": "node",
+                      "node": 7,
+                      "robots": [
+                        "robot1",
+                        "robot2",
+                        "robot3"
+                      ]
+                    },
+                    "action": "WAIT",
+                    "wait_node": 5,
+                    "needs_fms_approval": true,
+                    "priority_robot_action": "PROCEED",
+                    "wait_node_verified": true,
+                    "note": "FMS must reserve the wait node and stop robot before the conflict zone",
+                    "wait_path_overlaps": []
+                  },
+                  {
+                    "zone": "node:7",
+                    "robots": [
+                      "robot2",
+                      "robot3"
+                    ],
+                    "priority_robot": "robot2",
+                    "yield_robot": "robot3",
+                    "occupied_by": null,
+                    "shared_resource_details": {
+                      "kind": "node",
+                      "node": 7,
+                      "robots": [
+                        "robot1",
+                        "robot2",
+                        "robot3"
+                      ]
+                    },
+                    "action": "WAIT",
+                    "wait_node": 3,
+                    "needs_fms_approval": true,
+                    "priority_robot_action": "PROCEED",
+                    "wait_node_verified": true,
+                    "note": "FMS must reserve the wait node and stop robot before the conflict zone",
+                    "wait_path_overlaps": []
+                  }
+                ],
+                "input_paths": {
+                  "robot1": [
+                    "5",
+                    "7",
+                    "8",
+                    "10",
+                    "0"
+                  ],
+                  "robot2": [
+                    "6",
+                    "11",
+                    "7",
+                    "9",
+                    "1"
+                  ],
+                  "robot3": [
+                    "3",
+                    "11",
+                    "7",
+                    "9",
+                    "2"
+                  ]
+                },
+                "priority_mode": "score",
+                "priority_scores": {
+                  "robot1": 1.6972,
+                  "robot2": 1.7884,
+                  "robot3": 1.7875
+                },
+                "metrics": {
+                  "kev_api_calls": 6,
+                  "kev_score_calls": 1,
+                  "kev_choice_calls": 5,
+                  "kev_forced_choices": 7,
+                  "kev_estimated_total_wall_seconds": 0.89086,
+                  "reroutes": 0,
+                  "script_wall_seconds": 0.89858
+                },
+                "zone_wait_for": [
+                  {
+                    "robot_id": "robot2",
+                    "resources": [
+                      [
+                        "node",
+                        "7"
+                      ]
+                    ],
+                    "navigation_id": "10f4d386350a412ab1afcb6bffca2c89"
+                  },
+                  {
+                    "robot_id": "robot3",
+                    "resources": [
+                      [
+                        "node",
+                        "7"
+                      ]
+                    ],
+                    "navigation_id": "4c9211741bba4416980c3f30426c2a5e"
+                  }
+                ]
+              },
+              "driving_mode": "llm",
+              "selector": "kev",
+              "model": "kev-08b"
+            }
+          },
+          {
+            "robot_id": "robot2",
+            "http_status": 200,
+            "response": {
+              "success": true,
+              "status": "SUCCESS",
+              "robot_id": "robot2",
+              "ui_id": "R-02",
+              "command": "goal-node",
+              "target": {
+                "node_id": 1
+              },
+              "message": "Mock command accepted",
+              "mock": true,
+              "route": {
+                "node_ids": [
+                  "6",
+                  "11",
+                  "7",
+                  "9",
+                  "1"
+                ],
+                "edge_ids": [
+                  "45",
+                  "39",
+                  "31",
+                  "23"
+                ],
+                "waypoint_yaws": [
+                  0.0,
+                  1.5707963267948966,
+                  3.141592653589793,
+                  -2.887413021521144,
+                  3.141592653589793
+                ],
+                "segment_index": 0,
+                "phase": "ready",
+                "departure_at": 971222.137412417,
+                "segment_departures": [
+                  971222.137412417,
+                  971224.0236178667,
+                  971227.9524273307,
+                  971230.3080881563
+                ],
+                "route_source": "llm"
+              },
+              "llm_preview": {
+                "path": [
+                  "6",
+                  "11",
+                  "7",
+                  "9",
+                  "1"
+                ],
+                "model": "kev-08b",
+                "total_weight": 2.1418576967990655,
+                "calls": 1,
+                "baseline_path": [
+                  "6",
+                  "11",
+                  "7",
+                  "9",
+                  "1"
+                ],
+                "baseline_weight": 2.1418576967990655,
+                "same_path": true,
+                "same_distance": true,
+                "distance_difference": 0.0
+              },
+              "mapf": {
+                "enabled": true,
+                "analysis_source": "MIXED_ACTIVE_PENDING_PARALLEL",
+                "plan_id": "0a146ddde4c64c81b7df88eefde86e7c",
+                "robot_count": 3,
+                "decisions": [
+                  {
+                    "zone": "zone:edge:7:11",
+                    "robots": [
+                      "robot2",
+                      "robot3"
+                    ],
+                    "priority_robot": "robot2",
+                    "yield_robot": "robot3",
+                    "occupied_by": null,
+                    "shared_resource_details": {
+                      "kind": "group",
+                      "robots": [
+                        "robot2",
+                        "robot3"
+                      ],
+                      "nodes": [
+                        9,
+                        11
+                      ],
+                      "edges": [
+                        [
+                          7,
+                          9
+                        ],
+                        [
+                          7,
+                          11
+                        ]
+                      ],
+                      "resources": [
+                        "edge:7:11",
+                        "edge:7:9",
+                        "node:11",
+                        "node:9"
+                      ]
+                    },
+                    "action": "WAIT",
+                    "wait_node": 3,
+                    "needs_fms_approval": true,
+                    "priority_robot_action": "PROCEED",
+                    "wait_node_verified": true,
+                    "note": "FMS must reserve the wait node and stop robot before the conflict zone",
+                    "wait_path_overlaps": []
+                  },
+                  {
+                    "zone": "node:7",
+                    "robots": [
+                      "robot1",
+                      "robot2"
+                    ],
+                    "priority_robot": "robot2",
+                    "yield_robot": "robot1",
+                    "occupied_by": null,
+                    "shared_resource_details": {
+                      "kind": "node",
+                      "node": 7,
+                      "robots": [
+                        "robot1",
+                        "robot2",
+                        "robot3"
+                      ]
+                    },
+                    "action": "WAIT",
+                    "wait_node": 5,
+                    "needs_fms_approval": true,
+                    "priority_robot_action": "PROCEED",
+                    "wait_node_verified": true,
+                    "note": "FMS must reserve the wait node and stop robot before the conflict zone",
+                    "wait_path_overlaps": []
+                  },
+                  {
+                    "zone": "node:7",
+                    "robots": [
+                      "robot1",
+                      "robot3"
+                    ],
+                    "priority_robot": "robot3",
+                    "yield_robot": "robot1",
+                    "occupied_by": null,
+                    "shared_resource_details": {
+                      "kind": "node",
+                      "node": 7,
+                      "robots": [
+                        "robot1",
+                        "robot2",
+                        "robot3"
+                      ]
+                    },
+                    "action": "WAIT",
+                    "wait_node": 5,
+                    "needs_fms_approval": true,
+                    "priority_robot_action": "PROCEED",
+                    "wait_node_verified": true,
+                    "note": "FMS must reserve the wait node and stop robot before the conflict zone",
+                    "wait_path_overlaps": []
+                  },
+                  {
+                    "zone": "node:7",
+                    "robots": [
+                      "robot2",
+                      "robot3"
+                    ],
+                    "priority_robot": "robot2",
+                    "yield_robot": "robot3",
+                    "occupied_by": null,
+                    "shared_resource_details": {
+                      "kind": "node",
+                      "node": 7,
+                      "robots": [
+                        "robot1",
+                        "robot2",
+                        "robot3"
+                      ]
+                    },
+                    "action": "WAIT",
+                    "wait_node": 3,
+                    "needs_fms_approval": true,
+                    "priority_robot_action": "PROCEED",
+                    "wait_node_verified": true,
+                    "note": "FMS must reserve the wait node and stop robot before the conflict zone",
+                    "wait_path_overlaps": []
+                  }
+                ],
+                "input_paths": {
+                  "robot1": [
+                    "5",
+                    "7",
+                    "8",
+                    "10",
+                    "0"
+                  ],
+                  "robot2": [
+                    "6",
+                    "11",
+                    "7",
+                    "9",
+                    "1"
+                  ],
+                  "robot3": [
+                    "3",
+                    "11",
+                    "7",
+                    "9",
+                    "2"
+                  ]
+                },
+                "priority_mode": "score",
+                "priority_scores": {
+                  "robot1": 1.6972,
+                  "robot2": 1.7884,
+                  "robot3": 1.7875
+                },
+                "metrics": {
+                  "kev_api_calls": 6,
+                  "kev_score_calls": 1,
+                  "kev_choice_calls": 5,
+                  "kev_forced_choices": 7,
+                  "kev_estimated_total_wall_seconds": 0.89086,
+                  "reroutes": 0,
+                  "script_wall_seconds": 0.89858
+                },
+                "zone_wait_for": []
+              },
+              "driving_mode": "llm",
+              "selector": "kev",
+              "model": "kev-08b"
+            }
+          },
+          {
+            "robot_id": "robot3",
+            "http_status": 200,
+            "response": {
+              "success": true,
+              "status": "SUCCESS",
+              "robot_id": "robot3",
+              "ui_id": "R-03",
+              "command": "goal-node",
+              "target": {
+                "node_id": 2
+              },
+              "message": "Mock command accepted",
+              "mock": true,
+              "route": null,
+              "llm_preview": {
+                "path": [
+                  "3",
+                  "11",
+                  "7",
+                  "9",
+                  "2"
+                ],
+                "model": "kev-08b",
+                "total_weight": 2.046038662634252,
+                "calls": 1,
+                "baseline_path": [
+                  "3",
+                  "11",
+                  "7",
+                  "9",
+                  "2"
+                ],
+                "baseline_weight": 2.046038662634252,
+                "same_path": true,
+                "same_distance": true,
+                "distance_difference": 0.0
+              },
+              "mapf": {
+                "enabled": true,
+                "analysis_source": "MIXED_ACTIVE_PENDING_PARALLEL",
+                "plan_id": "0a146ddde4c64c81b7df88eefde86e7c",
+                "robot_count": 3,
+                "decisions": [
+                  {
+                    "zone": "zone:edge:7:11",
+                    "robots": [
+                      "robot2",
+                      "robot3"
+                    ],
+                    "priority_robot": "robot2",
+                    "yield_robot": "robot3",
+                    "occupied_by": null,
+                    "shared_resource_details": {
+                      "kind": "group",
+                      "robots": [
+                        "robot2",
+                        "robot3"
+                      ],
+                      "nodes": [
+                        9,
+                        11
+                      ],
+                      "edges": [
+                        [
+                          7,
+                          9
+                        ],
+                        [
+                          7,
+                          11
+                        ]
+                      ],
+                      "resources": [
+                        "edge:7:11",
+                        "edge:7:9",
+                        "node:11",
+                        "node:9"
+                      ]
+                    },
+                    "action": "WAIT",
+                    "wait_node": 3,
+                    "needs_fms_approval": true,
+                    "priority_robot_action": "PROCEED",
+                    "wait_node_verified": true,
+                    "note": "FMS must reserve the wait node and stop robot before the conflict zone",
+                    "wait_path_overlaps": []
+                  },
+                  {
+                    "zone": "node:7",
+                    "robots": [
+                      "robot1",
+                      "robot2"
+                    ],
+                    "priority_robot": "robot2",
+                    "yield_robot": "robot1",
+                    "occupied_by": null,
+                    "shared_resource_details": {
+                      "kind": "node",
+                      "node": 7,
+                      "robots": [
+                        "robot1",
+                        "robot2",
+                        "robot3"
+                      ]
+                    },
+                    "action": "WAIT",
+                    "wait_node": 5,
+                    "needs_fms_approval": true,
+                    "priority_robot_action": "PROCEED",
+                    "wait_node_verified": true,
+                    "note": "FMS must reserve the wait node and stop robot before the conflict zone",
+                    "wait_path_overlaps": []
+                  },
+                  {
+                    "zone": "node:7",
+                    "robots": [
+                      "robot1",
+                      "robot3"
+                    ],
+                    "priority_robot": "robot3",
+                    "yield_robot": "robot1",
+                    "occupied_by": null,
+                    "shared_resource_details": {
+                      "kind": "node",
+                      "node": 7,
+                      "robots": [
+                        "robot1",
+                        "robot2",
+                        "robot3"
+                      ]
+                    },
+                    "action": "WAIT",
+                    "wait_node": 5,
+                    "needs_fms_approval": true,
+                    "priority_robot_action": "PROCEED",
+                    "wait_node_verified": true,
+                    "note": "FMS must reserve the wait node and stop robot before the conflict zone",
+                    "wait_path_overlaps": []
+                  },
+                  {
+                    "zone": "node:7",
+                    "robots": [
+                      "robot2",
+                      "robot3"
+                    ],
+                    "priority_robot": "robot2",
+                    "yield_robot": "robot3",
+                    "occupied_by": null,
+                    "shared_resource_details": {
+                      "kind": "node",
+                      "node": 7,
+                      "robots": [
+                        "robot1",
+                        "robot2",
+                        "robot3"
+                      ]
+                    },
+                    "action": "WAIT",
+                    "wait_node": 3,
+                    "needs_fms_approval": true,
+                    "priority_robot_action": "PROCEED",
+                    "wait_node_verified": true,
+                    "note": "FMS must reserve the wait node and stop robot before the conflict zone",
+                    "wait_path_overlaps": []
+                  }
+                ],
+                "input_paths": {
+                  "robot1": [
+                    "5",
+                    "7",
+                    "8",
+                    "10",
+                    "0"
+                  ],
+                  "robot2": [
+                    "6",
+                    "11",
+                    "7",
+                    "9",
+                    "1"
+                  ],
+                  "robot3": [
+                    "3",
+                    "11",
+                    "7",
+                    "9",
+                    "2"
+                  ]
+                },
+                "priority_mode": "score",
+                "priority_scores": {
+                  "robot1": 1.6972,
+                  "robot2": 1.7884,
+                  "robot3": 1.7875
+                },
+                "metrics": {
+                  "kev_api_calls": 6,
+                  "kev_score_calls": 1,
+                  "kev_choice_calls": 5,
+                  "kev_forced_choices": 7,
+                  "kev_estimated_total_wall_seconds": 0.89086,
+                  "reroutes": 0,
+                  "script_wall_seconds": 0.89858
+                },
+                "zone_wait_for": [
+                  {
+                    "robot_id": "robot2",
+                    "resources": [
+                      [
+                        "node",
+                        "9"
+                      ],
+                      [
+                        "node",
+                        "11"
+                      ],
+                      [
+                        "edge",
+                        "7",
+                        "9"
+                      ],
+                      [
+                        "edge",
+                        "11",
+                        "7"
+                      ]
+                    ],
+                    "navigation_id": "10f4d386350a412ab1afcb6bffca2c89"
+                  },
+                  {
+                    "robot_id": "robot2",
+                    "resources": [
+                      [
+                        "node",
+                        "7"
+                      ]
+                    ],
+                    "navigation_id": "10f4d386350a412ab1afcb6bffca2c89"
+                  }
+                ]
+              },
+              "driving_mode": "llm",
+              "selector": "kev",
+              "model": "kev-08b"
+            }
+          }
+        ],
+        "in_flight_submission": null,
+        "first_n7_entry_seconds": {
+          "robot2": 7.289,
+          "robot3": 11.654,
+          "robot1": 13.712
+        },
+        "junction_violations": [],
+        "three_robot_shared_zone_decisions": [
+          {
+            "zone": "node:7",
+            "robots": [
+              "robot1",
+              "robot2"
+            ],
+            "priority_robot": "robot2",
+            "yield_robot": "robot1",
+            "occupied_by": null,
+            "shared_resource_details": {
+              "kind": "node",
+              "node": 7,
+              "robots": [
+                "robot1",
+                "robot2",
+                "robot3"
+              ]
+            },
+            "action": "WAIT",
+            "wait_node": 5,
+            "needs_fms_approval": true,
+            "priority_robot_action": "PROCEED",
+            "wait_node_verified": true,
+            "note": "FMS must reserve the wait node and stop robot before the conflict zone",
+            "wait_path_overlaps": []
+          },
+          {
+            "zone": "node:7",
+            "robots": [
+              "robot1",
+              "robot3"
+            ],
+            "priority_robot": "robot3",
+            "yield_robot": "robot1",
+            "occupied_by": null,
+            "shared_resource_details": {
+              "kind": "node",
+              "node": 7,
+              "robots": [
+                "robot1",
+                "robot2",
+                "robot3"
+              ]
+            },
+            "action": "WAIT",
+            "wait_node": 5,
+            "needs_fms_approval": true,
+            "priority_robot_action": "PROCEED",
+            "wait_node_verified": true,
+            "note": "FMS must reserve the wait node and stop robot before the conflict zone",
+            "wait_path_overlaps": []
+          },
+          {
+            "zone": "node:7",
+            "robots": [
+              "robot2",
+              "robot3"
+            ],
+            "priority_robot": "robot2",
+            "yield_robot": "robot3",
+            "occupied_by": null,
+            "shared_resource_details": {
+              "kind": "node",
+              "node": 7,
+              "robots": [
+                "robot1",
+                "robot2",
+                "robot3"
+              ]
+            },
+            "action": "WAIT",
+            "wait_node": 3,
+            "needs_fms_approval": true,
+            "priority_robot_action": "PROCEED",
+            "wait_node_verified": true,
+            "note": "FMS must reserve the wait node and stop robot before the conflict zone",
+            "wait_path_overlaps": []
+          },
+          {
+            "zone": "node:7",
+            "robots": [
+              "robot1",
+              "robot2"
+            ],
+            "priority_robot": "robot2",
+            "yield_robot": "robot1",
+            "occupied_by": null,
+            "shared_resource_details": {
+              "kind": "node",
+              "node": 7,
+              "robots": [
+                "robot1",
+                "robot2",
+                "robot3"
+              ]
+            },
+            "action": "WAIT",
+            "wait_node": 5,
+            "needs_fms_approval": true,
+            "priority_robot_action": "PROCEED",
+            "wait_node_verified": true,
+            "note": "FMS must reserve the wait node and stop robot before the conflict zone",
+            "wait_path_overlaps": []
+          },
+          {
+            "zone": "node:7",
+            "robots": [
+              "robot1",
+              "robot3"
+            ],
+            "priority_robot": "robot3",
+            "yield_robot": "robot1",
+            "occupied_by": null,
+            "shared_resource_details": {
+              "kind": "node",
+              "node": 7,
+              "robots": [
+                "robot1",
+                "robot2",
+                "robot3"
+              ]
+            },
+            "action": "WAIT",
+            "wait_node": 5,
+            "needs_fms_approval": true,
+            "priority_robot_action": "PROCEED",
+            "wait_node_verified": true,
+            "note": "FMS must reserve the wait node and stop robot before the conflict zone",
+            "wait_path_overlaps": []
+          },
+          {
+            "zone": "node:7",
+            "robots": [
+              "robot2",
+              "robot3"
+            ],
+            "priority_robot": "robot2",
+            "yield_robot": "robot3",
+            "occupied_by": null,
+            "shared_resource_details": {
+              "kind": "node",
+              "node": 7,
+              "robots": [
+                "robot1",
+                "robot2",
+                "robot3"
+              ]
+            },
+            "action": "WAIT",
+            "wait_node": 3,
+            "needs_fms_approval": true,
+            "priority_robot_action": "PROCEED",
+            "wait_node_verified": true,
+            "note": "FMS must reserve the wait node and stop robot before the conflict zone",
+            "wait_path_overlaps": []
+          },
+          {
+            "zone": "node:7",
+            "robots": [
+              "robot1",
+              "robot2"
+            ],
+            "priority_robot": "robot2",
+            "yield_robot": "robot1",
+            "occupied_by": null,
+            "shared_resource_details": {
+              "kind": "node",
+              "node": 7,
+              "robots": [
+                "robot1",
+                "robot2",
+                "robot3"
+              ]
+            },
+            "action": "WAIT",
+            "wait_node": 5,
+            "needs_fms_approval": true,
+            "priority_robot_action": "PROCEED",
+            "wait_node_verified": true,
+            "note": "FMS must reserve the wait node and stop robot before the conflict zone",
+            "wait_path_overlaps": []
+          },
+          {
+            "zone": "node:7",
+            "robots": [
+              "robot1",
+              "robot3"
+            ],
+            "priority_robot": "robot3",
+            "yield_robot": "robot1",
+            "occupied_by": null,
+            "shared_resource_details": {
+              "kind": "node",
+              "node": 7,
+              "robots": [
+                "robot1",
+                "robot2",
+                "robot3"
+              ]
+            },
+            "action": "WAIT",
+            "wait_node": 5,
+            "needs_fms_approval": true,
+            "priority_robot_action": "PROCEED",
+            "wait_node_verified": true,
+            "note": "FMS must reserve the wait node and stop robot before the conflict zone",
+            "wait_path_overlaps": []
+          },
+          {
+            "zone": "node:7",
+            "robots": [
+              "robot2",
+              "robot3"
+            ],
+            "priority_robot": "robot2",
+            "yield_robot": "robot3",
+            "occupied_by": null,
+            "shared_resource_details": {
+              "kind": "node",
+              "node": 7,
+              "robots": [
+                "robot1",
+                "robot2",
+                "robot3"
+              ]
+            },
+            "action": "WAIT",
+            "wait_node": 3,
+            "needs_fms_approval": true,
+            "priority_robot_action": "PROCEED",
+            "wait_node_verified": true,
+            "note": "FMS must reserve the wait node and stop robot before the conflict zone",
+            "wait_path_overlaps": []
+          }
+        ],
+        "junction_priority_respected": true,
+        "max_simultaneously_moving": 3,
+        "overlapping_motion_seconds": 5.06,
+        "three_robot_motion_seconds": 0.18
+      },
+      {
+        "case": "three_way_n7_rotated",
+        "completed": true,
+        "elapsed_seconds": 20.18,
+        "expected": {
+          "robot1": "1",
+          "robot2": "2",
+          "robot3": "0"
+        },
+        "actual": {
+          "robot1": "1",
+          "robot2": "2",
+          "robot3": "0"
+        },
+        "minimum_sampled_separation_m": 0.13663495308698356,
+        "responses": [
+          {
+            "robot_id": "robot1",
+            "http_status": 200,
+            "response": {
+              "success": true,
+              "status": "SUCCESS",
+              "robot_id": "robot1",
+              "ui_id": "R-01",
+              "command": "goal-node",
+              "target": {
+                "node_id": 1
+              },
+              "message": "Mock command accepted",
+              "mock": true,
+              "route": {
+                "node_ids": [
+                  "6",
+                  "11",
+                  "7",
+                  "9",
+                  "1"
+                ],
+                "edge_ids": [
+                  "45",
+                  "39",
+                  "31",
+                  "23"
+                ],
+                "waypoint_yaws": [
+                  3.141592653589793,
+                  1.5707963267948966,
+                  3.141592653589793,
+                  -2.887413021521144,
+                  3.141592653589793
+                ],
+                "segment_index": 0,
+                "phase": "ready",
+                "departure_at": 971242.357153683,
+                "segment_departures": [
+                  971242.357153683,
+                  971244.2433591327,
+                  971248.1721685966,
+                  971250.5278294223
+                ],
+                "route_source": "llm"
+              },
+              "llm_preview": {
+                "path": [
+                  "6",
+                  "11",
+                  "7",
+                  "9",
+                  "1"
+                ],
+                "model": "kev-08b",
+                "total_weight": 2.1418576967990655,
+                "calls": 1,
+                "baseline_path": [
+                  "6",
+                  "11",
+                  "7",
+                  "9",
+                  "1"
+                ],
+                "baseline_weight": 2.1418576967990655,
+                "same_path": true,
+                "same_distance": true,
+                "distance_difference": 0.0
+              },
+              "mapf": {
+                "enabled": true,
+                "analysis_source": "MIXED_ACTIVE_PENDING_PARALLEL",
+                "plan_id": "e1b3482d57c446119c56e7c30a801bf1",
+                "robot_count": 3,
+                "decisions": [
+                  {
+                    "zone": "zone:edge:7:11",
+                    "robots": [
+                      "robot1",
+                      "robot2"
+                    ],
+                    "priority_robot": "robot1",
+                    "yield_robot": "robot2",
+                    "occupied_by": null,
+                    "shared_resource_details": {
+                      "kind": "group",
+                      "robots": [
+                        "robot1",
+                        "robot2"
+                      ],
+                      "nodes": [
+                        9,
+                        11
+                      ],
+                      "edges": [
+                        [
+                          7,
+                          9
+                        ],
+                        [
+                          7,
+                          11
+                        ]
+                      ],
+                      "resources": [
+                        "edge:7:11",
+                        "edge:7:9",
+                        "node:11",
+                        "node:9"
+                      ]
+                    },
+                    "action": "WAIT",
+                    "wait_node": 3,
+                    "needs_fms_approval": true,
+                    "priority_robot_action": "PROCEED",
+                    "wait_node_verified": true,
+                    "note": "FMS must reserve the wait node and stop robot before the conflict zone",
+                    "wait_path_overlaps": []
+                  },
+                  {
+                    "zone": "node:7",
+                    "robots": [
+                      "robot1",
+                      "robot2"
+                    ],
+                    "priority_robot": "robot1",
+                    "yield_robot": "robot2",
+                    "occupied_by": null,
+                    "shared_resource_details": {
+                      "kind": "node",
+                      "node": 7,
+                      "robots": [
+                        "robot1",
+                        "robot2",
+                        "robot3"
+                      ]
+                    },
+                    "action": "WAIT",
+                    "wait_node": 3,
+                    "needs_fms_approval": true,
+                    "priority_robot_action": "PROCEED",
+                    "wait_node_verified": true,
+                    "note": "FMS must reserve the wait node and stop robot before the conflict zone",
+                    "wait_path_overlaps": []
+                  },
+                  {
+                    "zone": "node:7",
+                    "robots": [
+                      "robot1",
+                      "robot3"
+                    ],
+                    "priority_robot": "robot1",
+                    "yield_robot": "robot3",
+                    "occupied_by": null,
+                    "shared_resource_details": {
+                      "kind": "node",
+                      "node": 7,
+                      "robots": [
+                        "robot1",
+                        "robot2",
+                        "robot3"
+                      ]
+                    },
+                    "action": "WAIT",
+                    "wait_node": 5,
+                    "needs_fms_approval": true,
+                    "priority_robot_action": "PROCEED",
+                    "wait_node_verified": true,
+                    "note": "FMS must reserve the wait node and stop robot before the conflict zone",
+                    "wait_path_overlaps": []
+                  },
+                  {
+                    "zone": "node:7",
+                    "robots": [
+                      "robot2",
+                      "robot3"
+                    ],
+                    "priority_robot": "robot2",
+                    "yield_robot": "robot3",
+                    "occupied_by": null,
+                    "shared_resource_details": {
+                      "kind": "node",
+                      "node": 7,
+                      "robots": [
+                        "robot1",
+                        "robot2",
+                        "robot3"
+                      ]
+                    },
+                    "action": "WAIT",
+                    "wait_node": 5,
+                    "needs_fms_approval": true,
+                    "priority_robot_action": "PROCEED",
+                    "wait_node_verified": true,
+                    "note": "FMS must reserve the wait node and stop robot before the conflict zone",
+                    "wait_path_overlaps": []
+                  }
+                ],
+                "input_paths": {
+                  "robot1": [
+                    "6",
+                    "11",
+                    "7",
+                    "9",
+                    "1"
+                  ],
+                  "robot2": [
+                    "3",
+                    "11",
+                    "7",
+                    "9",
+                    "2"
+                  ],
+                  "robot3": [
+                    "5",
+                    "7",
+                    "8",
+                    "10",
+                    "0"
+                  ]
+                },
+                "priority_mode": "score",
+                "priority_scores": {
+                  "robot1": 1.7998,
+                  "robot2": 1.7914,
+                  "robot3": 1.7712
+                },
+                "metrics": {
+                  "kev_api_calls": 6,
+                  "kev_score_calls": 1,
+                  "kev_choice_calls": 5,
+                  "kev_forced_choices": 7,
+                  "kev_estimated_total_wall_seconds": 0.89739,
+                  "reroutes": 0,
+                  "script_wall_seconds": 0.9019
+                },
+                "zone_wait_for": []
+              },
+              "driving_mode": "llm",
+              "selector": "kev",
+              "model": "kev-08b"
+            }
+          },
+          {
+            "robot_id": "robot2",
+            "http_status": 200,
+            "response": {
+              "success": true,
+              "status": "SUCCESS",
+              "robot_id": "robot2",
+              "ui_id": "R-02",
+              "command": "goal-node",
+              "target": {
+                "node_id": 2
+              },
+              "message": "Mock command accepted",
+              "mock": true,
+              "route": null,
+              "llm_preview": {
+                "path": [
+                  "3",
+                  "11",
+                  "7",
+                  "9",
+                  "2"
+                ],
+                "model": "kev-08b",
+                "total_weight": 2.046038662634252,
+                "calls": 1,
+                "baseline_path": [
+                  "3",
+                  "11",
+                  "7",
+                  "9",
+                  "2"
+                ],
+                "baseline_weight": 2.046038662634252,
+                "same_path": true,
+                "same_distance": true,
+                "distance_difference": 0.0
+              },
+              "mapf": {
+                "enabled": true,
+                "analysis_source": "MIXED_ACTIVE_PENDING_PARALLEL",
+                "plan_id": "e1b3482d57c446119c56e7c30a801bf1",
+                "robot_count": 3,
+                "decisions": [
+                  {
+                    "zone": "zone:edge:7:11",
+                    "robots": [
+                      "robot1",
+                      "robot2"
+                    ],
+                    "priority_robot": "robot1",
+                    "yield_robot": "robot2",
+                    "occupied_by": null,
+                    "shared_resource_details": {
+                      "kind": "group",
+                      "robots": [
+                        "robot1",
+                        "robot2"
+                      ],
+                      "nodes": [
+                        9,
+                        11
+                      ],
+                      "edges": [
+                        [
+                          7,
+                          9
+                        ],
+                        [
+                          7,
+                          11
+                        ]
+                      ],
+                      "resources": [
+                        "edge:7:11",
+                        "edge:7:9",
+                        "node:11",
+                        "node:9"
+                      ]
+                    },
+                    "action": "WAIT",
+                    "wait_node": 3,
+                    "needs_fms_approval": true,
+                    "priority_robot_action": "PROCEED",
+                    "wait_node_verified": true,
+                    "note": "FMS must reserve the wait node and stop robot before the conflict zone",
+                    "wait_path_overlaps": []
+                  },
+                  {
+                    "zone": "node:7",
+                    "robots": [
+                      "robot1",
+                      "robot2"
+                    ],
+                    "priority_robot": "robot1",
+                    "yield_robot": "robot2",
+                    "occupied_by": null,
+                    "shared_resource_details": {
+                      "kind": "node",
+                      "node": 7,
+                      "robots": [
+                        "robot1",
+                        "robot2",
+                        "robot3"
+                      ]
+                    },
+                    "action": "WAIT",
+                    "wait_node": 3,
+                    "needs_fms_approval": true,
+                    "priority_robot_action": "PROCEED",
+                    "wait_node_verified": true,
+                    "note": "FMS must reserve the wait node and stop robot before the conflict zone",
+                    "wait_path_overlaps": []
+                  },
+                  {
+                    "zone": "node:7",
+                    "robots": [
+                      "robot1",
+                      "robot3"
+                    ],
+                    "priority_robot": "robot1",
+                    "yield_robot": "robot3",
+                    "occupied_by": null,
+                    "shared_resource_details": {
+                      "kind": "node",
+                      "node": 7,
+                      "robots": [
+                        "robot1",
+                        "robot2",
+                        "robot3"
+                      ]
+                    },
+                    "action": "WAIT",
+                    "wait_node": 5,
+                    "needs_fms_approval": true,
+                    "priority_robot_action": "PROCEED",
+                    "wait_node_verified": true,
+                    "note": "FMS must reserve the wait node and stop robot before the conflict zone",
+                    "wait_path_overlaps": []
+                  },
+                  {
+                    "zone": "node:7",
+                    "robots": [
+                      "robot2",
+                      "robot3"
+                    ],
+                    "priority_robot": "robot2",
+                    "yield_robot": "robot3",
+                    "occupied_by": null,
+                    "shared_resource_details": {
+                      "kind": "node",
+                      "node": 7,
+                      "robots": [
+                        "robot1",
+                        "robot2",
+                        "robot3"
+                      ]
+                    },
+                    "action": "WAIT",
+                    "wait_node": 5,
+                    "needs_fms_approval": true,
+                    "priority_robot_action": "PROCEED",
+                    "wait_node_verified": true,
+                    "note": "FMS must reserve the wait node and stop robot before the conflict zone",
+                    "wait_path_overlaps": []
+                  }
+                ],
+                "input_paths": {
+                  "robot1": [
+                    "6",
+                    "11",
+                    "7",
+                    "9",
+                    "1"
+                  ],
+                  "robot2": [
+                    "3",
+                    "11",
+                    "7",
+                    "9",
+                    "2"
+                  ],
+                  "robot3": [
+                    "5",
+                    "7",
+                    "8",
+                    "10",
+                    "0"
+                  ]
+                },
+                "priority_mode": "score",
+                "priority_scores": {
+                  "robot1": 1.7998,
+                  "robot2": 1.7914,
+                  "robot3": 1.7712
+                },
+                "metrics": {
+                  "kev_api_calls": 6,
+                  "kev_score_calls": 1,
+                  "kev_choice_calls": 5,
+                  "kev_forced_choices": 7,
+                  "kev_estimated_total_wall_seconds": 0.89739,
+                  "reroutes": 0,
+                  "script_wall_seconds": 0.9019
+                },
+                "zone_wait_for": [
+                  {
+                    "robot_id": "robot1",
+                    "resources": [
+                      [
+                        "node",
+                        "9"
+                      ],
+                      [
+                        "node",
+                        "11"
+                      ],
+                      [
+                        "edge",
+                        "7",
+                        "9"
+                      ],
+                      [
+                        "edge",
+                        "11",
+                        "7"
+                      ]
+                    ],
+                    "navigation_id": "af76d5ec6c15484ab66c2f16f3d7c83b"
+                  },
+                  {
+                    "robot_id": "robot1",
+                    "resources": [
+                      [
+                        "node",
+                        "7"
+                      ]
+                    ],
+                    "navigation_id": "af76d5ec6c15484ab66c2f16f3d7c83b"
+                  }
+                ]
+              },
+              "driving_mode": "llm",
+              "selector": "kev",
+              "model": "kev-08b"
+            }
+          },
+          {
+            "robot_id": "robot3",
+            "http_status": 200,
+            "response": {
+              "success": true,
+              "status": "SUCCESS",
+              "robot_id": "robot3",
+              "ui_id": "R-03",
+              "command": "goal-node",
+              "target": {
+                "node_id": 0
+              },
+              "message": "Mock command accepted",
+              "mock": true,
+              "route": null,
+              "llm_preview": {
+                "path": [
+                  "5",
+                  "7",
+                  "8",
+                  "10",
+                  "0"
+                ],
+                "model": "kev-08b",
+                "total_weight": 1.6525585962459297,
+                "calls": 1,
+                "baseline_path": [
+                  "5",
+                  "7",
+                  "8",
+                  "10",
+                  "0"
+                ],
+                "baseline_weight": 1.6525585962459297,
+                "same_path": true,
+                "same_distance": true,
+                "distance_difference": 0.0
+              },
+              "mapf": {
+                "enabled": true,
+                "analysis_source": "MIXED_ACTIVE_PENDING_PARALLEL",
+                "plan_id": "e1b3482d57c446119c56e7c30a801bf1",
+                "robot_count": 3,
+                "decisions": [
+                  {
+                    "zone": "zone:edge:7:11",
+                    "robots": [
+                      "robot1",
+                      "robot2"
+                    ],
+                    "priority_robot": "robot1",
+                    "yield_robot": "robot2",
+                    "occupied_by": null,
+                    "shared_resource_details": {
+                      "kind": "group",
+                      "robots": [
+                        "robot1",
+                        "robot2"
+                      ],
+                      "nodes": [
+                        9,
+                        11
+                      ],
+                      "edges": [
+                        [
+                          7,
+                          9
+                        ],
+                        [
+                          7,
+                          11
+                        ]
+                      ],
+                      "resources": [
+                        "edge:7:11",
+                        "edge:7:9",
+                        "node:11",
+                        "node:9"
+                      ]
+                    },
+                    "action": "WAIT",
+                    "wait_node": 3,
+                    "needs_fms_approval": true,
+                    "priority_robot_action": "PROCEED",
+                    "wait_node_verified": true,
+                    "note": "FMS must reserve the wait node and stop robot before the conflict zone",
+                    "wait_path_overlaps": []
+                  },
+                  {
+                    "zone": "node:7",
+                    "robots": [
+                      "robot1",
+                      "robot2"
+                    ],
+                    "priority_robot": "robot1",
+                    "yield_robot": "robot2",
+                    "occupied_by": null,
+                    "shared_resource_details": {
+                      "kind": "node",
+                      "node": 7,
+                      "robots": [
+                        "robot1",
+                        "robot2",
+                        "robot3"
+                      ]
+                    },
+                    "action": "WAIT",
+                    "wait_node": 3,
+                    "needs_fms_approval": true,
+                    "priority_robot_action": "PROCEED",
+                    "wait_node_verified": true,
+                    "note": "FMS must reserve the wait node and stop robot before the conflict zone",
+                    "wait_path_overlaps": []
+                  },
+                  {
+                    "zone": "node:7",
+                    "robots": [
+                      "robot1",
+                      "robot3"
+                    ],
+                    "priority_robot": "robot1",
+                    "yield_robot": "robot3",
+                    "occupied_by": null,
+                    "shared_resource_details": {
+                      "kind": "node",
+                      "node": 7,
+                      "robots": [
+                        "robot1",
+                        "robot2",
+                        "robot3"
+                      ]
+                    },
+                    "action": "WAIT",
+                    "wait_node": 5,
+                    "needs_fms_approval": true,
+                    "priority_robot_action": "PROCEED",
+                    "wait_node_verified": true,
+                    "note": "FMS must reserve the wait node and stop robot before the conflict zone",
+                    "wait_path_overlaps": []
+                  },
+                  {
+                    "zone": "node:7",
+                    "robots": [
+                      "robot2",
+                      "robot3"
+                    ],
+                    "priority_robot": "robot2",
+                    "yield_robot": "robot3",
+                    "occupied_by": null,
+                    "shared_resource_details": {
+                      "kind": "node",
+                      "node": 7,
+                      "robots": [
+                        "robot1",
+                        "robot2",
+                        "robot3"
+                      ]
+                    },
+                    "action": "WAIT",
+                    "wait_node": 5,
+                    "needs_fms_approval": true,
+                    "priority_robot_action": "PROCEED",
+                    "wait_node_verified": true,
+                    "note": "FMS must reserve the wait node and stop robot before the conflict zone",
+                    "wait_path_overlaps": []
+                  }
+                ],
+                "input_paths": {
+                  "robot1": [
+                    "6",
+                    "11",
+                    "7",
+                    "9",
+                    "1"
+                  ],
+                  "robot2": [
+                    "3",
+                    "11",
+                    "7",
+                    "9",
+                    "2"
+                  ],
+                  "robot3": [
+                    "5",
+                    "7",
+                    "8",
+                    "10",
+                    "0"
+                  ]
+                },
+                "priority_mode": "score",
+                "priority_scores": {
+                  "robot1": 1.7998,
+                  "robot2": 1.7914,
+                  "robot3": 1.7712
+                },
+                "metrics": {
+                  "kev_api_calls": 6,
+                  "kev_score_calls": 1,
+                  "kev_choice_calls": 5,
+                  "kev_forced_choices": 7,
+                  "kev_estimated_total_wall_seconds": 0.89739,
+                  "reroutes": 0,
+                  "script_wall_seconds": 0.9019
+                },
+                "zone_wait_for": [
+                  {
+                    "robot_id": "robot1",
+                    "resources": [
+                      [
+                        "node",
+                        "7"
+                      ]
+                    ],
+                    "navigation_id": "af76d5ec6c15484ab66c2f16f3d7c83b"
+                  },
+                  {
+                    "robot_id": "robot2",
+                    "resources": [
+                      [
+                        "node",
+                        "7"
+                      ]
+                    ],
+                    "navigation_id": "16c78ce1947a44da8c4e1305920350e6"
+                  }
+                ]
+              },
+              "driving_mode": "llm",
+              "selector": "kev",
+              "model": "kev-08b"
+            }
+          }
+        ],
+        "in_flight_submission": null,
+        "first_n7_entry_seconds": {
+          "robot1": 7.371,
+          "robot2": 11.631,
+          "robot3": 13.59
+        },
+        "junction_violations": [],
+        "three_robot_shared_zone_decisions": [
+          {
+            "zone": "node:7",
+            "robots": [
+              "robot1",
+              "robot2"
+            ],
+            "priority_robot": "robot1",
+            "yield_robot": "robot2",
+            "occupied_by": null,
+            "shared_resource_details": {
+              "kind": "node",
+              "node": 7,
+              "robots": [
+                "robot1",
+                "robot2",
+                "robot3"
+              ]
+            },
+            "action": "WAIT",
+            "wait_node": 3,
+            "needs_fms_approval": true,
+            "priority_robot_action": "PROCEED",
+            "wait_node_verified": true,
+            "note": "FMS must reserve the wait node and stop robot before the conflict zone",
+            "wait_path_overlaps": []
+          },
+          {
+            "zone": "node:7",
+            "robots": [
+              "robot1",
+              "robot3"
+            ],
+            "priority_robot": "robot1",
+            "yield_robot": "robot3",
+            "occupied_by": null,
+            "shared_resource_details": {
+              "kind": "node",
+              "node": 7,
+              "robots": [
+                "robot1",
+                "robot2",
+                "robot3"
+              ]
+            },
+            "action": "WAIT",
+            "wait_node": 5,
+            "needs_fms_approval": true,
+            "priority_robot_action": "PROCEED",
+            "wait_node_verified": true,
+            "note": "FMS must reserve the wait node and stop robot before the conflict zone",
+            "wait_path_overlaps": []
+          },
+          {
+            "zone": "node:7",
+            "robots": [
+              "robot2",
+              "robot3"
+            ],
+            "priority_robot": "robot2",
+            "yield_robot": "robot3",
+            "occupied_by": null,
+            "shared_resource_details": {
+              "kind": "node",
+              "node": 7,
+              "robots": [
+                "robot1",
+                "robot2",
+                "robot3"
+              ]
+            },
+            "action": "WAIT",
+            "wait_node": 5,
+            "needs_fms_approval": true,
+            "priority_robot_action": "PROCEED",
+            "wait_node_verified": true,
+            "note": "FMS must reserve the wait node and stop robot before the conflict zone",
+            "wait_path_overlaps": []
+          },
+          {
+            "zone": "node:7",
+            "robots": [
+              "robot1",
+              "robot2"
+            ],
+            "priority_robot": "robot1",
+            "yield_robot": "robot2",
+            "occupied_by": null,
+            "shared_resource_details": {
+              "kind": "node",
+              "node": 7,
+              "robots": [
+                "robot1",
+                "robot2",
+                "robot3"
+              ]
+            },
+            "action": "WAIT",
+            "wait_node": 3,
+            "needs_fms_approval": true,
+            "priority_robot_action": "PROCEED",
+            "wait_node_verified": true,
+            "note": "FMS must reserve the wait node and stop robot before the conflict zone",
+            "wait_path_overlaps": []
+          },
+          {
+            "zone": "node:7",
+            "robots": [
+              "robot1",
+              "robot3"
+            ],
+            "priority_robot": "robot1",
+            "yield_robot": "robot3",
+            "occupied_by": null,
+            "shared_resource_details": {
+              "kind": "node",
+              "node": 7,
+              "robots": [
+                "robot1",
+                "robot2",
+                "robot3"
+              ]
+            },
+            "action": "WAIT",
+            "wait_node": 5,
+            "needs_fms_approval": true,
+            "priority_robot_action": "PROCEED",
+            "wait_node_verified": true,
+            "note": "FMS must reserve the wait node and stop robot before the conflict zone",
+            "wait_path_overlaps": []
+          },
+          {
+            "zone": "node:7",
+            "robots": [
+              "robot2",
+              "robot3"
+            ],
+            "priority_robot": "robot2",
+            "yield_robot": "robot3",
+            "occupied_by": null,
+            "shared_resource_details": {
+              "kind": "node",
+              "node": 7,
+              "robots": [
+                "robot1",
+                "robot2",
+                "robot3"
+              ]
+            },
+            "action": "WAIT",
+            "wait_node": 5,
+            "needs_fms_approval": true,
+            "priority_robot_action": "PROCEED",
+            "wait_node_verified": true,
+            "note": "FMS must reserve the wait node and stop robot before the conflict zone",
+            "wait_path_overlaps": []
+          },
+          {
+            "zone": "node:7",
+            "robots": [
+              "robot1",
+              "robot2"
+            ],
+            "priority_robot": "robot1",
+            "yield_robot": "robot2",
+            "occupied_by": null,
+            "shared_resource_details": {
+              "kind": "node",
+              "node": 7,
+              "robots": [
+                "robot1",
+                "robot2",
+                "robot3"
+              ]
+            },
+            "action": "WAIT",
+            "wait_node": 3,
+            "needs_fms_approval": true,
+            "priority_robot_action": "PROCEED",
+            "wait_node_verified": true,
+            "note": "FMS must reserve the wait node and stop robot before the conflict zone",
+            "wait_path_overlaps": []
+          },
+          {
+            "zone": "node:7",
+            "robots": [
+              "robot1",
+              "robot3"
+            ],
+            "priority_robot": "robot1",
+            "yield_robot": "robot3",
+            "occupied_by": null,
+            "shared_resource_details": {
+              "kind": "node",
+              "node": 7,
+              "robots": [
+                "robot1",
+                "robot2",
+                "robot3"
+              ]
+            },
+            "action": "WAIT",
+            "wait_node": 5,
+            "needs_fms_approval": true,
+            "priority_robot_action": "PROCEED",
+            "wait_node_verified": true,
+            "note": "FMS must reserve the wait node and stop robot before the conflict zone",
+            "wait_path_overlaps": []
+          },
+          {
+            "zone": "node:7",
+            "robots": [
+              "robot2",
+              "robot3"
+            ],
+            "priority_robot": "robot2",
+            "yield_robot": "robot3",
+            "occupied_by": null,
+            "shared_resource_details": {
+              "kind": "node",
+              "node": 7,
+              "robots": [
+                "robot1",
+                "robot2",
+                "robot3"
+              ]
+            },
+            "action": "WAIT",
+            "wait_node": 5,
+            "needs_fms_approval": true,
+            "priority_robot_action": "PROCEED",
+            "wait_node_verified": true,
+            "note": "FMS must reserve the wait node and stop robot before the conflict zone",
+            "wait_path_overlaps": []
+          }
+        ],
+        "junction_priority_respected": true,
+        "max_simultaneously_moving": 3,
+        "overlapping_motion_seconds": 5.05,
+        "three_robot_motion_seconds": 0.23
+      },
+      {
+        "case": "three_way_n7_inflight",
+        "completed": true,
+        "elapsed_seconds": 19.29,
+        "expected": {
+          "robot1": "0",
+          "robot2": "1",
+          "robot3": "2"
+        },
+        "actual": {
+          "robot1": "0",
+          "robot2": "1",
+          "robot3": "2"
+        },
+        "minimum_sampled_separation_m": 0.13626715385110572,
+        "responses": [
+          {
+            "robot_id": "robot2",
+            "http_status": 200,
+            "response": {
+              "success": true,
+              "status": "SUCCESS",
+              "robot_id": "robot2",
+              "ui_id": "R-02",
+              "command": "goal-node",
+              "target": {
+                "node_id": 1
+              },
+              "message": "Mock command accepted",
+              "mock": true,
+              "route": {
+                "node_ids": [
+                  "6",
+                  "11",
+                  "7",
+                  "9",
+                  "1"
+                ],
+                "edge_ids": [
+                  "45",
+                  "39",
+                  "31",
+                  "23"
+                ],
+                "waypoint_yaws": [
+                  -2.460990681233863,
+                  1.5707963267948966,
+                  3.141592653589793,
+                  -2.887413021521144,
+                  3.141592653589793
+                ],
+                "segment_index": 0,
+                "phase": "ready",
+                "departure_at": 971261.672862241,
+                "segment_departures": [
+                  971261.672862241,
+                  971263.5590676907,
+                  971267.4878771547,
+                  971269.8435379803
+                ],
+                "route_source": "llm"
+              },
+              "llm_preview": {
+                "path": [
+                  "6",
+                  "11",
+                  "7",
+                  "9",
+                  "1"
+                ],
+                "model": "kev-08b",
+                "total_weight": 2.1418576967990655,
+                "calls": 1,
+                "baseline_path": [
+                  "6",
+                  "11",
+                  "7",
+                  "9",
+                  "1"
+                ],
+                "baseline_weight": 2.1418576967990655,
+                "same_path": true,
+                "same_distance": true,
+                "distance_difference": 0.0
+              },
+              "mapf": {
+                "enabled": true,
+                "analysis_source": "MIXED_ACTIVE_PENDING_PARALLEL",
+                "plan_id": "31fd95e48fea4f6e8b515547ed42a3f5",
+                "robot_count": 1,
+                "decisions": [],
+                "input_paths": {
+                  "robot2": [
+                    "6",
+                    "11",
+                    "7",
+                    "9",
+                    "1"
+                  ]
+                },
+                "priority_mode": "score",
+                "priority_scores": {},
+                "metrics": {
+                  "kev_api_calls": 0,
+                  "kev_score_calls": 0,
+                  "kev_choice_calls": 0,
+                  "kev_forced_choices": 0,
+                  "kev_estimated_total_wall_seconds": 0.0,
+                  "reroutes": 0,
+                  "script_wall_seconds": 0.00012
+                },
+                "zone_wait_for": []
+              },
+              "driving_mode": "llm",
+              "selector": "kev",
+              "model": "kev-08b"
+            }
+          },
+          {
+            "robot_id": "robot1",
+            "http_status": 200,
+            "response": {
+              "success": true,
+              "status": "SUCCESS",
+              "robot_id": "robot1",
+              "ui_id": "R-01",
+              "command": "goal-node",
+              "target": {
+                "node_id": 0
+              },
+              "message": "Mock command accepted",
+              "mock": true,
+              "route": null,
+              "llm_preview": {
+                "path": [
+                  "5",
+                  "7",
+                  "8",
+                  "10",
+                  "0"
+                ],
+                "model": "kev-08b",
+                "total_weight": 1.6525585962459297,
+                "calls": 1,
+                "baseline_path": [
+                  "5",
+                  "7",
+                  "8",
+                  "10",
+                  "0"
+                ],
+                "baseline_weight": 1.6525585962459297,
+                "same_path": true,
+                "same_distance": true,
+                "distance_difference": 0.0
+              },
+              "mapf": {
+                "enabled": true,
+                "analysis_source": "MIXED_ACTIVE_PENDING_PARALLEL",
+                "plan_id": "200384871d4f4ce485b5f32320357d13",
+                "robot_count": 3,
+                "decisions": [
+                  {
+                    "zone": "zone:edge:7:11",
+                    "robots": [
+                      "robot2",
+                      "robot3"
+                    ],
+                    "priority_robot": "robot2",
+                    "yield_robot": "robot3",
+                    "occupied_by": null,
+                    "shared_resource_details": {
+                      "kind": "group",
+                      "robots": [
+                        "robot2",
+                        "robot3"
+                      ],
+                      "nodes": [
+                        9,
+                        11
+                      ],
+                      "edges": [
+                        [
+                          7,
+                          9
+                        ],
+                        [
+                          7,
+                          11
+                        ]
+                      ],
+                      "resources": [
+                        "edge:7:11",
+                        "edge:7:9",
+                        "node:11",
+                        "node:9"
+                      ]
+                    },
+                    "action": "WAIT",
+                    "wait_node": 3,
+                    "needs_fms_approval": true,
+                    "priority_robot_action": "PROCEED",
+                    "wait_node_verified": true,
+                    "note": "FMS must reserve the wait node and stop robot before the conflict zone",
+                    "wait_path_overlaps": []
+                  },
+                  {
+                    "zone": "node:7",
+                    "robots": [
+                      "robot1",
+                      "robot2"
+                    ],
+                    "priority_robot": "robot2",
+                    "yield_robot": "robot1",
+                    "occupied_by": null,
+                    "shared_resource_details": {
+                      "kind": "node",
+                      "node": 7,
+                      "robots": [
+                        "robot1",
+                        "robot2",
+                        "robot3"
+                      ]
+                    },
+                    "action": "WAIT",
+                    "wait_node": 5,
+                    "needs_fms_approval": true,
+                    "priority_robot_action": "PROCEED",
+                    "wait_node_verified": true,
+                    "note": "FMS must reserve the wait node and stop robot before the conflict zone",
+                    "wait_path_overlaps": []
+                  },
+                  {
+                    "zone": "node:7",
+                    "robots": [
+                      "robot1",
+                      "robot3"
+                    ],
+                    "priority_robot": "robot3",
+                    "yield_robot": "robot1",
+                    "occupied_by": null,
+                    "shared_resource_details": {
+                      "kind": "node",
+                      "node": 7,
+                      "robots": [
+                        "robot1",
+                        "robot2",
+                        "robot3"
+                      ]
+                    },
+                    "action": "WAIT",
+                    "wait_node": 5,
+                    "needs_fms_approval": true,
+                    "priority_robot_action": "PROCEED",
+                    "wait_node_verified": true,
+                    "note": "FMS must reserve the wait node and stop robot before the conflict zone",
+                    "wait_path_overlaps": []
+                  },
+                  {
+                    "zone": "node:7",
+                    "robots": [
+                      "robot2",
+                      "robot3"
+                    ],
+                    "priority_robot": "robot2",
+                    "yield_robot": "robot3",
+                    "occupied_by": null,
+                    "shared_resource_details": {
+                      "kind": "node",
+                      "node": 7,
+                      "robots": [
+                        "robot1",
+                        "robot2",
+                        "robot3"
+                      ]
+                    },
+                    "action": "WAIT",
+                    "wait_node": 3,
+                    "needs_fms_approval": true,
+                    "priority_robot_action": "PROCEED",
+                    "wait_node_verified": true,
+                    "note": "FMS must reserve the wait node and stop robot before the conflict zone",
+                    "wait_path_overlaps": []
+                  }
+                ],
+                "input_paths": {
+                  "robot1": [
+                    "5",
+                    "7",
+                    "8",
+                    "10",
+                    "0"
+                  ],
+                  "robot2": [
+                    "6",
+                    "11",
+                    "7",
+                    "9",
+                    "1"
+                  ],
+                  "robot3": [
+                    "3",
+                    "11",
+                    "7",
+                    "9",
+                    "2"
+                  ]
+                },
+                "priority_mode": "score",
+                "priority_scores": {
+                  "robot1": 1.7972,
+                  "robot2": 1.9075,
+                  "robot3": 1.8837
+                },
+                "metrics": {
+                  "kev_api_calls": 6,
+                  "kev_score_calls": 1,
+                  "kev_choice_calls": 5,
+                  "kev_forced_choices": 7,
+                  "kev_estimated_total_wall_seconds": 0.90529,
+                  "reroutes": 0,
+                  "script_wall_seconds": 0.90865
+                },
+                "zone_wait_for": [
+                  {
+                    "robot_id": "robot2",
+                    "resources": [
+                      [
+                        "node",
+                        "7"
+                      ]
+                    ],
+                    "navigation_id": "ec97dbccf1194da6aaeb30144fe1f432"
+                  },
+                  {
+                    "robot_id": "robot3",
+                    "resources": [
+                      [
+                        "node",
+                        "7"
+                      ]
+                    ],
+                    "navigation_id": "33b31430b4804e9ba12db484f7dfd036"
+                  }
+                ]
+              },
+              "driving_mode": "llm",
+              "selector": "kev",
+              "model": "kev-08b"
+            }
+          },
+          {
+            "robot_id": "robot3",
+            "http_status": 200,
+            "response": {
+              "success": true,
+              "status": "SUCCESS",
+              "robot_id": "robot3",
+              "ui_id": "R-03",
+              "command": "goal-node",
+              "target": {
+                "node_id": 2
+              },
+              "message": "Mock command accepted",
+              "mock": true,
+              "route": null,
+              "llm_preview": {
+                "path": [
+                  "3",
+                  "11",
+                  "7",
+                  "9",
+                  "2"
+                ],
+                "model": "kev-08b",
+                "total_weight": 2.046038662634252,
+                "calls": 1,
+                "baseline_path": [
+                  "3",
+                  "11",
+                  "7",
+                  "9",
+                  "2"
+                ],
+                "baseline_weight": 2.046038662634252,
+                "same_path": true,
+                "same_distance": true,
+                "distance_difference": 0.0
+              },
+              "mapf": {
+                "enabled": true,
+                "analysis_source": "MIXED_ACTIVE_PENDING_PARALLEL",
+                "plan_id": "200384871d4f4ce485b5f32320357d13",
+                "robot_count": 3,
+                "decisions": [
+                  {
+                    "zone": "zone:edge:7:11",
+                    "robots": [
+                      "robot2",
+                      "robot3"
+                    ],
+                    "priority_robot": "robot2",
+                    "yield_robot": "robot3",
+                    "occupied_by": null,
+                    "shared_resource_details": {
+                      "kind": "group",
+                      "robots": [
+                        "robot2",
+                        "robot3"
+                      ],
+                      "nodes": [
+                        9,
+                        11
+                      ],
+                      "edges": [
+                        [
+                          7,
+                          9
+                        ],
+                        [
+                          7,
+                          11
+                        ]
+                      ],
+                      "resources": [
+                        "edge:7:11",
+                        "edge:7:9",
+                        "node:11",
+                        "node:9"
+                      ]
+                    },
+                    "action": "WAIT",
+                    "wait_node": 3,
+                    "needs_fms_approval": true,
+                    "priority_robot_action": "PROCEED",
+                    "wait_node_verified": true,
+                    "note": "FMS must reserve the wait node and stop robot before the conflict zone",
+                    "wait_path_overlaps": []
+                  },
+                  {
+                    "zone": "node:7",
+                    "robots": [
+                      "robot1",
+                      "robot2"
+                    ],
+                    "priority_robot": "robot2",
+                    "yield_robot": "robot1",
+                    "occupied_by": null,
+                    "shared_resource_details": {
+                      "kind": "node",
+                      "node": 7,
+                      "robots": [
+                        "robot1",
+                        "robot2",
+                        "robot3"
+                      ]
+                    },
+                    "action": "WAIT",
+                    "wait_node": 5,
+                    "needs_fms_approval": true,
+                    "priority_robot_action": "PROCEED",
+                    "wait_node_verified": true,
+                    "note": "FMS must reserve the wait node and stop robot before the conflict zone",
+                    "wait_path_overlaps": []
+                  },
+                  {
+                    "zone": "node:7",
+                    "robots": [
+                      "robot1",
+                      "robot3"
+                    ],
+                    "priority_robot": "robot3",
+                    "yield_robot": "robot1",
+                    "occupied_by": null,
+                    "shared_resource_details": {
+                      "kind": "node",
+                      "node": 7,
+                      "robots": [
+                        "robot1",
+                        "robot2",
+                        "robot3"
+                      ]
+                    },
+                    "action": "WAIT",
+                    "wait_node": 5,
+                    "needs_fms_approval": true,
+                    "priority_robot_action": "PROCEED",
+                    "wait_node_verified": true,
+                    "note": "FMS must reserve the wait node and stop robot before the conflict zone",
+                    "wait_path_overlaps": []
+                  },
+                  {
+                    "zone": "node:7",
+                    "robots": [
+                      "robot2",
+                      "robot3"
+                    ],
+                    "priority_robot": "robot2",
+                    "yield_robot": "robot3",
+                    "occupied_by": null,
+                    "shared_resource_details": {
+                      "kind": "node",
+                      "node": 7,
+                      "robots": [
+                        "robot1",
+                        "robot2",
+                        "robot3"
+                      ]
+                    },
+                    "action": "WAIT",
+                    "wait_node": 3,
+                    "needs_fms_approval": true,
+                    "priority_robot_action": "PROCEED",
+                    "wait_node_verified": true,
+                    "note": "FMS must reserve the wait node and stop robot before the conflict zone",
+                    "wait_path_overlaps": []
+                  }
+                ],
+                "input_paths": {
+                  "robot1": [
+                    "5",
+                    "7",
+                    "8",
+                    "10",
+                    "0"
+                  ],
+                  "robot2": [
+                    "6",
+                    "11",
+                    "7",
+                    "9",
+                    "1"
+                  ],
+                  "robot3": [
+                    "3",
+                    "11",
+                    "7",
+                    "9",
+                    "2"
+                  ]
+                },
+                "priority_mode": "score",
+                "priority_scores": {
+                  "robot1": 1.7972,
+                  "robot2": 1.9075,
+                  "robot3": 1.8837
+                },
+                "metrics": {
+                  "kev_api_calls": 6,
+                  "kev_score_calls": 1,
+                  "kev_choice_calls": 5,
+                  "kev_forced_choices": 7,
+                  "kev_estimated_total_wall_seconds": 0.90529,
+                  "reroutes": 0,
+                  "script_wall_seconds": 0.90865
+                },
+                "zone_wait_for": [
+                  {
+                    "robot_id": "robot2",
+                    "resources": [
+                      [
+                        "node",
+                        "9"
+                      ],
+                      [
+                        "node",
+                        "11"
+                      ],
+                      [
+                        "edge",
+                        "7",
+                        "9"
+                      ],
+                      [
+                        "edge",
+                        "11",
+                        "7"
+                      ]
+                    ],
+                    "navigation_id": "ec97dbccf1194da6aaeb30144fe1f432"
+                  },
+                  {
+                    "robot_id": "robot2",
+                    "resources": [
+                      [
+                        "node",
+                        "7"
+                      ]
+                    ],
+                    "navigation_id": "ec97dbccf1194da6aaeb30144fe1f432"
+                  }
+                ]
+              },
+              "driving_mode": "llm",
+              "selector": "kev",
+              "model": "kev-08b"
+            }
+          }
+        ],
+        "in_flight_submission": {
+          "robot_id": "robot2",
+          "occupied_edge": "45",
+          "goal_node": "1",
+          "status": "NAVIGATING"
+        },
+        "first_n7_entry_seconds": {
+          "robot2": 6.453,
+          "robot3": 10.835,
+          "robot1": 12.765
+        },
+        "junction_violations": [],
+        "three_robot_shared_zone_decisions": [
+          {
+            "zone": "node:7",
+            "robots": [
+              "robot1",
+              "robot2"
+            ],
+            "priority_robot": "robot2",
+            "yield_robot": "robot1",
+            "occupied_by": null,
+            "shared_resource_details": {
+              "kind": "node",
+              "node": 7,
+              "robots": [
+                "robot1",
+                "robot2",
+                "robot3"
+              ]
+            },
+            "action": "WAIT",
+            "wait_node": 5,
+            "needs_fms_approval": true,
+            "priority_robot_action": "PROCEED",
+            "wait_node_verified": true,
+            "note": "FMS must reserve the wait node and stop robot before the conflict zone",
+            "wait_path_overlaps": []
+          },
+          {
+            "zone": "node:7",
+            "robots": [
+              "robot1",
+              "robot3"
+            ],
+            "priority_robot": "robot3",
+            "yield_robot": "robot1",
+            "occupied_by": null,
+            "shared_resource_details": {
+              "kind": "node",
+              "node": 7,
+              "robots": [
+                "robot1",
+                "robot2",
+                "robot3"
+              ]
+            },
+            "action": "WAIT",
+            "wait_node": 5,
+            "needs_fms_approval": true,
+            "priority_robot_action": "PROCEED",
+            "wait_node_verified": true,
+            "note": "FMS must reserve the wait node and stop robot before the conflict zone",
+            "wait_path_overlaps": []
+          },
+          {
+            "zone": "node:7",
+            "robots": [
+              "robot2",
+              "robot3"
+            ],
+            "priority_robot": "robot2",
+            "yield_robot": "robot3",
+            "occupied_by": null,
+            "shared_resource_details": {
+              "kind": "node",
+              "node": 7,
+              "robots": [
+                "robot1",
+                "robot2",
+                "robot3"
+              ]
+            },
+            "action": "WAIT",
+            "wait_node": 3,
+            "needs_fms_approval": true,
+            "priority_robot_action": "PROCEED",
+            "wait_node_verified": true,
+            "note": "FMS must reserve the wait node and stop robot before the conflict zone",
+            "wait_path_overlaps": []
+          },
+          {
+            "zone": "node:7",
+            "robots": [
+              "robot1",
+              "robot2"
+            ],
+            "priority_robot": "robot2",
+            "yield_robot": "robot1",
+            "occupied_by": null,
+            "shared_resource_details": {
+              "kind": "node",
+              "node": 7,
+              "robots": [
+                "robot1",
+                "robot2",
+                "robot3"
+              ]
+            },
+            "action": "WAIT",
+            "wait_node": 5,
+            "needs_fms_approval": true,
+            "priority_robot_action": "PROCEED",
+            "wait_node_verified": true,
+            "note": "FMS must reserve the wait node and stop robot before the conflict zone",
+            "wait_path_overlaps": []
+          },
+          {
+            "zone": "node:7",
+            "robots": [
+              "robot1",
+              "robot3"
+            ],
+            "priority_robot": "robot3",
+            "yield_robot": "robot1",
+            "occupied_by": null,
+            "shared_resource_details": {
+              "kind": "node",
+              "node": 7,
+              "robots": [
+                "robot1",
+                "robot2",
+                "robot3"
+              ]
+            },
+            "action": "WAIT",
+            "wait_node": 5,
+            "needs_fms_approval": true,
+            "priority_robot_action": "PROCEED",
+            "wait_node_verified": true,
+            "note": "FMS must reserve the wait node and stop robot before the conflict zone",
+            "wait_path_overlaps": []
+          },
+          {
+            "zone": "node:7",
+            "robots": [
+              "robot2",
+              "robot3"
+            ],
+            "priority_robot": "robot2",
+            "yield_robot": "robot3",
+            "occupied_by": null,
+            "shared_resource_details": {
+              "kind": "node",
+              "node": 7,
+              "robots": [
+                "robot1",
+                "robot2",
+                "robot3"
+              ]
+            },
+            "action": "WAIT",
+            "wait_node": 3,
+            "needs_fms_approval": true,
+            "priority_robot_action": "PROCEED",
+            "wait_node_verified": true,
+            "note": "FMS must reserve the wait node and stop robot before the conflict zone",
+            "wait_path_overlaps": []
+          }
+        ],
+        "junction_priority_respected": true,
+        "max_simultaneously_moving": 3,
+        "overlapping_motion_seconds": 5.13,
+        "three_robot_motion_seconds": 0.22
+      },
+      {
+        "case": "manual_startup",
+        "completed": true,
+        "elapsed_seconds": 17.06,
+        "expected": {
+          "robot1": "5",
+          "robot2": "6",
+          "robot3": "3"
+        },
+        "actual": {
+          "robot1": "5",
+          "robot2": "6",
+          "robot3": "3"
+        },
+        "minimum_sampled_separation_m": 0.25076941393036745,
+        "responses": [
+          {
+            "robot_id": "robot1",
+            "http_status": 200,
+            "response": {
+              "success": true,
+              "status": "SUCCESS",
+              "robot_id": "robot1",
+              "ui_id": "R-01",
+              "command": "goal-node",
+              "target": {
+                "node_id": 5
+              },
+              "message": "Mock command accepted",
+              "mock": true,
+              "route": {
+                "node_ids": [
+                  "0",
+                  "10",
+                  "9",
+                  "7",
+                  "5"
+                ],
+                "edge_ids": [
+                  "20",
+                  "26",
+                  "30",
+                  "34"
+                ],
+                "waypoint_yaws": [
+                  3.141592653589793,
+                  0.0,
+                  -1.5707963267948966,
+                  0.2541796320686493,
+                  -1.5707963267948966
+                ],
+                "segment_index": 0,
+                "phase": "ready",
+                "departure_at": 971282.172189123,
+                "segment_departures": [
+                  971282.172189123,
+                  971284.7108018678,
+                  971287.4664626933,
+                  971289.8221235189
+                ],
+                "route_source": "llm"
+              },
+              "llm_preview": {
+                "path": [
+                  "0",
+                  "10",
+                  "9",
+                  "7",
+                  "5"
+                ],
+                "model": "kev-08b",
+                "total_weight": 1.7327194475657002,
+                "calls": 1,
+                "baseline_path": [
+                  "0",
+                  "10",
+                  "8",
+                  "7",
+                  "5"
+                ],
+                "baseline_weight": 1.6525585962459297,
+                "same_path": false,
+                "same_distance": false,
+                "distance_difference": 0.08016085131977047
+              },
+              "mapf": {
+                "enabled": true,
+                "analysis_source": "MIXED_ACTIVE_PENDING_PARALLEL",
+                "plan_id": "bc5dc38b30004bcfaa99bfea44c9d1cd",
+                "robot_count": 3,
+                "decisions": [
+                  {
+                    "zone": "zone:edge:7:9",
+                    "robots": [
+                      "robot1",
+                      "robot2"
+                    ],
+                    "priority_robot": "robot2",
+                    "yield_robot": "robot1",
+                    "occupied_by": null,
+                    "shared_resource_details": {
+                      "kind": "group",
+                      "robots": [
+                        "robot1",
+                        "robot2",
+                        "robot3"
+                      ],
+                      "nodes": [
+                        7,
+                        9
+                      ],
+                      "edges": [
+                        [
+                          7,
+                          9
+                        ]
+                      ],
+                      "resources": [
+                        "edge:7:9",
+                        "node:7",
+                        "node:9"
+                      ]
+                    },
+                    "action": "WAIT",
+                    "wait_node": 0,
+                    "needs_fms_approval": true,
+                    "priority_robot_action": "PROCEED",
+                    "wait_node_verified": true,
+                    "note": "FMS must reserve the wait node and stop robot before the conflict zone",
+                    "wait_path_overlaps": []
+                  },
+                  {
+                    "zone": "zone:edge:7:9",
+                    "robots": [
+                      "robot1",
+                      "robot3"
+                    ],
+                    "priority_robot": "robot3",
+                    "yield_robot": "robot1",
+                    "occupied_by": null,
+                    "shared_resource_details": {
+                      "kind": "group",
+                      "robots": [
+                        "robot1",
+                        "robot2",
+                        "robot3"
+                      ],
+                      "nodes": [
+                        7,
+                        9
+                      ],
+                      "edges": [
+                        [
+                          7,
+                          9
+                        ]
+                      ],
+                      "resources": [
+                        "edge:7:9",
+                        "node:7",
+                        "node:9"
+                      ]
+                    },
+                    "action": "WAIT",
+                    "wait_node": 0,
+                    "needs_fms_approval": true,
+                    "priority_robot_action": "PROCEED",
+                    "wait_node_verified": true,
+                    "note": "FMS must reserve the wait node and stop robot before the conflict zone",
+                    "wait_path_overlaps": []
+                  },
+                  {
+                    "zone": "zone:edge:7:9",
+                    "robots": [
+                      "robot2",
+                      "robot3"
+                    ],
+                    "priority_robot": "robot2",
+                    "yield_robot": "robot3",
+                    "occupied_by": null,
+                    "shared_resource_details": {
+                      "kind": "group",
+                      "robots": [
+                        "robot1",
+                        "robot2",
+                        "robot3"
+                      ],
+                      "nodes": [
+                        7,
+                        9
+                      ],
+                      "edges": [
+                        [
+                          7,
+                          9
+                        ]
+                      ],
+                      "resources": [
+                        "edge:7:9",
+                        "node:7",
+                        "node:9"
+                      ]
+                    },
+                    "action": "WAIT",
+                    "wait_node": 2,
+                    "needs_fms_approval": true,
+                    "priority_robot_action": "PROCEED",
+                    "wait_node_verified": true,
+                    "note": "FMS must reserve the wait node and stop robot before the conflict zone",
+                    "wait_path_overlaps": []
+                  },
+                  {
+                    "zone": "zone:edge:7:11",
+                    "robots": [
+                      "robot2",
+                      "robot3"
+                    ],
+                    "priority_robot": "robot2",
+                    "yield_robot": "robot3",
+                    "occupied_by": null,
+                    "shared_resource_details": {
+                      "kind": "group",
+                      "robots": [
+                        "robot2",
+                        "robot3"
+                      ],
+                      "nodes": [
+                        11
+                      ],
+                      "edges": [
+                        [
+                          7,
+                          11
+                        ]
+                      ],
+                      "resources": [
+                        "edge:7:11",
+                        "node:11"
+                      ]
+                    },
+                    "action": "WAIT",
+                    "wait_node": 2,
+                    "needs_fms_approval": true,
+                    "priority_robot_action": "PROCEED",
+                    "wait_node_verified": true,
+                    "note": "FMS must reserve the wait node and stop robot before the conflict zone",
+                    "wait_path_overlaps": []
+                  }
+                ],
+                "input_paths": {
+                  "robot1": [
+                    "0",
+                    "10",
+                    "9",
+                    "7",
+                    "5"
+                  ],
+                  "robot2": [
+                    "1",
+                    "9",
+                    "7",
+                    "11",
+                    "6"
+                  ],
+                  "robot3": [
+                    "2",
+                    "9",
+                    "7",
+                    "11",
+                    "3"
+                  ]
+                },
+                "priority_mode": "score",
+                "priority_scores": {
+                  "robot1": 1.7901,
+                  "robot2": 1.8291,
+                  "robot3": 1.8094
+                },
+                "metrics": {
+                  "kev_api_calls": 8,
+                  "kev_score_calls": 1,
+                  "kev_choice_calls": 7,
+                  "kev_forced_choices": 5,
+                  "kev_estimated_total_wall_seconds": 1.13795,
+                  "reroutes": 0,
+                  "script_wall_seconds": 1.14117
+                },
+                "zone_wait_for": [
+                  {
+                    "robot_id": "robot2",
+                    "resources": [
+                      [
+                        "node",
+                        "7"
+                      ],
+                      [
+                        "node",
+                        "9"
+                      ],
+                      [
+                        "edge",
+                        "7",
+                        "9"
+                      ]
+                    ],
+                    "navigation_id": "6ae5d873033246048eadb0596b729edf"
+                  },
+                  {
+                    "robot_id": "robot3",
+                    "resources": [
+                      [
+                        "node",
+                        "7"
+                      ],
+                      [
+                        "node",
+                        "9"
+                      ],
+                      [
+                        "edge",
+                        "7",
+                        "9"
+                      ]
+                    ],
+                    "navigation_id": "cf7931de79894ee19d84565304658f7a"
+                  }
+                ]
+              },
+              "driving_mode": "llm",
+              "selector": "kev",
+              "model": "kev-08b"
+            }
+          },
+          {
+            "robot_id": "robot2",
+            "http_status": 200,
+            "response": {
+              "success": true,
+              "status": "SUCCESS",
+              "robot_id": "robot2",
+              "ui_id": "R-02",
+              "command": "goal-node",
+              "target": {
+                "node_id": 6
+              },
+              "message": "Mock command accepted",
+              "mock": true,
+              "route": {
+                "node_ids": [
+                  "1",
+                  "9",
+                  "7",
+                  "11",
+                  "6"
+                ],
+                "edge_ids": [
+                  "22",
+                  "30",
+                  "38",
+                  "44"
+                ],
+                "waypoint_yaws": [
+                  3.141592653589793,
+                  0.0,
+                  0.2541796320686493,
+                  0.0,
+                  -1.5707963267948966
+                ],
+                "segment_index": 0,
+                "phase": "ready",
+                "departure_at": 971282.172189123,
+                "segment_departures": [
+                  971282.172189123,
+                  971284.7108018678,
+                  971287.0664626934,
+                  971290.9952721574
+                ],
+                "route_source": "llm"
+              },
+              "llm_preview": {
+                "path": [
+                  "1",
+                  "9",
+                  "7",
+                  "11",
+                  "6"
+                ],
+                "model": "kev-08b",
+                "total_weight": 2.1418576967990655,
+                "calls": 1,
+                "baseline_path": [
+                  "1",
+                  "9",
+                  "7",
+                  "11",
+                  "6"
+                ],
+                "baseline_weight": 2.1418576967990655,
+                "same_path": true,
+                "same_distance": true,
+                "distance_difference": 0.0
+              },
+              "mapf": {
+                "enabled": true,
+                "analysis_source": "MIXED_ACTIVE_PENDING_PARALLEL",
+                "plan_id": "bc5dc38b30004bcfaa99bfea44c9d1cd",
+                "robot_count": 3,
+                "decisions": [
+                  {
+                    "zone": "zone:edge:7:9",
+                    "robots": [
+                      "robot1",
+                      "robot2"
+                    ],
+                    "priority_robot": "robot2",
+                    "yield_robot": "robot1",
+                    "occupied_by": null,
+                    "shared_resource_details": {
+                      "kind": "group",
+                      "robots": [
+                        "robot1",
+                        "robot2",
+                        "robot3"
+                      ],
+                      "nodes": [
+                        7,
+                        9
+                      ],
+                      "edges": [
+                        [
+                          7,
+                          9
+                        ]
+                      ],
+                      "resources": [
+                        "edge:7:9",
+                        "node:7",
+                        "node:9"
+                      ]
+                    },
+                    "action": "WAIT",
+                    "wait_node": 0,
+                    "needs_fms_approval": true,
+                    "priority_robot_action": "PROCEED",
+                    "wait_node_verified": true,
+                    "note": "FMS must reserve the wait node and stop robot before the conflict zone",
+                    "wait_path_overlaps": []
+                  },
+                  {
+                    "zone": "zone:edge:7:9",
+                    "robots": [
+                      "robot1",
+                      "robot3"
+                    ],
+                    "priority_robot": "robot3",
+                    "yield_robot": "robot1",
+                    "occupied_by": null,
+                    "shared_resource_details": {
+                      "kind": "group",
+                      "robots": [
+                        "robot1",
+                        "robot2",
+                        "robot3"
+                      ],
+                      "nodes": [
+                        7,
+                        9
+                      ],
+                      "edges": [
+                        [
+                          7,
+                          9
+                        ]
+                      ],
+                      "resources": [
+                        "edge:7:9",
+                        "node:7",
+                        "node:9"
+                      ]
+                    },
+                    "action": "WAIT",
+                    "wait_node": 0,
+                    "needs_fms_approval": true,
+                    "priority_robot_action": "PROCEED",
+                    "wait_node_verified": true,
+                    "note": "FMS must reserve the wait node and stop robot before the conflict zone",
+                    "wait_path_overlaps": []
+                  },
+                  {
+                    "zone": "zone:edge:7:9",
+                    "robots": [
+                      "robot2",
+                      "robot3"
+                    ],
+                    "priority_robot": "robot2",
+                    "yield_robot": "robot3",
+                    "occupied_by": null,
+                    "shared_resource_details": {
+                      "kind": "group",
+                      "robots": [
+                        "robot1",
+                        "robot2",
+                        "robot3"
+                      ],
+                      "nodes": [
+                        7,
+                        9
+                      ],
+                      "edges": [
+                        [
+                          7,
+                          9
+                        ]
+                      ],
+                      "resources": [
+                        "edge:7:9",
+                        "node:7",
+                        "node:9"
+                      ]
+                    },
+                    "action": "WAIT",
+                    "wait_node": 2,
+                    "needs_fms_approval": true,
+                    "priority_robot_action": "PROCEED",
+                    "wait_node_verified": true,
+                    "note": "FMS must reserve the wait node and stop robot before the conflict zone",
+                    "wait_path_overlaps": []
+                  },
+                  {
+                    "zone": "zone:edge:7:11",
+                    "robots": [
+                      "robot2",
+                      "robot3"
+                    ],
+                    "priority_robot": "robot2",
+                    "yield_robot": "robot3",
+                    "occupied_by": null,
+                    "shared_resource_details": {
+                      "kind": "group",
+                      "robots": [
+                        "robot2",
+                        "robot3"
+                      ],
+                      "nodes": [
+                        11
+                      ],
+                      "edges": [
+                        [
+                          7,
+                          11
+                        ]
+                      ],
+                      "resources": [
+                        "edge:7:11",
+                        "node:11"
+                      ]
+                    },
+                    "action": "WAIT",
+                    "wait_node": 2,
+                    "needs_fms_approval": true,
+                    "priority_robot_action": "PROCEED",
+                    "wait_node_verified": true,
+                    "note": "FMS must reserve the wait node and stop robot before the conflict zone",
+                    "wait_path_overlaps": []
+                  }
+                ],
+                "input_paths": {
+                  "robot1": [
+                    "0",
+                    "10",
+                    "9",
+                    "7",
+                    "5"
+                  ],
+                  "robot2": [
+                    "1",
+                    "9",
+                    "7",
+                    "11",
+                    "6"
+                  ],
+                  "robot3": [
+                    "2",
+                    "9",
+                    "7",
+                    "11",
+                    "3"
+                  ]
+                },
+                "priority_mode": "score",
+                "priority_scores": {
+                  "robot1": 1.7901,
+                  "robot2": 1.8291,
+                  "robot3": 1.8094
+                },
+                "metrics": {
+                  "kev_api_calls": 8,
+                  "kev_score_calls": 1,
+                  "kev_choice_calls": 7,
+                  "kev_forced_choices": 5,
+                  "kev_estimated_total_wall_seconds": 1.13795,
+                  "reroutes": 0,
+                  "script_wall_seconds": 1.14117
+                },
+                "zone_wait_for": []
+              },
+              "driving_mode": "llm",
+              "selector": "kev",
+              "model": "kev-08b"
+            }
+          },
+          {
+            "robot_id": "robot3",
+            "http_status": 200,
+            "response": {
+              "success": true,
+              "status": "SUCCESS",
+              "robot_id": "robot3",
+              "ui_id": "R-03",
+              "command": "goal-node",
+              "target": {
+                "node_id": 3
+              },
+              "message": "Mock command accepted",
+              "mock": true,
+              "route": null,
+              "llm_preview": {
+                "path": [
+                  "2",
+                  "9",
+                  "7",
+                  "11",
+                  "3"
+                ],
+                "model": "kev-08b",
+                "total_weight": 2.046038662634252,
+                "calls": 1,
+                "baseline_path": [
+                  "2",
+                  "9",
+                  "7",
+                  "11",
+                  "3"
+                ],
+                "baseline_weight": 2.046038662634252,
+                "same_path": true,
+                "same_distance": true,
+                "distance_difference": 0.0
+              },
+              "mapf": {
+                "enabled": true,
+                "analysis_source": "MIXED_ACTIVE_PENDING_PARALLEL",
+                "plan_id": "bc5dc38b30004bcfaa99bfea44c9d1cd",
+                "robot_count": 3,
+                "decisions": [
+                  {
+                    "zone": "zone:edge:7:9",
+                    "robots": [
+                      "robot1",
+                      "robot2"
+                    ],
+                    "priority_robot": "robot2",
+                    "yield_robot": "robot1",
+                    "occupied_by": null,
+                    "shared_resource_details": {
+                      "kind": "group",
+                      "robots": [
+                        "robot1",
+                        "robot2",
+                        "robot3"
+                      ],
+                      "nodes": [
+                        7,
+                        9
+                      ],
+                      "edges": [
+                        [
+                          7,
+                          9
+                        ]
+                      ],
+                      "resources": [
+                        "edge:7:9",
+                        "node:7",
+                        "node:9"
+                      ]
+                    },
+                    "action": "WAIT",
+                    "wait_node": 0,
+                    "needs_fms_approval": true,
+                    "priority_robot_action": "PROCEED",
+                    "wait_node_verified": true,
+                    "note": "FMS must reserve the wait node and stop robot before the conflict zone",
+                    "wait_path_overlaps": []
+                  },
+                  {
+                    "zone": "zone:edge:7:9",
+                    "robots": [
+                      "robot1",
+                      "robot3"
+                    ],
+                    "priority_robot": "robot3",
+                    "yield_robot": "robot1",
+                    "occupied_by": null,
+                    "shared_resource_details": {
+                      "kind": "group",
+                      "robots": [
+                        "robot1",
+                        "robot2",
+                        "robot3"
+                      ],
+                      "nodes": [
+                        7,
+                        9
+                      ],
+                      "edges": [
+                        [
+                          7,
+                          9
+                        ]
+                      ],
+                      "resources": [
+                        "edge:7:9",
+                        "node:7",
+                        "node:9"
+                      ]
+                    },
+                    "action": "WAIT",
+                    "wait_node": 0,
+                    "needs_fms_approval": true,
+                    "priority_robot_action": "PROCEED",
+                    "wait_node_verified": true,
+                    "note": "FMS must reserve the wait node and stop robot before the conflict zone",
+                    "wait_path_overlaps": []
+                  },
+                  {
+                    "zone": "zone:edge:7:9",
+                    "robots": [
+                      "robot2",
+                      "robot3"
+                    ],
+                    "priority_robot": "robot2",
+                    "yield_robot": "robot3",
+                    "occupied_by": null,
+                    "shared_resource_details": {
+                      "kind": "group",
+                      "robots": [
+                        "robot1",
+                        "robot2",
+                        "robot3"
+                      ],
+                      "nodes": [
+                        7,
+                        9
+                      ],
+                      "edges": [
+                        [
+                          7,
+                          9
+                        ]
+                      ],
+                      "resources": [
+                        "edge:7:9",
+                        "node:7",
+                        "node:9"
+                      ]
+                    },
+                    "action": "WAIT",
+                    "wait_node": 2,
+                    "needs_fms_approval": true,
+                    "priority_robot_action": "PROCEED",
+                    "wait_node_verified": true,
+                    "note": "FMS must reserve the wait node and stop robot before the conflict zone",
+                    "wait_path_overlaps": []
+                  },
+                  {
+                    "zone": "zone:edge:7:11",
+                    "robots": [
+                      "robot2",
+                      "robot3"
+                    ],
+                    "priority_robot": "robot2",
+                    "yield_robot": "robot3",
+                    "occupied_by": null,
+                    "shared_resource_details": {
+                      "kind": "group",
+                      "robots": [
+                        "robot2",
+                        "robot3"
+                      ],
+                      "nodes": [
+                        11
+                      ],
+                      "edges": [
+                        [
+                          7,
+                          11
+                        ]
+                      ],
+                      "resources": [
+                        "edge:7:11",
+                        "node:11"
+                      ]
+                    },
+                    "action": "WAIT",
+                    "wait_node": 2,
+                    "needs_fms_approval": true,
+                    "priority_robot_action": "PROCEED",
+                    "wait_node_verified": true,
+                    "note": "FMS must reserve the wait node and stop robot before the conflict zone",
+                    "wait_path_overlaps": []
+                  }
+                ],
+                "input_paths": {
+                  "robot1": [
+                    "0",
+                    "10",
+                    "9",
+                    "7",
+                    "5"
+                  ],
+                  "robot2": [
+                    "1",
+                    "9",
+                    "7",
+                    "11",
+                    "6"
+                  ],
+                  "robot3": [
+                    "2",
+                    "9",
+                    "7",
+                    "11",
+                    "3"
+                  ]
+                },
+                "priority_mode": "score",
+                "priority_scores": {
+                  "robot1": 1.7901,
+                  "robot2": 1.8291,
+                  "robot3": 1.8094
+                },
+                "metrics": {
+                  "kev_api_calls": 8,
+                  "kev_score_calls": 1,
+                  "kev_choice_calls": 7,
+                  "kev_forced_choices": 5,
+                  "kev_estimated_total_wall_seconds": 1.13795,
+                  "reroutes": 0,
+                  "script_wall_seconds": 1.14117
+                },
+                "zone_wait_for": [
+                  {
+                    "robot_id": "robot2",
+                    "resources": [
+                      [
+                        "node",
+                        "7"
+                      ],
+                      [
+                        "node",
+                        "9"
+                      ],
+                      [
+                        "edge",
+                        "7",
+                        "9"
+                      ]
+                    ],
+                    "navigation_id": "6ae5d873033246048eadb0596b729edf"
+                  },
+                  {
+                    "robot_id": "robot2",
+                    "resources": [
+                      [
+                        "node",
+                        "11"
+                      ],
+                      [
+                        "edge",
+                        "11",
+                        "7"
+                      ]
+                    ],
+                    "navigation_id": "6ae5d873033246048eadb0596b729edf"
+                  }
+                ]
+              },
+              "driving_mode": "llm",
+              "selector": "kev",
+              "model": "kev-08b"
+            }
+          }
+        ],
+        "in_flight_submission": null,
+        "first_n7_entry_seconds": {},
+        "junction_violations": [],
+        "three_robot_shared_zone_decisions": [],
+        "junction_priority_respected": true,
+        "max_simultaneously_moving": 3,
+        "overlapping_motion_seconds": 11.8,
+        "three_robot_motion_seconds": 1.89
+      },
+      {
+        "case": "photo_n5_n7_n9",
+        "completed": true,
+        "elapsed_seconds": 15.41,
+        "expected": {
+          "robot1": "3",
+          "robot2": "1",
+          "robot3": "6"
+        },
+        "actual": {
+          "robot1": "3",
+          "robot2": "1",
+          "robot3": "6"
+        },
+        "minimum_sampled_separation_m": 0.2312492907208715,
+        "responses": [
+          {
+            "robot_id": "robot1",
+            "http_status": 200,
+            "response": {
+              "success": true,
+              "status": "SUCCESS",
+              "robot_id": "robot1",
+              "ui_id": "R-01",
+              "command": "goal-node",
+              "target": {
+                "node_id": 3
+              },
+              "message": "Mock command accepted",
+              "mock": true,
+              "route": {
+                "node_ids": [
+                  "5",
+                  "7",
+                  "11",
+                  "3"
+                ],
+                "edge_ids": [
+                  "35",
+                  "38",
+                  "48"
+                ],
+                "waypoint_yaws": [
+                  -1.5707963267948966,
+                  1.5707963267948966,
+                  0.0,
+                  0.0
+                ],
+                "segment_index": 0,
+                "phase": "ready",
+                "departure_at": 971298.364802697,
+                "segment_departures": [
+                  971298.364802697,
+                  971300.2510081467,
+                  971304.1798176107
+                ],
+                "route_source": "llm"
+              },
+              "llm_preview": {
+                "path": [
+                  "5",
+                  "7",
+                  "11",
+                  "3"
+                ],
+                "model": "kev-08b",
+                "total_weight": 1.298871174454689,
+                "calls": 0,
+                "baseline_path": [
+                  "5",
+                  "7",
+                  "11",
+                  "3"
+                ],
+                "baseline_weight": 1.298871174454689,
+                "same_path": true,
+                "same_distance": true,
+                "distance_difference": 0.0
+              },
+              "mapf": {
+                "enabled": true,
+                "analysis_source": "MIXED_ACTIVE_PENDING_PARALLEL",
+                "plan_id": "c8f4b4cc6d9d435b99f804b9a9fc171e",
+                "robot_count": 3,
+                "decisions": [
+                  {
+                    "zone": "node:11",
+                    "robots": [
+                      "robot1",
+                      "robot3"
+                    ],
+                    "priority_robot": "robot3",
+                    "yield_robot": "robot1",
+                    "occupied_by": null,
+                    "shared_resource_details": {
+                      "kind": "node",
+                      "node": 11,
+                      "robots": [
+                        "robot1",
+                        "robot3"
+                      ]
+                    },
+                    "action": "WAIT",
+                    "wait_node": 5,
+                    "needs_fms_approval": true,
+                    "priority_robot_action": "PROCEED",
+                    "wait_node_verified": true,
+                    "note": "FMS must reserve the wait node and stop robot before the conflict zone",
+                    "wait_path_overlaps": []
+                  }
+                ],
+                "input_paths": {
+                  "robot1": [
+                    "5",
+                    "7",
+                    "11",
+                    "3"
+                  ],
+                  "robot2": [
+                    "7",
+                    "9",
+                    "1"
+                  ],
+                  "robot3": [
+                    "9",
+                    "10",
+                    "8",
+                    "12",
+                    "11",
+                    "6"
+                  ]
+                },
+                "priority_mode": "score",
+                "priority_scores": {
+                  "robot1": 1.7408,
+                  "robot2": 1.7937,
+                  "robot3": 1.7832
+                },
+                "metrics": {
+                  "kev_api_calls": 2,
+                  "kev_score_calls": 1,
+                  "kev_choice_calls": 1,
+                  "kev_forced_choices": 2,
+                  "kev_estimated_total_wall_seconds": 0.34578,
+                  "reroutes": 0,
+                  "script_wall_seconds": 0.35554
+                },
+                "zone_wait_for": [
+                  {
+                    "robot_id": "robot3",
+                    "resources": [
+                      [
+                        "node",
+                        "11"
+                      ]
+                    ],
+                    "navigation_id": "7fa3b7e43c8143afb68de36286c63b1c"
+                  }
+                ]
+              },
+              "driving_mode": "llm",
+              "selector": "kev",
+              "model": "kev-08b"
+            }
+          },
+          {
+            "robot_id": "robot2",
+            "http_status": 200,
+            "response": {
+              "success": true,
+              "status": "SUCCESS",
+              "robot_id": "robot2",
+              "ui_id": "R-02",
+              "command": "goal-node",
+              "target": {
+                "node_id": 1
+              },
+              "message": "Mock command accepted",
+              "mock": true,
+              "route": {
+                "node_ids": [
+                  "7",
+                  "9",
+                  "1"
+                ],
+                "edge_ids": [
+                  "31",
+                  "23"
+                ],
+                "waypoint_yaws": [
+                  -1.5707963267948966,
+                  -2.887413021521144,
+                  3.141592653589793
+                ],
+                "segment_index": 0,
+                "phase": "ready",
+                "departure_at": 971298.364802697,
+                "segment_departures": [
+                  971298.364802697,
+                  971300.7204635226
+                ],
+                "route_source": "llm"
+              },
+              "llm_preview": {
+                "path": [
+                  "7",
+                  "9",
+                  "1"
+                ],
+                "model": "kev-08b",
+                "total_weight": 0.9788547140634314,
+                "calls": 0,
+                "baseline_path": [
+                  "7",
+                  "9",
+                  "1"
+                ],
+                "baseline_weight": 0.9788547140634314,
+                "same_path": true,
+                "same_distance": true,
+                "distance_difference": 0.0
+              },
+              "mapf": {
+                "enabled": true,
+                "analysis_source": "MIXED_ACTIVE_PENDING_PARALLEL",
+                "plan_id": "c8f4b4cc6d9d435b99f804b9a9fc171e",
+                "robot_count": 3,
+                "decisions": [
+                  {
+                    "zone": "node:11",
+                    "robots": [
+                      "robot1",
+                      "robot3"
+                    ],
+                    "priority_robot": "robot3",
+                    "yield_robot": "robot1",
+                    "occupied_by": null,
+                    "shared_resource_details": {
+                      "kind": "node",
+                      "node": 11,
+                      "robots": [
+                        "robot1",
+                        "robot3"
+                      ]
+                    },
+                    "action": "WAIT",
+                    "wait_node": 5,
+                    "needs_fms_approval": true,
+                    "priority_robot_action": "PROCEED",
+                    "wait_node_verified": true,
+                    "note": "FMS must reserve the wait node and stop robot before the conflict zone",
+                    "wait_path_overlaps": []
+                  }
+                ],
+                "input_paths": {
+                  "robot1": [
+                    "5",
+                    "7",
+                    "11",
+                    "3"
+                  ],
+                  "robot2": [
+                    "7",
+                    "9",
+                    "1"
+                  ],
+                  "robot3": [
+                    "9",
+                    "10",
+                    "8",
+                    "12",
+                    "11",
+                    "6"
+                  ]
+                },
+                "priority_mode": "score",
+                "priority_scores": {
+                  "robot1": 1.7408,
+                  "robot2": 1.7937,
+                  "robot3": 1.7832
+                },
+                "metrics": {
+                  "kev_api_calls": 2,
+                  "kev_score_calls": 1,
+                  "kev_choice_calls": 1,
+                  "kev_forced_choices": 2,
+                  "kev_estimated_total_wall_seconds": 0.34578,
+                  "reroutes": 0,
+                  "script_wall_seconds": 0.35554
+                },
+                "zone_wait_for": []
+              },
+              "driving_mode": "llm",
+              "selector": "kev",
+              "model": "kev-08b"
+            }
+          },
+          {
+            "robot_id": "robot3",
+            "http_status": 200,
+            "response": {
+              "success": true,
+              "status": "SUCCESS",
+              "robot_id": "robot3",
+              "ui_id": "R-03",
+              "command": "goal-node",
+              "target": {
+                "node_id": 6
+              },
+              "message": "Mock command accepted",
+              "mock": true,
+              "route": {
+                "node_ids": [
+                  "9",
+                  "10",
+                  "8",
+                  "12",
+                  "11",
+                  "6"
+                ],
+                "edge_ids": [
+                  "27",
+                  "28",
+                  "36",
+                  "42",
+                  "44"
+                ],
+                "waypoint_yaws": [
+                  0.0,
+                  1.5707963267948966,
+                  0.11060129593525438,
+                  0.0,
+                  -1.5707963267948966,
+                  -1.5707963267948966
+                ],
+                "segment_index": 0,
+                "phase": "ready",
+                "departure_at": 971298.364802697,
+                "segment_departures": [
+                  971298.364802697,
+                  971300.2479209148,
+                  971302.5419106178,
+                  971306.4707200818,
+                  971308.0147051655
+                ],
+                "route_source": "llm"
+              },
+              "llm_preview": {
+                "path": [
+                  "9",
+                  "10",
+                  "8",
+                  "12",
+                  "11",
+                  "6"
+                ],
+                "model": "kev-08b",
+                "total_weight": 2.307221583659217,
+                "calls": 0,
+                "baseline_path": [
+                  "9",
+                  "7",
+                  "11",
+                  "6"
+                ],
+                "baseline_weight": 1.634135147854592,
+                "same_path": false,
+                "same_distance": false,
+                "distance_difference": 0.6730864358046251
+              },
+              "mapf": {
+                "enabled": true,
+                "analysis_source": "MIXED_ACTIVE_PENDING_PARALLEL",
+                "plan_id": "c8f4b4cc6d9d435b99f804b9a9fc171e",
+                "robot_count": 3,
+                "decisions": [
+                  {
+                    "zone": "node:11",
+                    "robots": [
+                      "robot1",
+                      "robot3"
+                    ],
+                    "priority_robot": "robot3",
+                    "yield_robot": "robot1",
+                    "occupied_by": null,
+                    "shared_resource_details": {
+                      "kind": "node",
+                      "node": 11,
+                      "robots": [
+                        "robot1",
+                        "robot3"
+                      ]
+                    },
+                    "action": "WAIT",
+                    "wait_node": 5,
+                    "needs_fms_approval": true,
+                    "priority_robot_action": "PROCEED",
+                    "wait_node_verified": true,
+                    "note": "FMS must reserve the wait node and stop robot before the conflict zone",
+                    "wait_path_overlaps": []
+                  }
+                ],
+                "input_paths": {
+                  "robot1": [
+                    "5",
+                    "7",
+                    "11",
+                    "3"
+                  ],
+                  "robot2": [
+                    "7",
+                    "9",
+                    "1"
+                  ],
+                  "robot3": [
+                    "9",
+                    "10",
+                    "8",
+                    "12",
+                    "11",
+                    "6"
+                  ]
+                },
+                "priority_mode": "score",
+                "priority_scores": {
+                  "robot1": 1.7408,
+                  "robot2": 1.7937,
+                  "robot3": 1.7832
+                },
+                "metrics": {
+                  "kev_api_calls": 2,
+                  "kev_score_calls": 1,
+                  "kev_choice_calls": 1,
+                  "kev_forced_choices": 2,
+                  "kev_estimated_total_wall_seconds": 0.34578,
+                  "reroutes": 0,
+                  "script_wall_seconds": 0.35554
+                },
+                "zone_wait_for": []
+              },
+              "driving_mode": "llm",
+              "selector": "kev",
+              "model": "kev-08b"
+            }
+          }
+        ],
+        "in_flight_submission": null,
+        "first_n7_entry_seconds": {},
+        "junction_violations": [],
+        "three_robot_shared_zone_decisions": [],
+        "junction_priority_respected": true,
+        "max_simultaneously_moving": 3,
+        "overlapping_motion_seconds": 6.14,
+        "three_robot_motion_seconds": 1.7
+      },
+      {
+        "case": "photo_n8_n9_n7",
+        "completed": true,
+        "elapsed_seconds": 37.4,
+        "expected": {
+          "robot1": "6",
+          "robot2": "5",
+          "robot3": "2"
+        },
+        "actual": {
+          "robot1": "6",
+          "robot2": "5",
+          "robot3": "2"
+        },
+        "minimum_sampled_separation_m": 0.3087970167398453,
+        "responses": [
+          {
+            "robot_id": "robot1",
+            "http_status": 200,
+            "response": {
+              "success": true,
+              "status": "SUCCESS",
+              "robot_id": "robot1",
+              "ui_id": "R-01",
+              "command": "goal-node",
+              "target": {
+                "node_id": 6
+              },
+              "message": "Mock command accepted",
+              "mock": true,
+              "route": {
+                "node_ids": [
+                  "8",
+                  "12",
+                  "11",
+                  "6"
+                ],
+                "edge_ids": [
+                  "36",
+                  "42",
+                  "44"
+                ],
+                "waypoint_yaws": [
+                  0.0,
+                  0.0,
+                  -1.5707963267948966,
+                  -1.5707963267948966
+                ],
+                "segment_index": 0,
+                "phase": "ready",
+                "departure_at": 971317.710614203,
+                "segment_departures": [
+                  971317.710614203,
+                  971321.639423667,
+                  971323.1834087507
+                ],
+                "route_source": "llm"
+              },
+              "llm_preview": {
+                "path": [
+                  "8",
+                  "12",
+                  "11",
+                  "6"
+                ],
+                "model": "kev-08b",
+                "total_weight": 1.4717999994754791,
+                "calls": 0,
+                "baseline_path": [
+                  "8",
+                  "7",
+                  "11",
+                  "6"
+                ],
+                "baseline_weight": 1.4717999994754791,
+                "same_path": false,
+                "same_distance": true,
+                "distance_difference": 0.0
+              },
+              "mapf": {
+                "enabled": true,
+                "analysis_source": "KEV_PENDING_RECOVERY",
+                "robot_count": 3,
+                "decisions": [
+                  {
+                    "model": "kev-08b",
+                    "api_model": "kev-latest",
+                    "routing": null,
+                    "usage": {
+                      "input_tokens": 1020,
+                      "output_tokens": 132
+                    },
+                    "state_truncated": null,
+                    "total_duration_seconds": 0.3230226089945063,
+                    "load_duration_seconds": 0.0,
+                    "eval_duration_seconds": 0.101,
+                    "runtime": {
+                      "name": "kev-latest",
+                      "description": "Kev pointer head on Qwen/Qwen3.5-0.8B-Base, serving jaredpalmer/kev-0.8b@v1.0 at temperature 2.35",
+                      "release_date": "2026-10-01",
+                      "run": "jaredpalmer/kev-0.8b@v1.0",
+                      "base": "Qwen/Qwen3.5-0.8B-Base",
+                      "lora": 16,
+                      "device": "cuda",
+                      "backend": "torch",
+                      "dtype": "bfloat16",
+                      "temperature": 2.3510958125672174,
+                      "max_state_tokens": 65536,
+                      "truncate_states": false,
+                      "cuda_graphs": null,
+                      "prefix_cache": {
+                        "size": 0,
+                        "min_state_tokens": 0,
+                        "max_tokens": 65536,
+                        "hits": 0,
+                        "misses": 0,
+                        "cached_states": 0,
+                        "oom_retries": 0
+                      },
+                      "batches": {
+                        "count": 573,
+                        "requests": 621,
+                        "queued": 0
+                      }
+                    },
+                    "raw": {
+                      "model": "kev-latest",
+                      "answers": {
+                        "deadlock_recovery": {
+                          "type": "choice",
+                          "choice": "proceed_robot1",
+                          "confidence": 0.1347,
+                          "probabilities": {
+                            "proceed_robot1": 0.2789,
+                            "move_aside_robot1_10": 0.1023,
+                            "move_aside_robot1_12": 0.1341,
+                            "move_aside_robot2_10": 0.1313,
+                            "move_aside_robot3_11": 0.2217,
+                            "wait": 0.1316
+                          }
+                        }
+                      },
+                      "usage": {
+                        "input_tokens": 1020,
+                        "output_tokens": 132
+                      },
+                      "latency_ms": 101.0
+                    },
+                    "choice": "proceed_robot1",
+                    "confidence": 0.1347,
+                    "answer_confidence": 0.2789,
+                    "probabilities": {
+                      "proceed_robot1": 0.2789,
+                      "move_aside_robot1_10": 0.1023,
+                      "move_aside_robot1_12": 0.1341,
+                      "move_aside_robot2_10": 0.1313,
+                      "move_aside_robot3_11": 0.2217,
+                      "wait": 0.1316
+                    },
+                    "action": "PROCEED",
+                    "temporary_goal": null
+                  }
+                ],
+                "business_goal": 6,
+                "predeparture_advisory": {
+                  "status": "BLOCKED",
+                  "decisions": [
+                    {
+                      "zone": "zone:edge:7:9",
+                      "robots": [
+                        "robot2",
+                        "robot3"
+                      ],
+                      "priority_robot": "robot2",
+                      "yield_robot": "robot3",
+                      "occupied_by": null,
+                      "shared_resource_details": {
+                        "kind": "group",
+                        "robots": [
+                          "robot2",
+                          "robot3"
+                        ],
+                        "nodes": [
+                          7,
+                          9
+                        ],
+                        "edges": [
+                          [
+                            7,
+                            9
+                          ]
+                        ],
+                        "resources": [
+                          "edge:7:9",
+                          "node:7",
+                          "node:9"
+                        ]
+                      },
+                      "action": "HOLD",
+                      "wait_node": null,
+                      "needs_fms_approval": true,
+                      "priority_robot_action": "PROCEED",
+                      "reason": "REROUTE_FAILED",
+                      "details": "ValueError: 순환 방지 조건을 만족하는 이동 후보가 없습니다: current=12"
+                    }
+                  ],
+                  "metrics": {
+                    "kev_api_calls": 1,
+                    "kev_score_calls": 1,
+                    "kev_choice_calls": 0,
+                    "kev_forced_choices": 2,
+                    "kev_estimated_total_wall_seconds": 1.56879,
+                    "reroutes": 1,
+                    "script_wall_seconds": 1.57116
+                  }
+                }
+              },
+              "driving_mode": "llm",
+              "selector": "kev",
+              "model": "kev-08b"
+            }
+          },
+          {
+            "robot_id": "robot2",
+            "http_status": 200,
+            "response": {
+              "success": true,
+              "status": "SUCCESS",
+              "robot_id": "robot2",
+              "ui_id": "R-02",
+              "command": "goal-node",
+              "target": {
+                "node_id": 5
+              },
+              "message": "Mock command accepted",
+              "mock": true,
+              "route": {
+                "node_ids": [
+                  "9",
+                  "7",
+                  "5"
+                ],
+                "edge_ids": [
+                  "30",
+                  "34"
+                ],
+                "waypoint_yaws": [
+                  3.141592653589793,
+                  0.2541796320686493,
+                  -1.5707963267948966
+                ],
+                "segment_index": 0,
+                "phase": "ready",
+                "departure_at": 971334.756890813,
+                "segment_departures": [
+                  971334.756890813,
+                  971337.1125516386
+                ],
+                "route_source": "llm"
+              },
+              "llm_preview": {
+                "path": [
+                  "9",
+                  "7",
+                  "5"
+                ],
+                "model": "kev-08b",
+                "total_weight": 0.8483732550590293,
+                "calls": 0,
+                "baseline_path": [
+                  "9",
+                  "7",
+                  "5"
+                ],
+                "baseline_weight": 0.8483732550590293,
+                "same_path": true,
+                "same_distance": true,
+                "distance_difference": 0.0
+              },
+              "mapf": {
+                "enabled": true,
+                "analysis_source": "KEV_PENDING_RECOVERY",
+                "robot_count": 2,
+                "decisions": [
+                  {
+                    "model": "kev-08b",
+                    "api_model": "kev-latest",
+                    "routing": null,
+                    "usage": {
+                      "input_tokens": 848,
+                      "output_tokens": 95
+                    },
+                    "state_truncated": null,
+                    "total_duration_seconds": 0.2028206849936396,
+                    "load_duration_seconds": 0.0,
+                    "eval_duration_seconds": 0.0932,
+                    "runtime": {
+                      "name": "kev-latest",
+                      "description": "Kev pointer head on Qwen/Qwen3.5-0.8B-Base, serving jaredpalmer/kev-0.8b@v1.0 at temperature 2.35",
+                      "release_date": "2026-10-01",
+                      "run": "jaredpalmer/kev-0.8b@v1.0",
+                      "base": "Qwen/Qwen3.5-0.8B-Base",
+                      "lora": 16,
+                      "device": "cuda",
+                      "backend": "torch",
+                      "dtype": "bfloat16",
+                      "temperature": 2.3510958125672174,
+                      "max_state_tokens": 65536,
+                      "truncate_states": false,
+                      "cuda_graphs": null,
+                      "prefix_cache": {
+                        "size": 0,
+                        "min_state_tokens": 0,
+                        "max_tokens": 65536,
+                        "hits": 0,
+                        "misses": 0,
+                        "cached_states": 0,
+                        "oom_retries": 0
+                      },
+                      "batches": {
+                        "count": 675,
+                        "requests": 725,
+                        "queued": 0
+                      }
+                    },
+                    "raw": {
+                      "model": "kev-latest",
+                      "answers": {
+                        "deadlock_recovery": {
+                          "type": "choice",
+                          "choice": "proceed_robot2",
+                          "confidence": 0.1752,
+                          "probabilities": {
+                            "proceed_robot2": 0.3814,
+                            "move_aside_robot2_10": 0.1728,
+                            "move_aside_robot2_7": 0.2602,
+                            "wait": 0.1856
+                          }
+                        }
+                      },
+                      "usage": {
+                        "input_tokens": 848,
+                        "output_tokens": 95
+                      },
+                      "latency_ms": 93.2
+                    },
+                    "choice": "proceed_robot2",
+                    "confidence": 0.1752,
+                    "answer_confidence": 0.3814,
+                    "probabilities": {
+                      "proceed_robot2": 0.3814,
+                      "move_aside_robot2_10": 0.1728,
+                      "move_aside_robot2_7": 0.2602,
+                      "wait": 0.1856
+                    },
+                    "action": "PROCEED",
+                    "temporary_goal": null
+                  }
+                ],
+                "business_goal": 5,
+                "predeparture_advisory": {
+                  "status": "BLOCKED",
+                  "decisions": [
+                    {
+                      "zone": "zone:edge:7:9",
+                      "robots": [
+                        "robot2",
+                        "robot3"
+                      ],
+                      "priority_robot": "robot2",
+                      "yield_robot": "robot3",
+                      "occupied_by": null,
+                      "shared_resource_details": {
+                        "kind": "group",
+                        "robots": [
+                          "robot2",
+                          "robot3"
+                        ],
+                        "nodes": [
+                          7,
+                          9
+                        ],
+                        "edges": [
+                          [
+                            7,
+                            9
+                          ]
+                        ],
+                        "resources": [
+                          "edge:7:9",
+                          "node:7",
+                          "node:9"
+                        ]
+                      },
+                      "action": "HOLD",
+                      "wait_node": null,
+                      "needs_fms_approval": true,
+                      "priority_robot_action": "PROCEED",
+                      "reason": "REROUTE_FAILED",
+                      "details": "ValueError: 순환 방지 조건을 만족하는 이동 후보가 없습니다: current=6"
+                    }
+                  ],
+                  "metrics": {
+                    "kev_api_calls": 1,
+                    "kev_score_calls": 1,
+                    "kev_choice_calls": 0,
+                    "kev_forced_choices": 2,
+                    "kev_estimated_total_wall_seconds": 1.40468,
+                    "reroutes": 1,
+                    "script_wall_seconds": 1.40591
+                  }
+                }
+              },
+              "driving_mode": "llm",
+              "selector": "kev",
+              "model": "kev-08b"
+            }
+          },
+          {
+            "robot_id": "robot3",
+            "http_status": 200,
+            "response": {
+              "success": true,
+              "status": "SUCCESS",
+              "robot_id": "robot3",
+              "ui_id": "R-03",
+              "command": "goal-node",
+              "target": {
+                "node_id": 2
+              },
+              "message": "Mock command accepted",
+              "mock": true,
+              "route": {
+                "node_ids": [
+                  "7",
+                  "11"
+                ],
+                "edge_ids": [
+                  "38"
+                ],
+                "waypoint_yaws": [
+                  -1.5707963267948966,
+                  0.0
+                ],
+                "segment_index": 0,
+                "phase": "ready",
+                "departure_at": 971328.665118679,
+                "segment_departures": [
+                  971328.665118679
+                ],
+                "route_source": "llm"
+              },
+              "llm_preview": {
+                "path": [
+                  "7",
+                  "11"
+                ],
+                "model": "kev-08b",
+                "total_weight": 1.1244085781196342,
+                "calls": 0,
+                "baseline_path": [
+                  "7",
+                  "9",
+                  "2"
+                ],
+                "baseline_weight": 1.1244085781196342,
+                "same_path": true,
+                "same_distance": true,
+                "distance_difference": 0.0
+              },
+              "mapf": {
+                "enabled": true,
+                "analysis_source": "KEV_PENDING_RECOVERY",
+                "robot_count": 2,
+                "decisions": [
+                  {
+                    "model": "kev-08b",
+                    "api_model": "kev-latest",
+                    "routing": null,
+                    "usage": {
+                      "input_tokens": 835,
+                      "output_tokens": 102
+                    },
+                    "state_truncated": null,
+                    "total_duration_seconds": 0.20841357402969152,
+                    "load_duration_seconds": 0.0,
+                    "eval_duration_seconds": 0.09459999999999999,
+                    "runtime": {
+                      "name": "kev-latest",
+                      "description": "Kev pointer head on Qwen/Qwen3.5-0.8B-Base, serving jaredpalmer/kev-0.8b@v1.0 at temperature 2.35",
+                      "release_date": "2026-10-01",
+                      "run": "jaredpalmer/kev-0.8b@v1.0",
+                      "base": "Qwen/Qwen3.5-0.8B-Base",
+                      "lora": 16,
+                      "device": "cuda",
+                      "backend": "torch",
+                      "dtype": "bfloat16",
+                      "temperature": 2.3510958125672174,
+                      "max_state_tokens": 65536,
+                      "truncate_states": false,
+                      "cuda_graphs": null,
+                      "prefix_cache": {
+                        "size": 0,
+                        "min_state_tokens": 0,
+                        "max_tokens": 65536,
+                        "hits": 0,
+                        "misses": 0,
+                        "cached_states": 0,
+                        "oom_retries": 0
+                      },
+                      "batches": {
+                        "count": 656,
+                        "requests": 706,
+                        "queued": 0
+                      }
+                    },
+                    "raw": {
+                      "model": "kev-latest",
+                      "answers": {
+                        "deadlock_recovery": {
+                          "type": "choice",
+                          "choice": "move_aside_robot3_11",
+                          "confidence": 0.145,
+                          "probabilities": {
+                            "move_aside_robot2_10": 0.1677,
+                            "move_aside_robot3_8": 0.3002,
+                            "move_aside_robot3_11": 0.3587,
+                            "wait": 0.1734
+                          }
+                        }
+                      },
+                      "usage": {
+                        "input_tokens": 835,
+                        "output_tokens": 102
+                      },
+                      "latency_ms": 94.6
+                    },
+                    "choice": "move_aside_robot3_11",
+                    "confidence": 0.145,
+                    "answer_confidence": 0.3587,
+                    "probabilities": {
+                      "move_aside_robot2_10": 0.1677,
+                      "move_aside_robot3_8": 0.3002,
+                      "move_aside_robot3_11": 0.3587,
+                      "wait": 0.1734
+                    },
+                    "action": "MOVE_ASIDE",
+                    "temporary_goal": "11"
+                  }
+                ],
+                "business_goal": 2,
+                "predeparture_advisory": {
+                  "status": "BLOCKED",
+                  "decisions": [
+                    {
+                      "zone": "zone:edge:7:9",
+                      "robots": [
+                        "robot2",
+                        "robot3"
+                      ],
+                      "priority_robot": "robot2",
+                      "yield_robot": "robot3",
+                      "occupied_by": null,
+                      "shared_resource_details": {
+                        "kind": "group",
+                        "robots": [
+                          "robot2",
+                          "robot3"
+                        ],
+                        "nodes": [
+                          7,
+                          9
+                        ],
+                        "edges": [
+                          [
+                            7,
+                            9
+                          ]
+                        ],
+                        "resources": [
+                          "edge:7:9",
+                          "node:7",
+                          "node:9"
+                        ]
+                      },
+                      "action": "HOLD",
+                      "wait_node": null,
+                      "needs_fms_approval": true,
+                      "priority_robot_action": "PROCEED",
+                      "reason": "REROUTE_FAILED",
+                      "details": "ValueError: 순환 방지 조건을 만족하는 이동 후보가 없습니다: current=6"
+                    }
+                  ],
+                  "metrics": {
+                    "kev_api_calls": 1,
+                    "kev_score_calls": 1,
+                    "kev_choice_calls": 0,
+                    "kev_forced_choices": 2,
+                    "kev_estimated_total_wall_seconds": 1.29137,
+                    "reroutes": 1,
+                    "script_wall_seconds": 1.29311
+                  }
+                }
+              },
+              "driving_mode": "llm",
+              "selector": "kev",
+              "model": "kev-08b"
+            }
+          }
+        ],
+        "in_flight_submission": null,
+        "first_n7_entry_seconds": {},
+        "junction_violations": [],
+        "three_robot_shared_zone_decisions": [],
+        "junction_priority_respected": true,
+        "max_simultaneously_moving": 1,
+        "overlapping_motion_seconds": 0.0,
+        "three_robot_motion_seconds": 0.0
+      },
+      {
+        "case": "orders",
+        "completed": true,
+        "created": [
+          {
+            "order_id": "ff1a4716-842a-4f1a-9837-9b1e770c9a4f",
+            "order_name": "MAPF-VERIFY-1792994552374741390-1",
+            "items": {
+              "A": 0,
+              "B": 1,
+              "C": 0,
+              "D": 0
+            },
+            "total_quantity": 1,
+            "pickup_nodes": [
+              "5"
+            ],
+            "pickup_index": 0,
+            "workstation_node": null,
+            "robot_id": null,
+            "status": "PENDING",
+            "phase": "PENDING",
+            "mode": "simulation",
+            "driving_mode": "llm",
+            "operation_mode": "ai",
+            "selector": "kev",
+            "model": "kev-08b"
+          },
+          {
+            "order_id": "04d0920d-c64f-4ad9-b220-25691971d79a",
+            "order_name": "MAPF-VERIFY-1792994552375776163-2",
+            "items": {
+              "A": 0,
+              "B": 0,
+              "C": 1,
+              "D": 0
+            },
+            "total_quantity": 1,
+            "pickup_nodes": [
+              "6"
+            ],
+            "pickup_index": 0,
+            "workstation_node": null,
+            "robot_id": null,
+            "status": "PENDING",
+            "phase": "PENDING",
+            "mode": "simulation",
+            "driving_mode": "llm",
+            "operation_mode": "ai",
+            "selector": "kev",
+            "model": "kev-08b"
+          },
+          {
+            "order_id": "255c051a-48ce-4f9f-9473-37c7448d546f",
+            "order_name": "MAPF-VERIFY-1792994552376682339-3",
+            "items": {
+              "A": 0,
+              "B": 1,
+              "C": 1,
+              "D": 0
+            },
+            "total_quantity": 2,
+            "pickup_nodes": [
+              "5",
+              "6"
+            ],
+            "pickup_index": 0,
+            "workstation_node": null,
+            "robot_id": null,
+            "status": "PENDING",
+            "phase": "PENDING",
+            "mode": "simulation",
+            "driving_mode": "llm",
+            "operation_mode": "ai",
+            "selector": "kev",
+            "model": "kev-08b"
+          }
+        ],
+        "final_orders": [
+          {
+            "order_id": "ff1a4716-842a-4f1a-9837-9b1e770c9a4f",
+            "order_name": "MAPF-VERIFY-1792994552374741390-1",
+            "items": {
+              "A": 0,
+              "B": 1,
+              "C": 0,
+              "D": 0
+            },
+            "total_quantity": 1,
+            "pickup_nodes": [
+              "5"
+            ],
+            "pickup_index": 0,
+            "workstation_node": "3",
+            "robot_id": "robot1",
+            "status": "COMPLETED",
+            "phase": "COMPLETED",
+            "mode": "simulation",
+            "driving_mode": "llm",
+            "operation_mode": "ai",
+            "selector": "kev",
+            "model": "kev-08b"
+          },
+          {
+            "order_id": "04d0920d-c64f-4ad9-b220-25691971d79a",
+            "order_name": "MAPF-VERIFY-1792994552375776163-2",
+            "items": {
+              "A": 0,
+              "B": 0,
+              "C": 1,
+              "D": 0
+            },
+            "total_quantity": 1,
+            "pickup_nodes": [
+              "6"
+            ],
+            "pickup_index": 0,
+            "workstation_node": "4",
+            "robot_id": "robot2",
+            "status": "COMPLETED",
+            "phase": "COMPLETED",
+            "mode": "simulation",
+            "driving_mode": "llm",
+            "operation_mode": "ai",
+            "selector": "kev",
+            "model": "kev-08b"
+          },
+          {
+            "order_id": "255c051a-48ce-4f9f-9473-37c7448d546f",
+            "order_name": "MAPF-VERIFY-1792994552376682339-3",
+            "items": {
+              "A": 0,
+              "B": 1,
+              "C": 1,
+              "D": 0
+            },
+            "total_quantity": 2,
+            "pickup_nodes": [
+              "5",
+              "6"
+            ],
+            "pickup_index": 1,
+            "workstation_node": "3",
+            "robot_id": "robot3",
+            "status": "COMPLETED",
+            "phase": "COMPLETED",
+            "mode": "simulation",
+            "driving_mode": "llm",
+            "operation_mode": "ai",
+            "selector": "kev",
+            "model": "kev-08b"
+          }
+        ],
+        "max_simultaneously_moving": 3,
+        "overlapping_motion_seconds": 25.08,
+        "three_robot_motion_seconds": 2.09
+      }
+    ]
+  },
+  "real_executor_controlled_replay": {
+    "actual_kev_inference": true,
+    "ros_transport": "controlled test callbacks",
+    "measured_pose": "controlled test AMCL data",
+    "physical_robot_tested": false,
+    "results": [
+      {
+        "case": "disjoint",
+        "completed": true,
+        "inference_seconds": 0.001,
+        "priority_scores": {},
+        "decisions": [],
+        "metrics": {
+          "kev_api_calls": 0,
+          "kev_score_calls": 0,
+          "kev_choice_calls": 0,
+          "kev_forced_choices": 0,
+          "kev_estimated_total_wall_seconds": 0.0,
+          "reroutes": 0,
+          "script_wall_seconds": 2e-05
+        },
+        "peak_concurrent_ros_actions": 3,
+        "final_nodes": {
+          "robot1": "3",
+          "robot2": "4",
+          "robot3": "5"
+        },
+        "sent_actions": 3,
+        "single_segment_only": true
+      },
+      {
+        "case": "shared_junction",
+        "completed": true,
+        "inference_seconds": 0.486,
+        "priority_scores": {
+          "robot1": 1.7946,
+          "robot2": 1.8513,
+          "robot3": 1.8433
+        },
+        "decisions": [
+          {
+            "zone": "node:7",
+            "robots": [
+              "robot1",
+              "robot2"
+            ],
+            "priority_robot": "robot2",
+            "yield_robot": "robot1",
+            "occupied_by": null,
+            "shared_resource_details": {
+              "kind": "node",
+              "node": 7,
+              "robots": [
+                "robot1",
+                "robot2",
+                "robot3"
+              ]
+            },
+            "action": "WAIT",
+            "wait_node": 0,
+            "needs_fms_approval": true,
+            "priority_robot_action": "PROCEED",
+            "wait_node_verified": true,
+            "note": "FMS must reserve the wait node and stop robot before the conflict zone",
+            "wait_path_overlaps": []
+          },
+          {
+            "zone": "node:7",
+            "robots": [
+              "robot1",
+              "robot3"
+            ],
+            "priority_robot": "robot3",
+            "yield_robot": "robot1",
+            "occupied_by": null,
+            "shared_resource_details": {
+              "kind": "node",
+              "node": 7,
+              "robots": [
+                "robot1",
+                "robot2",
+                "robot3"
+              ]
+            },
+            "action": "WAIT",
+            "wait_node": 0,
+            "needs_fms_approval": true,
+            "priority_robot_action": "PROCEED",
+            "wait_node_verified": true,
+            "note": "FMS must reserve the wait node and stop robot before the conflict zone",
+            "wait_path_overlaps": []
+          },
+          {
+            "zone": "node:7",
+            "robots": [
+              "robot2",
+              "robot3"
+            ],
+            "priority_robot": "robot2",
+            "yield_robot": "robot3",
+            "occupied_by": null,
+            "shared_resource_details": {
+              "kind": "node",
+              "node": 7,
+              "robots": [
+                "robot1",
+                "robot2",
+                "robot3"
+              ]
+            },
+            "action": "WAIT",
+            "wait_node": 2,
+            "needs_fms_approval": true,
+            "priority_robot_action": "PROCEED",
+            "wait_node_verified": true,
+            "note": "FMS must reserve the wait node and stop robot before the conflict zone",
+            "wait_path_overlaps": []
+          }
+        ],
+        "metrics": {
+          "kev_api_calls": 4,
+          "kev_score_calls": 1,
+          "kev_choice_calls": 3,
+          "kev_forced_choices": 6,
+          "kev_estimated_total_wall_seconds": 0.43324,
+          "reroutes": 0,
+          "script_wall_seconds": 0.44933
+        },
+        "peak_concurrent_ros_actions": 1,
+        "final_nodes": {
+          "robot1": "3",
+          "robot2": "4",
+          "robot3": "5"
+        },
+        "sent_actions": 6,
+        "single_segment_only": true
+      }
+    ]
+  },
+  "sampling_note": "Concurrency requires displacement while NAVIGATING at both sample endpoints. Orders sample at 0.5s, N7 cases at 0.05s. Latest orders peaked at 3 concurrent robots, including during normal work/return stages. Shared resources still require local waits.",
+  "parallel_order_regression": {
+    "causes": [
+      "Confirmed arrival stop flag rejected new pending cohort; legacy individual gate dispatched instead",
+      "Pickup admission waited for the earlier whole order instead of current pickup clearance"
+    ],
+    "fixes": [
+      "Bind prepared requests to command_epoch and reject subsequent stops; accept confirmed idle simulation stops",
+      "Check current pickup and actual occupancy for each pickup stage"
+    ],
+    "before": {
+      "max_simultaneously_moving": 1,
+      "overlapping_motion_seconds": 0.0,
+      "three_robot_motion_seconds": 0.0
+    },
+    "after": {
+      "completed": true,
+      "max_simultaneously_moving": 3,
+      "overlapping_motion_seconds": 25.08,
+      "three_robot_motion_seconds": 2.09
+    },
+    "third_order_pickup_started_seconds": 13.02,
+    "first_order_work_completed_seconds": 20.81,
+    "minimum_sampled_separation_m": 0.14608,
+    "orders_validator_requires_parallel_motion": true
+  }
+}

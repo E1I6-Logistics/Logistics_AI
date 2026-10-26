@@ -10,6 +10,9 @@ from backend.app.services.kev_mapf.kev_graph import Graph
 class MockKEV:
     """오프라인 데모 및 단위 테스트 전용 대역(Stub)이며, 결과를 실제 모델 추론으로 취급하지 않는다."""
 
+    path_source = "mock_bfs"
+    reroute_source = "mock_rerouted"
+    warnings = []
     calls = 0
     model_seconds = 0.0
     forced = 0
@@ -23,11 +26,6 @@ class MockKEV:
         if "action_wait" in candidates:
             return "action_wait"
         return next(iter(candidates))
-
-    def score(self, state, question_id):
-        """단일 로봇 우선순위 평가 대역 (기본 0.5 반환)."""
-        self.calls += 1
-        return 0.5
 
     def score_many(self, state, robot_ids):
         """다중 로봇 우선순위 일괄 평가 대역 (정렬 순서대로 내림차순 점수 부여)."""

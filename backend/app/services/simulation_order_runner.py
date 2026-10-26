@@ -95,12 +95,12 @@ class SimulationOrderRunner:
             await asyncio.gather(*tasks, return_exceptions=True)
 
     async def _wait_for_pickup_turn(self, order):
-        """Keep robots with the same pickup from blocking one another."""
+        """같은 픽업의 현재 작업·실제 점유만 기다린다. 전체 주문 완료는 기다리지 않는다."""
         from .order_manager import order_manager
 
         order_id = order["order_id"]
         robot_id = order["robot_id"]
-        pickups = set(order["pickup_nodes"])
+        pickup = order["pickup_nodes"][order["pickup_index"]]
         while order_manager.is_current(order_id, robot_id):
             blocked = False
             with order_manager.lock:
@@ -110,10 +110,16 @@ class SimulationOrderRunner:
                     if (
                         previous["mode"] == "simulation"
                         and previous["status"] == "IN_PROGRESS"
-                        and pickups.intersection(previous["pickup_nodes"])
+                        and previous["phase"] in ("WAITING_PICKUP", "MOVING_TO_PICKUP", "WORKING_AT_PICKUP")
+                        and previous["pickup_nodes"][previous["pickup_index"]] == pickup
                     ):
                         blocked = True
                         break
+            if not blocked:
+                blocked = any(
+                    r["robot_id"] != robot_id and r.get("occupied_node") == pickup
+                    for r in mock_fms.robot_snapshots("simulation")
+                )
             if not blocked:
                 return True
             order_manager.set_phase(order_id, "WAITING_PICKUP")
@@ -196,12 +202,12 @@ class SimulationOrderRunner:
         order = order_manager.orders[order_id]
         robot_id = order["robot_id"]
         try:
-            if not await self._wait_for_pickup_turn(order):
-                return
             for index, pickup in enumerate(order["pickup_nodes"]):
                 if not order_manager.is_current(order_id, robot_id):
                     return
                 order["pickup_index"] = index
+                if not await self._wait_for_pickup_turn(order):
+                    return
                 order_manager.set_phase(order_id, "MOVING_TO_PICKUP")
                 if not await self._move(order, pickup, "MOVING_TO_PICKUP"):
                     return

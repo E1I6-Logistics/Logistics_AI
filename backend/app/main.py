@@ -70,6 +70,12 @@ async def lifespan(app: FastAPI):
     ros_thread.start()
 
     simulation_task = asyncio.create_task(run_mock_simulation(), name="mock-simulation")
+    from .services.kev_mapf.kev_dispatcher import mapf_enabled, mapf_priority_mode
+
+    logging.getLogger("uvicorn.error").info(
+        "KEV MAPF pre-departure gate: simulation=%s real=%s priority_mode=%s scope=ai_orders_and_manual_goals",
+        mapf_enabled("simulation"), mapf_enabled("real"), mapf_priority_mode(),
+    )
     recovery_task = asyncio.create_task(run_kev_recovery(), name="kev-recovery")
 
     navigation_task = asyncio.create_task(run_real_navigation(), name="real-navigation")
@@ -180,9 +186,8 @@ async def run_mock_simulation() -> None:
 
 
 async def run_kev_recovery() -> None:
-    """Slow model inference runs independently of the simulation/telemetry tick."""
-    from .services.mock_data import mock_fms
-    from .services.kev_mapf.kev_coordinator import fms_mapf_coordinator
+    """Model inference is independent of simulation and ROS navigation ticks."""
+    from .services.kev_mapf.kev_dispatcher import runtime_for
     from .services.kev_mapf.kev_recovery import kev_recovery
 
     logging.getLogger("uvicorn.error").info(
@@ -191,7 +196,11 @@ async def run_kev_recovery() -> None:
 
     while True:
         await asyncio.sleep(0.2)
-        await kev_recovery.run_once(mock_fms, fms_mapf_coordinator, mode_manager)
+        try:
+            store, coordinator = runtime_for(mode_manager.mode)
+            await kev_recovery.run_once(store, coordinator, mode_manager)
+        except (ValueError, KeyError, RuntimeError):
+            logging.getLogger("uvicorn.error").exception("KEV recovery waiting for a valid fleet state")
 
 
 # 실제 주행을 실행한다.

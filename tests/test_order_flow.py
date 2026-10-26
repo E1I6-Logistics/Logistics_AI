@@ -11,6 +11,47 @@ from backend.app.services.simulation_order_runner import simulation_order_runner
 from backend.app.services.workstation_manager import workstation_manager
 
 
+@pytest.mark.parametrize("previous_phase,previous_pickups", [
+    ("WORKING_AT_WORKSTATION", ["5"]),
+    ("MOVING_TO_PICKUP", ["6", "5"]),
+])
+def test_pickup_admission_does_not_wait_for_unrelated_work(monkeypatch, previous_phase, previous_pickups):
+    _reset(monkeypatch)
+    previous = dict(order_id="earlier", mode="simulation", status="IN_PROGRESS",
+                    phase=previous_phase, pickup_nodes=previous_pickups, pickup_index=0)
+    current = dict(order_id="current", robot_id="robot2", pickup_nodes=["5"], pickup_index=0)
+    monkeypatch.setattr(order_manager, "orders", {"earlier": previous, "current": current})
+    monkeypatch.setattr(order_manager, "is_current", lambda *_: True)
+    monkeypatch.setattr(mock_fms, "robot_snapshots", lambda _: [])
+
+    async def scenario():
+        assert await asyncio.wait_for(simulation_order_runner._wait_for_pickup_turn(current), .1)
+
+    asyncio.run(scenario())
+
+
+def test_pickup_wait_ends_when_previous_robot_vacates_node(monkeypatch):
+    _reset(monkeypatch)
+    previous = dict(order_id="earlier", mode="simulation", status="IN_PROGRESS",
+                    phase="MOVING_TO_WORKSTATION", pickup_nodes=["5"], pickup_index=0)
+    current = dict(order_id="current", robot_id="robot2", pickup_nodes=["5"], pickup_index=0)
+    monkeypatch.setattr(order_manager, "orders", {"earlier": previous, "current": current})
+    monkeypatch.setattr(order_manager, "is_current", lambda *_: True)
+    monkeypatch.setattr(order_manager, "set_phase", lambda *_: None)
+    snapshots = [{"robot_id": "robot1", "occupied_node": "5"}]
+    monkeypatch.setattr(mock_fms, "robot_snapshots", lambda _: snapshots)
+
+    async def scenario():
+        task = asyncio.create_task(simulation_order_runner._wait_for_pickup_turn(current))
+        await asyncio.sleep(.01)
+        assert not task.done()
+        snapshots[0]["occupied_node"] = None
+        assert await asyncio.wait_for(task, .3)
+        assert previous["status"] == "IN_PROGRESS"
+
+    asyncio.run(scenario())
+
+
 # 테스트 사이에 공유 상태를 초기화한다.
 def _reset(monkeypatch):
     mode_manager.set_mode("simulation", "algorithm")
@@ -573,6 +614,8 @@ def test_pickup_status_shows_occupant_order_and_waiting_orders(monkeypatch):
 # 작업대 선택 후에만 AI 경로를 요청하는지 검증한다.
 def test_ai_route_is_requested_only_after_workstation_selection(monkeypatch):
     visits = _reset(monkeypatch)
+    # This test isolates order/preview timing; MAPF admission has dedicated tests.
+    monkeypatch.setenv("FMS_SIM_MAPF_ENABLED", "0")
     from backend.app.services import route_model_catalog, order_route_dispatcher
 
     monkeypatch.setattr(route_model_catalog, "require_enabled_model", lambda *_: None)
@@ -610,6 +653,7 @@ def test_ai_route_is_requested_only_after_workstation_selection(monkeypatch):
 # 잘못된 AI 경로는 주행하지 않고 실패 로봇을 복귀시키는지 검증한다.
 def test_invalid_ai_route_is_not_driven_and_failure_returns_robot(monkeypatch):
     visits = _reset(monkeypatch)
+    monkeypatch.setenv("FMS_SIM_MAPF_ENABLED", "0")  # Isolate preview failure handling.
     from backend.app.services import route_model_catalog, order_route_dispatcher
 
     monkeypatch.setattr(route_model_catalog, "require_enabled_model", lambda *_: None)

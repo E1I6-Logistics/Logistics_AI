@@ -24,7 +24,7 @@ class RecoveryTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.graph = json.loads((ROOT / "routes/test.geojson").read_text())
         self.store = MockFmsStore(ReservationTable())
-        self.coordinator = FmsMapfCoordinator()
+        self.coordinator = FmsMapfCoordinator(self.store)
         self.worker = KevRecovery(stall_seconds=1, retry_seconds=5)
         self.mode = SimpleNamespace(mode="simulation")
         nodes = Graph(self.graph).nodes
@@ -156,7 +156,7 @@ class RecoveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(mover["kev_recovery"]["action"], "MOVE_ASIDE")
         with patch("backend.app.services.mock_data.mock_fms", self.store):
             self.assertEqual(
-                self.coordinator.inspect_simulation_state()["robot2"]["issue"],
+                self.coordinator.inspect_state()["robot2"]["issue"],
                 "KEV_MOVE_ASIDE_ACTIVE",
             )
         for tick in range(1, 201):
@@ -218,7 +218,7 @@ class RecoveryTests(unittest.IsolatedAsyncioTestCase):
         self.second_junction()
         snapshot = self.worker._capture(self.store, self.coordinator)
         blocked = self.worker._candidates(snapshot, 102)
-        candidates = self.worker._aside_candidates(self.graph, snapshot, blocked)
+        candidates = self.worker.planner._aside_candidates(self.graph, snapshot, blocked)
         self.assertIn("move_aside_robot2_10", candidates)
         self.assertIn("move_aside_robot3_11", candidates)
         # KEV must assess whether the follower should move; code does not
@@ -354,14 +354,12 @@ class RecoveryTests(unittest.IsolatedAsyncioTestCase):
 
 class StrictKevTests(unittest.TestCase):
     def test_no_algorithm_fallback_on_inference_or_route_failure(self):
-        live = LiveKEV(ROOT, model="kev-08b", deadline=.15, max_steps=None)
+        live = LiveKEV(model="kev-08b")
         live.selector = Mock()
-        live.selector.evaluate_score.side_effect = RuntimeError("offline")
         live.selector.decide.side_effect = RuntimeError("offline")
         live.selector.select_choice.side_effect = RuntimeError("offline")
         live.preview_llm_route = Mock(side_effect=ValueError("invalid model route"))
         for call in (
-            lambda: live.score({}, "score"),
             lambda: live.score_many({}, ["robot1", "robot2"]),
             lambda: live.pick({}, {"a": "A", "b": "B"}, "choose", "pick"),
             lambda: live.route({}, 1, 2),

@@ -2,11 +2,11 @@
 import json
 import unittest
 from copy import deepcopy
-from pathlib import Path
 from unittest.mock import Mock, patch
 
-from backend.app.services import kev_mapf_standalone as mapf
+from backend.app.services import kev_mapf as mapf
 from backend.app.services import route_service
+from tests.mock.kev_mock import MockKEV
 
 
 def graph_data():
@@ -33,7 +33,7 @@ def requests():
     ]
 
 
-class Decisions(mapf.MockKEV):
+class Decisions(MockKEV):
     def __init__(self, action="action_wait"):
         self.action = action
         self.states = []
@@ -60,6 +60,23 @@ class MapfIntegrationTests(unittest.TestCase):
 
     def plan(self, **kwargs):
         return mapf.plan_mapf_from_route_results(self.graph, self.requests, **kwargs)
+
+    def test_score_many_sends_all_robots_in_one_request(self):
+        live = mapf.LiveKEV(model="kev-08b")
+        live.selector.decide = Mock(return_value={"answers": {
+            f"priority_score_{rid}": {"type": "score", "score": score}
+            for rid, score in [("r1", .7), ("r2", .2), ("r3", .9)]
+        }})
+        state = {"robots": [{"id": "r1", "execution_committed": True, "occupied_edge": "45"}]}
+        self.assertEqual(live.score_many(state, ["r3", "r1", "r2"]), {"r1": .7, "r2": .2, "r3": .9})
+        live.selector.decide.assert_called_once()
+        sent_state, questions = live.selector.decide.call_args.args
+        self.assertEqual(sent_state, state)
+        self.assertEqual(set(questions), {"priority_score_r1", "priority_score_r2", "priority_score_r3"})
+        for question in questions.values():
+            self.assertEqual(question["type"], "score")
+            self.assertIn("execution_committed", question["instructions"])
+        self.assertEqual(live.calls, 1)
 
     def test_provided_non_shortest_paths_are_preserved_without_inference(self):
         planner = Decisions()
@@ -134,7 +151,7 @@ class MapfIntegrationTests(unittest.TestCase):
                 mapf.mapf_robot_from_route_result("a", value, "4", {"path": ["1", "4"]})
 
     def test_reroute_reuses_preview_with_original_robot_model(self):
-        live = mapf.LiveKEV(Path(__file__).resolve().parents[1], model="kev-08b", deadline=0.15, max_steps=None)
+        live = mapf.LiveKEV(model="kev-08b")
         live.preview_llm_route = Mock(return_value={"path": ["5", "6", "7"], "calls": 1})
         planner = Decisions(action="action_reroute")
         planner.route = live.route
@@ -155,7 +172,7 @@ class MapfIntegrationTests(unittest.TestCase):
         self.assertEqual((self.graph, self.requests), before)
 
     def test_missing_catalog_propagates_without_runner_fallback(self):
-        live = mapf.LiveKEV(Path(__file__).resolve().parents[1], model="kev-08b", deadline=0.15, max_steps=None)
+        live = mapf.LiveKEV(model="kev-08b")
         live.preview_llm_route = Mock(side_effect=FileNotFoundError("selector_iterative_benchmark.json"))
         with self.assertRaises(FileNotFoundError):
             live.route(self.graph, 1, 4)
@@ -175,13 +192,6 @@ class MapfIntegrationTests(unittest.TestCase):
                 result = self.plan(planner=planner)
                 self.assertEqual(result["status"], "BLOCKED")
                 self.assertEqual(result["required_paths"]["b"], ["5", "3", "7"])
-
-    def test_optional_order_preview_uses_dispatcher_contract(self):
-        with patch("backend.app.services.llm_route_preview.preview_llm_route", return_value={"path": ["1", "4"]}) as preview:
-            result = mapf.preview_order_route_for_mapf(self.graph, self.requests[0]["order"], "1", "4")
-        self.assertEqual(result["path"], ["1", "4"])
-        preview.assert_called_once_with(self.graph, "1", "4", selector="kev", model="kev-08b")
-
 
     def test_priority_robot_action_is_proceed(self):
         planner = Decisions()

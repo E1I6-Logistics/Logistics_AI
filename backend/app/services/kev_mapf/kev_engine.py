@@ -20,10 +20,9 @@ from backend.app.services import route_service
 
 from .kev_client import (
     KEV_ACTION_INSTRUCTIONS,
-    KEV_PRIORITY_INSTRUCTIONS,
     KEV_WAIT_INSTRUCTIONS,
     KEV_ZONE_INSTRUCTIONS,
-    LiveKEV,
+    KevPlanner,
 )
 from .kev_conflict import (
     first_zone_index,
@@ -42,7 +41,7 @@ class KevMAPF:
         self,
         graph: Graph,
         robots: dict[str, dict],
-        live: Any,
+        live: KevPlanner,
         config: dict,
         *,
         rounds: int = 16,
@@ -52,10 +51,11 @@ class KevMAPF:
         self.rounds, self.reroutes = rounds, reroutes
 
         self.priority_mode = config.get("priority_mode", "score")
-        if self.priority_mode not in ("choice", "score"):
-            raise ValueError("Invalid priority_mode")
+        if self.priority_mode != "score":
+            raise ValueError("MAPF priority_mode supports only score")
 
         self.priority_scores: dict[str, float] = {}
+        self.priority_score_calls = 0
         self.allow_proactive_hold = bool(config.get("allow_proactive_hold", False))
         self.occupied: dict[str, str] = {
             str(k): str(v)
@@ -288,51 +288,40 @@ class KevMAPF:
             )
             return None
 
-        if self.priority_mode == "score":
-            if self.reroutes == 0:
-                feasible = []
-                for hi, lo in possible:
-                    if not self._wait_candidates(self.robots[lo], info):
-                        continue
-                    high_path = set(self.robots[hi]["path"])
-                    low_curr = self.robots[lo]["path"][0]
-                    if low_curr not in high_path:
-                        feasible.append((hi, lo))
-                if not feasible:
-                    self.decisions.append(
-                        {
-                            "zone": zid,
-                            "robots": [a, b],
-                            "action": "HOLD",
-                            "reason": "NO_FEASIBLE_WAIT_OR_REROUTE",
-                        }
-                    )
-                    return None
-                possible = feasible
-
-            if not self.priority_scores:
-                common_state = {
-                    **self._graph_state(),
-                    "conflict_zones": potential_conflict_zones,
-                    "current_occupancy": self.occupied,
-                }
-                involved = sorted(
-                    {rid for z in potential_conflict_zones.values() for rid in z["robots"]}
+        if self.reroutes == 0:
+            feasible = []
+            for hi, lo in possible:
+                if not self._wait_candidates(self.robots[lo], info):
+                    continue
+                high_path = set(self.robots[hi]["path"])
+                low_curr = self.robots[lo]["path"][0]
+                if low_curr not in high_path:
+                    feasible.append((hi, lo))
+            if not feasible:
+                self.decisions.append(
+                    {
+                        "zone": zid,
+                        "robots": [a, b],
+                        "action": "HOLD",
+                        "reason": "NO_FEASIBLE_WAIT_OR_REROUTE",
+                    }
                 )
-                self.priority_scores.update(self.live.score_many(common_state, involved))
+                return None
+            possible = feasible
 
-            return min(possible, key=lambda p: (-self.priority_scores[p[0]], p[0]))
+        if not self.priority_scores:
+            common_state = {
+                **self._graph_state(),
+                "conflict_zones": potential_conflict_zones,
+                "current_occupancy": self.occupied,
+            }
+            involved = sorted(
+                {rid for z in potential_conflict_zones.values() for rid in z["robots"]}
+            )
+            self.priority_scores.update(self.live.score_many(common_state, involved))
+            self.priority_score_calls += 1
 
-        pri_map = {f"p{i}": (hi, lo) for i, (hi, lo) in enumerate(possible)}
-        pchoices = {k: f"{hi} receives priority over {lo}" for k, (hi, lo) in pri_map.items()}
-        choice = self.live.pick(
-            self._state(zid, info, [a, b]),
-            pchoices,
-            KEV_PRIORITY_INSTRUCTIONS,
-            f"priority_{it}",
-        )
-        high = pri_map[choice][0]
-        return high, (b if high == a else a)
+        return min(possible, key=lambda p: (-self.priority_scores[p[0]], p[0]))
 
     def _apply_wait(
         self,
@@ -527,6 +516,7 @@ class KevMAPF:
                 "priority_robot": high,
                 "yield_robot": low,
                 "occupied_by": occupant,
+                "shared_resource_details": info,
                 "action": "HOLD",
                 "wait_node": None,
                 "needs_fms_approval": True,
@@ -543,11 +533,7 @@ class KevMAPF:
                 new_route, error = self._reroute(waiter, zid, info)
                 if new_route is not None:
                     waiter["path"] = new_route
-                    waiter["source"] = (
-                        "kev_rerouted"
-                        if isinstance(self.live, LiveKEV)
-                        else "mock_rerouted"
-                    )
+                    waiter["source"] = self.live.reroute_source
                     self._cached_graph_state = None
                     result.update(action="REROUTE", new_path=new_route)
                     routes = {r: x["path"] for r, x in self.robots.items()}
@@ -606,6 +592,8 @@ class KevMAPF:
             "potential_shared_zones": remaining,
             "decisions": self.decisions,
             "global_priority_relations": [list(x) for x in sorted(self.priorities)],
+            "priority_mode": self.priority_mode,
+            "priority_scores": dict(self.priority_scores),
             "time_prediction_used": False,
             "fms_execution_approved": False,
             "safety": {
@@ -615,11 +603,13 @@ class KevMAPF:
                 "requires_independent_collision_interlock": True,
             },
             "metrics": {
-                "kev_choice_calls": self.live.calls,
+                "kev_api_calls": self.live.calls,
+                "kev_score_calls": self.priority_score_calls,
+                "kev_choice_calls": self.live.calls - self.priority_score_calls,
                 "kev_forced_choices": self.live.forced,
                 "kev_estimated_total_wall_seconds": round(self.live.model_seconds, 5),
                 "reroutes": self.reroute_count,
                 "script_wall_seconds": round(time.perf_counter() - start, 5),
             },
-            "warnings": self.warnings + list(getattr(self.live, "warnings", [])),
+            "warnings": self.warnings + list(self.live.warnings),
         }

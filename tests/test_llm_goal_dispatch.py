@@ -2,10 +2,11 @@
 
 import asyncio
 import importlib.util
+import os
 import sys
 import types
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from fastapi import HTTPException
 from pydantic import ValidationError
@@ -29,6 +30,8 @@ class GoalDispatchTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         commands._llm_requests.clear()
         patches = [
+            # Legacy path tests explicitly exercise the opt-out route.
+            patch.dict(os.environ, {"FMS_SIM_MAPF_ENABLED": "0"}),
             patch.object(commands, "scenario_manager"),
             patch.object(commands, "mode_manager", types.SimpleNamespace(mode="simulation")),
             patch.object(commands, "_preview_start_node", return_value="0"),
@@ -43,6 +46,58 @@ class GoalDispatchTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(commands, "navigate_to_node", return_value={"success": True}) as dispatch:
             await commands.send_node_goal(GoalNodeRequest(robot_id="robot1", node_id=3))
         dispatch.assert_called_once_with("robot1", 3, "simulation")
+
+    async def test_manual_ai_uses_mapf_by_default_without_direct_dispatch(self):
+        from backend.app.services.kev_mapf import kev_dispatcher
+
+        result = {"success": True, "mapf": {"enabled": True}, "llm_preview": {"path": ["0", "3"]}}
+        async def dispatch(*args, valid, **kwargs):
+            self.assertTrue(valid())
+            return result
+
+        with patch.dict(os.environ), patch.object(
+            kev_dispatcher, "dispatch_mapf", new_callable=AsyncMock, side_effect=dispatch
+        ) as gate, patch.object(commands, "navigate_to_node") as direct:
+            os.environ.pop("FMS_SIM_MAPF_ENABLED", None)
+            response = await commands.send_node_goal(
+                GoalNodeRequest(robot_id="robot1", node_id=3, driving_mode="llm", selector="kev", model="kev-08b")
+            )
+        gate.assert_awaited_once()
+        self.assertEqual(gate.call_args.args[0]["operation_mode"], "ai")
+        self.assertTrue(response["mapf"]["enabled"])
+        direct.assert_not_called()
+
+    async def test_manual_mapf_invalidates_stopped_request(self):
+        from backend.app.services.kev_mapf import kev_dispatcher
+
+        async def stopped(*args, valid, **kwargs):
+            commands._llm_requests.clear()
+            valid()
+
+        with patch.dict(os.environ, {"FMS_SIM_MAPF_ENABLED": "1"}), patch.object(
+            kev_dispatcher, "dispatch_mapf", side_effect=stopped
+        ), patch.object(commands, "navigate_to_node") as direct:
+            with self.assertRaises(HTTPException) as error:
+                await commands.send_node_goal(
+                    GoalNodeRequest(robot_id="robot1", node_id=3, driving_mode="llm", selector="kev", model="kev-08b")
+                )
+        self.assertEqual(error.exception.status_code, 409)
+        direct.assert_not_called()
+
+    async def test_orders_use_the_same_mapf_gate_by_default(self):
+        from backend.app.services import order_route_dispatcher as dispatcher
+        from backend.app.services.mode_service import mode_manager
+
+        for mode in ("simulation", "real"):
+            order = {"robot_id": "robot1", "mode": mode, "operation_mode": "ai",
+                     "driving_mode": "llm", "selector": "kev", "model": "kev-08b"}
+            with patch.dict(os.environ), patch.object(mode_manager, "_mode", mode), patch.object(
+                dispatcher, "_dispatch_mapf", new_callable=AsyncMock, return_value={"mapf": {"enabled": True}}
+            ) as gate:
+                os.environ.pop("FMS_SIM_MAPF_ENABLED", None)
+                result = await dispatcher.dispatch_order_route(order, "3", "0")
+            gate.assert_awaited_once_with(order, "3", "0", valid=None)
+            self.assertTrue(result["mapf"]["enabled"])
 
     # 검증된 AI 경로가 예약 단계까지 전달되는지 검증한다.
     async def test_validated_path_reaches_reservation(self):
@@ -63,7 +118,7 @@ class GoalDispatchTests(unittest.IsolatedAsyncioTestCase):
         ) as collect, patch(
             "backend.app.services.llm_route_preview.preview_llm_route", return_value={"path": ["0", "2", "3"]}
         ) as preview, patch.object(commands, "navigate_to_node", return_value={"success": True}), patch(
-            "backend.app.services.kev_mapf.kev_coordinator.fms_mapf_coordinator.register_preview"
+            "backend.app.services.kev_mapf.kev_coordinator.FmsMapfCoordinator.register_preview"
         ) as register:
             await commands.send_node_goal(
                 GoalNodeRequest(robot_id="robot1", node_id=3, driving_mode="llm", selector="kev", model="kev-08b")
@@ -109,16 +164,17 @@ class GoalDispatchTests(unittest.IsolatedAsyncioTestCase):
                         break
                 self.assertEqual(store._robots["robot1"]["occupied_node"], "3")
 
-    # 실제 모드에도 동일한 경로를 배차하는지 검증한다.
-    async def test_real_mode_dispatches_the_same_path(self):
+    async def test_real_mode_uses_mapf_gate_instead_of_direct_dispatch(self):
+        from backend.app.services.kev_mapf import kev_dispatcher
         commands.mode_manager.mode = "real"
-        with patch(
-            "backend.app.services.llm_route_preview.preview_llm_route", return_value={"path": ["0", "2", "3"]}
-        ), patch.object(commands, "navigate_to_node", return_value={"status": "PROCESSING"}) as dispatch:
+        with patch.object(kev_dispatcher, "dispatch_mapf", new_callable=AsyncMock,
+                          return_value={"mapf": {"enabled": True}}) as gate, patch.object(commands, "navigate_to_node") as direct:
             await commands.send_node_goal(
                 GoalNodeRequest(robot_id="robot1", node_id=3, driving_mode="llm", selector="kev", model="kev-08b")
             )
-        dispatch.assert_called_once_with("robot1", 3, "real", required_path=["0", "2", "3"])
+        gate.assert_awaited_once()
+        self.assertEqual(gate.call_args.args[0]["mode"], "real")
+        direct.assert_not_called()
 
     # 잘못된 경로를 배차하지 않는지 검증한다.
     async def test_invalid_route_does_not_dispatch(self):

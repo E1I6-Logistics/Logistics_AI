@@ -9,11 +9,15 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from copy import deepcopy
 from threading import RLock
 from typing import Any
+from uuid import uuid4
 
+from .kev_client import KevPlanner
 from .kev_adapter import mapf_robot_from_route_result, plan_mapf_from_route_results
+
 
 
 def _blocked_response(reason: str, *, issues: dict | None = None, **extra: Any) -> dict[str, Any]:
@@ -69,10 +73,43 @@ def is_fms_reviewable_advisory(advisory: dict) -> bool:
 class FmsMapfCoordinator:
     """Active 및 Pending 로봇 경로를 관리하고 KEV-MAPF 판단과 FMS 상태를 조율하는 코디네이터."""
 
-    def __init__(self) -> None:
+    def __init__(self, store) -> None:
+        self._store = store
         self._lock = RLock()
         self._route_requests: dict[str, dict] = {}
         self._pending_requests: dict[str, dict] = {}
+        from .kev_parallel_admission import ParallelAdmission
+        self.admission = ParallelAdmission(self)
+
+    @property
+    def store(self):
+        return self._store
+
+    @contextmanager
+    def transaction(self, execution):
+        # Registry precedes execution in every commit, including ROS callbacks.
+        with self._lock, execution.transaction():
+            yield
+
+    def requests_by_robot(self):
+        with self._lock:
+            return deepcopy(self._route_requests), deepcopy(self._pending_requests)
+
+    def pending_matches(self, robot_id, request):
+        with self._lock:
+            return self._pending_requests.get(robot_id) == request
+
+    def update_active_path(self, robot_id, current_node, path):
+        with self._lock:
+            request = self._route_requests[robot_id]
+            request["current_node"] = str(current_node)
+            request["result"] = {"path": list(path)}
+
+    def finish_request(self, robot_id, request):
+        with self._lock:
+            self.admission.finish(request["request_id"])
+            if self._pending_requests.get(robot_id) == request:
+                self._pending_requests.pop(robot_id)
 
     # -------------------------------------------------------------------------
     # 1. 내부 상태 스냅샷 및 등록/삭제 관리
@@ -111,10 +148,15 @@ class FmsMapfCoordinator:
         return deepcopy(req)
 
     def stage_preview(
-        self, order: dict, current_node: int | str, goal_node: int | str, result: dict
+        self, order: dict, current_node: int | str, goal_node: int | str, result: dict,
+        *, execution_epoch=None,
     ) -> dict:
         """실제 주행 요청 전 AI가 생성한 경로를 Pending 목록에 임시 등록한다."""
         rid, req = self._build_request(order, current_node, goal_node, result)
+        # Identical replacement routes still belong to different requests.
+        req["request_id"] = uuid4().hex
+        if execution_epoch is not None:
+            req["execution_epoch"] = deepcopy(execution_epoch)
         with self._lock:
             self._pending_requests[rid] = deepcopy(req)
         return deepcopy(req)
@@ -139,20 +181,20 @@ class FmsMapfCoordinator:
         with self._lock:
             self._pending_requests.pop(str(robot_id), None)
 
-    def _state_triplet(self) -> tuple[dict, list[dict], list[dict]]:
+    def state_triplet(self) -> tuple[dict, list[dict], list[dict]]:
         """현재 시점의 (FMS 시그니처, Pending 스냅샷, Active 스냅샷) 3중 상태를 캡처한다."""
-        return self._simulation_signature(), self.pending_snapshot(), self.snapshot()
+        return self.state_signature(), self.pending_snapshot(), self.snapshot()
 
     # -------------------------------------------------------------------------
     # 2. FMS 시뮬레이션 상태 조회 및 완료 경로 정리
     # -------------------------------------------------------------------------
 
-    def _simulation_signature(self) -> dict:
+    def state_signature(self) -> dict:
         """FMS 실행 상태의 변경 여부를 확인하기 위한 스냅샷 시그니처를 생성한다."""
-        from ..mock_data import mock_fms
+        store = self.store
 
         signature = {}
-        for robot in mock_fms.robot_snapshots("simulation"):
+        for robot in store.robot_snapshots(getattr(store, "mode", "simulation")):
             rid = str(robot["robot_id"])
             route = robot.get("route")
             is_dict = isinstance(route, dict)
@@ -172,12 +214,12 @@ class FmsMapfCoordinator:
             }
         return signature
 
-    def inspect_simulation_state(self) -> dict:
+    def inspect_state(self) -> dict:
         """FMS 시뮬레이션의 실제 점유와 남은 경로(`remaining_path`)를 조회한다."""
-        from ..mock_data import mock_fms
+        store = self.store
 
         states = {}
-        for robot in mock_fms.robot_snapshots("simulation"):
+        for robot in store.robot_snapshots(getattr(store, "mode", "simulation")):
             rid = str(robot["robot_id"])
             occupied_node = robot.get("occupied_node")
             occupied_edge = robot.get("occupied_edge")
@@ -219,13 +261,13 @@ class FmsMapfCoordinator:
             }
         return states
 
-    def retire_completed_simulation_routes(self) -> dict:
+    def retire_completed_routes(self) -> dict:
         """주행 완료가 확인된 Active 경로만 정리한다."""
-        from ..mock_data import mock_fms
+        store = self.store
 
-        before = self._simulation_signature()
-        snapshots = mock_fms.robot_snapshots("simulation")
-        if before != self._simulation_signature():
+        before = self.state_signature()
+        snapshots = store.robot_snapshots(getattr(store, "mode", "simulation"))
+        if before != self.state_signature():
             return _blocked_response("FMS_STATE_CHANGED_DURING_CHECK", retired_robot_ids=[])
 
         states = {}
@@ -267,10 +309,10 @@ class FmsMapfCoordinator:
     # 3. 혼합(Active + Pending) 경로 준비 및 KEV-MAPF 평가·분류
     # -------------------------------------------------------------------------
 
-    def prepare_mixed_simulation_requests(self) -> dict:
+    def prepare_mixed_requests(self) -> dict:
         """Active의 실제 남은 경로와 Pending 경로를 통합하여 MAPF 요청 목록을 구성한다."""
-        fms_before, pending, active = self._state_triplet()
-        live = self.inspect_simulation_state()
+        fms_before, pending, active = self.state_triplet()
+        live = self.inspect_state()
 
         requests = []
         issues = {}
@@ -341,7 +383,7 @@ class FmsMapfCoordinator:
             elif state["occupied_node"] is not None and str(state["occupied_node"]) in planned_nodes:
                 issues[rid] = "UNMODELED_IDLE_OCCUPANCY"
 
-        if (fms_before, pending, active) != self._state_triplet():
+        if (fms_before, pending, active) != self.state_triplet():
             issues["_global"] = "STATE_CHANGED_DURING_COLLECTION"
 
         return {
@@ -353,14 +395,14 @@ class FmsMapfCoordinator:
             "fms_execution_approved": False,
         }
 
-    def evaluate_mixed_simulation_advisory(
-        self, graph: dict, *, planner: Any = None, config: dict | None = None
+    def evaluate_mixed_advisory(
+        self, graph: dict, *, planner: KevPlanner | None = None, config: dict | None = None
     ) -> dict:
         """Active + Pending 경로를 통합하여 KEV-MAPF 분석을 수행한다."""
-        fms_before, pending_before, active_before = self._state_triplet()
-        prepared = self.prepare_mixed_simulation_requests()
+        fms_before, pending_before, active_before = self.state_triplet()
+        prepared = self.prepare_mixed_requests()
 
-        if (fms_before, pending_before, active_before) != self._state_triplet():
+        if (fms_before, pending_before, active_before) != self.state_triplet():
             return _blocked_response(
                 "STATE_CHANGED_DURING_COLLECTION",
                 issues={},
@@ -379,7 +421,7 @@ class FmsMapfCoordinator:
             graph, prepared["requests"], planner=planner, config=config
         )
 
-        if (fms_before, pending_before, active_before) != self._state_triplet():
+        if (fms_before, pending_before, active_before) != self.state_triplet():
             return _blocked_response(
                 "FMS_STATE_CHANGED_DURING_MAPF",
                 issues={},
@@ -414,7 +456,7 @@ class FmsMapfCoordinator:
         ):
             return blocked("MAPF_ADVISORY_NOT_READY")
 
-        state_before = self._state_triplet()
+        state_before = self.state_triplet()
         if state_before != (
             advisory.get("mixed_fms_at_analysis"),
             advisory.get("mixed_pending_at_analysis"),
@@ -422,7 +464,7 @@ class FmsMapfCoordinator:
         ):
             return blocked("MIXED_ANALYSIS_STALE")
 
-        prepared = self.prepare_mixed_simulation_requests()
+        prepared = self.prepare_mixed_requests()
         if prepared["status"] != "READY":
             return blocked("MIXED_INPUT_NOT_READY", prepared["issues"])
         if prepared["requests"] != advisory.get("mixed_requests_at_analysis"):
@@ -484,7 +526,7 @@ class FmsMapfCoordinator:
             elif actual_str != expected:
                 return blocked("MAPF_PATH_CHANGE_NEEDS_REVIEW")
 
-        if state_before != self._state_triplet():
+        if state_before != self.state_triplet():
             return blocked("STATE_CHANGED_DURING_CLASSIFICATION")
 
         candidates = sorted(pending_ids - set(deferred))
@@ -516,227 +558,3 @@ class FmsMapfCoordinator:
             "rerouted": rerouted,
             "fms_execution_approved": False,
         }
-
-    # -------------------------------------------------------------------------
-    # 4. 단독 Pending / Active 동기화 분석 및 Preflight 검증
-    # -------------------------------------------------------------------------
-
-    def evaluate_advisory(
-        self, graph: dict, *, planner: Any = None, config: dict | None = None
-    ) -> dict:
-        """등록된 Active AMR 경로를 KEV-MAPF로 분석한다."""
-        requests = self.snapshot()
-        if len(requests) < 2:
-            raise ValueError("MAPF 분석에는 최소 2대의 로봇 경로가 필요합니다.")
-        result = plan_mapf_from_route_results(
-            graph, requests, planner=planner, config=config
-        )
-        if result["fms_execution_approved"] is not False:
-            raise RuntimeError("MAPF 실행 승인 상태가 올바르지 않습니다.")
-        return result
-
-    def evaluate_pending_advisory(
-        self, graph: dict, *, planner: Any = None, config: dict | None = None
-    ) -> dict:
-        """FMS 주행 요청 전, 대기 중인 3대의 Pending 경로를 MAPF로 분석한다."""
-        before = self.pending_snapshot()
-        if len(before) != 3:
-            return {
-                "status": "NOT_READY",
-                "reason": "WAITING_FOR_THREE_ROUTES",
-                "pending_robot_count": len(before),
-                "decisions": [],
-                "fms_execution_approved": False,
-            }
-
-        result = plan_mapf_from_route_results(graph, before, planner=planner, config=config)
-        if before != self.pending_snapshot():
-            return _blocked_response("PENDING_ROUTES_CHANGED_DURING_MAPF", decisions=[])
-        if result["fms_execution_approved"] is not False:
-            raise RuntimeError("MAPF가 직접 FMS 이동을 승인할 수 없습니다.")
-
-        result["analysis_source"] = "PENDING_ROUTES"
-        result["pending_requests_at_analysis"] = before
-        return result
-
-    def classify_pending_advisory(self, advisory: dict) -> dict:
-        """단독 Pending MAPF 판단을 FMS 검증 후보와 실행 보류 대상으로 분류한다."""
-        pending = self.pending_snapshot()
-        robot_ids = {item["order"]["robot_id"] for item in pending}
-
-        def blocked(reason: str) -> dict:
-            return _blocked_response(reason, fms_check_candidates=[], deferred={}, rerouted={})
-
-        if pending != advisory.get("pending_requests_at_analysis"):
-            return blocked("PENDING_ROUTES_CHANGED")
-        if (
-            advisory.get("status") != "PROPOSED"
-            or advisory.get("analysis_source") != "PENDING_ROUTES"
-            or advisory.get("fms_execution_approved") is not False
-            or advisory.get("robot_count") != len(robot_ids)
-        ):
-            return blocked("MAPF_ADVISORY_NOT_READY")
-
-        deferred: dict[str, list[str]] = {}
-        rerouted: dict[str, list[str]] = {}
-        for d in advisory.get("decisions", []):
-            action, yield_robot = d.get("action"), d.get("yield_robot")
-            if action not in ("WAIT", "HOLD", "REROUTE") or yield_robot not in robot_ids:
-                return blocked("UNSUPPORTED_MAPF_DECISION")
-            if action == "REROUTE" and isinstance(d.get("new_path"), list) and d["new_path"]:
-                rerouted[yield_robot] = [str(n) for n in d["new_path"]]
-            else:
-                deferred.setdefault(yield_robot, []).append(action)
-
-        return {
-            "status": "REVIEW_ONLY",
-            "fms_check_candidates": sorted(robot_ids - set(deferred)),
-            "deferred": deferred,
-            "rerouted": rerouted,
-            "fms_execution_approved": False,
-        }
-
-    def inspect_pending_fms_candidates(self, advisory: dict) -> dict:
-        """Pending MAPF 실행 후보에 대해 실제 FMS 상태를 Preflight 검사한다."""
-        from ..mock_data import mock_fms
-
-        def blocked(reason: str, issues: dict | None = None) -> dict:
-            return _blocked_response(reason, issues=issues or {}, fms_check_candidates=[])
-
-        pending_before = self.pending_snapshot()
-        policy = self.classify_pending_advisory(advisory)
-        if policy["status"] != "REVIEW_ONLY" or pending_before != self.pending_snapshot():
-            return blocked("MAPF_POLICY_OR_PENDING_CHANGED")
-
-        states_before = deepcopy(mock_fms.robot_snapshots("simulation"))
-        states = {}
-        issues = {}
-        for state in states_before:
-            rid = str(state["robot_id"])
-            if rid in states:
-                issues[rid] = "DUPLICATE_ROBOT_STATE"
-            states[rid] = state
-
-        pending_ids = {str(item["order"]["robot_id"]) for item in pending_before}
-        for rid, state in states.items():
-            if rid not in pending_ids and (
-                state.get("goal_node") is not None
-                or state.get("route") is not None
-                or state.get("occupied_edge") is not None
-                or state.get("status") in ("NAVIGATING", "WAITING")
-            ):
-                issues[rid] = "UNMODELED_ACTIVE_ROBOT"
-
-        for req in pending_before:
-            rid = str(req["order"]["robot_id"])
-            start_node = str(req["current_node"])
-            state = states.get(rid)
-            if state is None:
-                issues[rid] = "ROBOT_NOT_FOUND"
-            elif state.get("connection_state") != "ONLINE":
-                issues[rid] = "ROBOT_OFFLINE"
-            elif state.get("stop_requested"):
-                issues[rid] = "STOP_REQUESTED"
-            elif (
-                state.get("status") != "IDLE"
-                or state.get("goal_node") is not None
-                or state.get("route") is not None
-                or state.get("occupied_edge") is not None
-            ):
-                issues[rid] = "ROBOT_NOT_IDLE"
-            elif str(state.get("occupied_node")) != start_node:
-                issues[rid] = "START_POSITION_CHANGED"
-
-        states_after = deepcopy(mock_fms.robot_snapshots("simulation"))
-        stable = lambda snaps: sorted(
-            [{k: v for k, v in s.items() if k != "updated_at"} for s in snaps],
-            key=lambda s: str(s["robot_id"]),
-        )
-        if stable(states_before) != stable(states_after) or pending_before != self.pending_snapshot():
-            return blocked("STATE_CHANGED_DURING_PREFLIGHT")
-        if issues:
-            return blocked("FMS_PREFLIGHT_FAILED", issues)
-
-        return {
-            "status": "REVIEW_ONLY",
-            "fms_check_candidates": policy["fms_check_candidates"],
-            "deferred": policy["deferred"],
-            "issues": {},
-            "fms_execution_approved": False,
-        }
-
-    def prepare_simulation_requests(self) -> dict:
-        """FMS의 현재 위치와 남은 경로를 검증해 Active 로봇들의 MAPF 입력을 준비한다."""
-        registered = self.snapshot()
-        live_states = self.inspect_simulation_state()
-        requests = []
-        issues = {}
-        registered_ids = {item["order"]["robot_id"] for item in registered}
-
-        for rid, state in live_states.items():
-            if rid not in registered_ids and (
-                state["goal_node"] is not None or state["occupied_edge"] is not None
-            ):
-                issues[rid] = "UNREGISTERED_ACTIVE_ROBOT"
-
-        for item in registered:
-            rid = item["order"]["robot_id"]
-            state = live_states.get(rid)
-            if state is None:
-                issues[rid] = "ROBOT_NOT_FOUND"
-            elif state["issue"] is not None:
-                issues[rid] = state["issue"]
-            elif state["status"] not in ("NAVIGATING", "WAITING"):
-                issues[rid] = "ROBOT_NOT_ACTIVE"
-            elif str(state["goal_node"]) != str(item["node"]):
-                issues[rid] = "GOAL_CHANGED"
-            elif not _is_valid_suffix(
-                [str(n) for n in item["result"]["path"]], state["remaining_path"]
-            ):
-                issues[rid] = "ROUTE_CHANGED"
-            else:
-                updated = deepcopy(item)
-                updated["current_node"] = str(state["occupied_node"])
-                updated["result"] = {"path": list(state["remaining_path"])}
-                requests.append(updated)
-
-        return {
-            "status": "READY" if len(requests) >= 2 and not issues else "BLOCKED",
-            "requests": requests,
-            "issues": issues,
-        }
-
-    def evaluate_synced_simulation_advisory(
-        self, graph: dict, *, planner: Any = None, config: dict | None = None
-    ) -> dict:
-        """FMS의 최신 남은 경로를 동기화하여 MAPF 분석을 수행한다."""
-        before = self._simulation_signature()
-        prepared = self.prepare_simulation_requests()
-
-        if before != self._simulation_signature():
-            return _blocked_response(
-                "FMS_STATE_CHANGED_DURING_SYNC", decisions=[], fms_route_synced=False
-            )
-        if prepared["status"] != "READY":
-            return _blocked_response(
-                "FMS_ROUTE_SYNC_FAILED",
-                issues=prepared["issues"],
-                decisions=[],
-                fms_route_synced=False,
-            )
-
-        result = plan_mapf_from_route_results(
-            graph, prepared["requests"], planner=planner, config=config
-        )
-        if before != self._simulation_signature():
-            return _blocked_response(
-                "FMS_STATE_CHANGED_DURING_MAPF", decisions=[], fms_route_synced=False
-            )
-        if result["fms_execution_approved"] is not False:
-            raise RuntimeError("MAPF가 직접 이동을 승인할 수 없습니다.")
-
-        result["fms_route_synced"] = True
-        return result
-
-
-fms_mapf_coordinator = FmsMapfCoordinator()

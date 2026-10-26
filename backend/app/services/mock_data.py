@@ -12,6 +12,7 @@ from .pathfinding import DistanceAStar
 from .reservation import reservation_tables
 from .occupancy import locate_occupancy, occupied_resource
 from .traffic_manager import TrafficManager, safe_travel_distance
+from .mapf_execution import MapfExecution
 
 import math
 
@@ -30,6 +31,8 @@ _MOCK_CONNECTIONS = {"10.10.141.225": "robot1", "10.10.141.221": "robot2", "10.1
 class MockFmsStore:
     """Volatile state used only to keep the frontend contract operational."""
 
+    mode = "simulation"
+
     # MockFmsStore - FMS 상태를 유지하는 임시 저장소
     # MockFmsStore의 초기 상태를 설정한다.
     def __init__(self, reservations=None) -> None:
@@ -38,6 +41,7 @@ class MockFmsStore:
             self._robots, reservations, speed_mps=SIMULATION_SPEED_MPS, safety_margin=RESERVATION_MARGIN_S
         )
         self._lock = self._traffic.lock
+        self.mapf = MapfExecution(self._traffic, mode=self.mode, response=self._command_response)
         self._last_tick = monotonic()
         self._blocked_ips: set[str] = set()
         self.reset()
@@ -66,6 +70,7 @@ class MockFmsStore:
                     "goal_node": None,
                     "navigation_id": None,
                     "request_order": None,
+                    "command_epoch": 0,
                     "stop_requested": False,
                     "map_pose_received": True,
                     "connection_state": "ONLINE",
@@ -238,6 +243,7 @@ class MockFmsStore:
         with self._lock:
             robot = self._get_robot(robot_id)
             self._traffic.cancel_navigation_after_stop(robot["robot_id"])
+            robot["command_epoch"] = robot.get("command_epoch", 0) + 1
         return self._command_response(robot_id, "stop", None)
 
     def cmd_vel(self, robot_id: str, linear_x: float, angular_z: float) -> dict[str, Any]:

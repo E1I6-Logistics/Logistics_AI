@@ -27,6 +27,7 @@ RECOVERY_INSTRUCTIONS = (
     "a node needed by another robot in a mutual blockage. Moving a follower "
     "that blocks nobody may leave the actual deadlock unresolved. "
     "MOVE_ASIDE selects a temporary neighboring node and preserves the task. "
+    "PROCEED starts a pending request on its validated original-goal path. "
     "REROUTE follows a new route to the original goal. All supplied actions "
     "are topologically valid and avoid current occupancy, but their usefulness "
     "is YOUR decision. Compare them using the full fleet state. Avoid repeating "
@@ -40,74 +41,12 @@ RECOVERY_INSTRUCTIONS = (
 
 
 
-class KevRecovery:
-    def __init__(self, *, stall_seconds=1.0, retry_seconds=5.0):
-        self.stall_seconds = stall_seconds
-        self.retry_seconds = retry_seconds
-        self._fingerprint = None
-        self._since = 0.0
-        self._next_attempt = 0.0
-        self._running = False
+class KevRecoveryPlanner:
+    """합법적인 후보를 구성하고 복구 행동·경로를 KEV에 묻는다."""
 
-    @staticmethod
-    def _capture(store, coordinator):
-        # Same lock order as the MAPF dispatcher.
-        with coordinator._lock, store._lock:
-            return (
-                deepcopy(store._robots),
-                dict(store._traffic._required_paths),
-                deepcopy(coordinator._route_requests),
-                deepcopy(store._traffic._protected_resources),
-            )
-
-    @staticmethod
-    def _progress_signature(snapshot):
-        robots, paths, registered, protected = snapshot
-        # Reservation retries refresh timestamps without moving a robot. They
-        # must neither hide a stall nor invalidate a KEV plan. Commit always
-        # validates against the newest reservation table under the store lock.
-        fields = ("x", "y", "occupied_node", "occupied_edge", "goal_node",
-                  "navigation_id", "stop_requested", "connection_state", "kev_maneuver")
-        physical = {
-            rid: {**{field: r.get(field) for field in fields},
-                  "route_nodes": (r.get("route") or {}).get("node_ids")}
-            for rid, r in robots.items()
-        }
-        return deepcopy((physical, paths, registered, protected))
-
-    @staticmethod
-    def _candidates(snapshot, now):
-        robots, paths, registered, protected = snapshot
-        blocked = {}
-        for rid, path in paths.items():
-            robot = robots[rid]
-            req = registered.get(rid)
-            route = robot.get("route") or {}
-            maneuver = robot.get("kev_maneuver")
-            if (
-                not req or req["order"]["selector"] != "kev"
-                or not _is_valid_suffix(req["result"]["path"], list(path))
-                or str(req["node"]) != str(robot.get("goal_node"))
-                or robot["status"] != "WAITING" or robot.get("stop_requested")
-                or robot.get("connection_state", "ONLINE") != "ONLINE"
-                or robot.get("occupied_node") is None or robot.get("occupied_edge") is not None
-                or (route.get("departure_at") is not None and route["departure_at"] > now)
-                or rid in protected
-                or (maneuver and maneuver["phase"] != "ASIDE")
-            ):
-                continue
-            if maneuver:
-                blocked[rid] = []  # A parked maneuver needs a KEV RESUME decision.
-                continue
-            blockers = [
-                other_id for other_id, other in robots.items()
-                if other_id != rid and other.get("occupied_node") in path[1:]
-                and other.get("status") in ("WAITING", "IDLE")
-                and (other.get("route") or {}).get("departure_at") is None
-            ]
-            if blockers:
-                blocked[rid] = blockers
-        return blocked
+    def __init__(self, *, route_preview=None, selector_factory=None):
+        self._route_preview = route_preview
+        self._selector_factory = selector_factory
 
     @staticmethod
     def _aside_candidates(graph, snapshot, blocked):
@@ -134,15 +73,14 @@ class KevRecovery:
                 proposals[key] = (rid, [str(current), str(target)], str(target))
         return proposals
 
-    @staticmethod
-    def _plan(graph, snapshot, blocked):
+    def plan(self, graph, snapshot, blocked):
         """Read-only KEV choice and route generation; never changes fleet state."""
         robots, paths, registered, _ = snapshot
         proposals = {}
         rejected = []
         for rid in sorted(blocked):
             robot = robots[rid]
-            action = "resume" if robot.get("kev_maneuver") else "reroute"
+            action = "proceed" if robot.get("mapf_pending") else "resume" if robot.get("kev_maneuver") else "reroute"
             key = f"{action}_{rid}"
             try:
                 traffic = live_traffic(rid, graph=graph, snapshots=list(robots.values()))
@@ -151,7 +89,7 @@ class KevRecovery:
                 if int(robot["goal_node"]) in forbidden:
                     raise ValueError("original goal is currently occupied")
                 virtual = Graph(graph).virtual_graph(forbidden, set())
-                result = preview_llm_route(
+                result = (self._route_preview or preview_llm_route)(
                     virtual, robot["occupied_node"], robot["goal_node"],
                     selector="kev", model=registered[rid]["order"]["model"], traffic=traffic,
                 )
@@ -159,17 +97,17 @@ class KevRecovery:
                 Graph(virtual).check_path(
                     path, start=int(robot["occupied_node"]), goal=int(robot["goal_node"])
                 )
-                if path == list(paths[rid]):
+                if path == list(paths[rid]) and not robot.get("mapf_pending"):
                     raise ValueError("reroute did not change the blocked path")
                 proposals[key] = (rid, path, None)
             except (ValueError, RuntimeError) as exc:
                 rejected.append({"action": key, "reason": str(exc)})
-        proposals.update(KevRecovery._aside_candidates(graph, snapshot, blocked))
+        proposals.update(KevRecoveryPlanner._aside_candidates(graph, snapshot, blocked))
         if not proposals:
             logger.warning("KEV recovery has no feasible move; blocked=%s reasons=%s", blocked, rejected)
             return None
         choices = {
-            key: f"{'MOVE_ASIDE' if target is not None else 'RESUME' if key.startswith('resume_') else 'REROUTE'} "
+            key: f"{'MOVE_ASIDE' if target is not None else 'PROCEED' if key.startswith('proceed_') else 'RESUME' if key.startswith('resume_') else 'REROUTE'} "
                  f"{rid} via {path}; original goal={robots[rid]['goal_node']}"
             for key, (rid, path, target) in proposals.items()
         }
@@ -183,7 +121,8 @@ class KevRecovery:
             "robots": [
                 {"id": rid, "current_node": r.get("occupied_node"),
                  "original_goal": r.get("goal_node"), "remaining_path": list(paths.get(rid, ())),
-                 "temporary_maneuver": r.get("kev_maneuver")}
+                 "temporary_maneuver": r.get("kev_maneuver"),
+                 "pending_admission": bool(r.get("mapf_pending"))}
                 for rid, r in sorted(robots.items())
             ],
             "valid_maneuvers": [
@@ -191,7 +130,7 @@ class KevRecovery:
                  "original_goal": int(robots[rid]["goal_node"]),
                  "directed_path_valid": True, "avoids_current_occupancy": True,
                  "temporary_move_complete": bool(robots[rid].get("kev_maneuver")),
-                 "action": "MOVE_ASIDE" if target is not None else "RESUME" if key.startswith("resume_") else "REROUTE"}
+                 "action": "MOVE_ASIDE" if target is not None else "PROCEED" if key.startswith("proceed_") else "RESUME" if key.startswith("resume_") else "REROUTE"}
                 for key, (rid, path, target) in proposals.items()
             ],
             "previous_decisions": {rid: r["kev_recovery"] for rid, r in robots.items() if r.get("kev_recovery")},
@@ -200,7 +139,7 @@ class KevRecovery:
         }
 
         model = registered[next(iter(proposals.values()))[0]]["order"]["model"]
-        selector = KevSelector(model=model, timeout_seconds=20)
+        selector = (self._selector_factory or KevSelector)(model=model, timeout_seconds=20)
         decision = selector.select_choice(
             state, choices, RECOVERY_INSTRUCTIONS, question_id="deadlock_recovery"
         )
@@ -211,18 +150,92 @@ class KevRecovery:
         if key not in proposals:
             raise ValueError("KEV returned an unknown recovery action")
         rid, path, target = proposals[key]
-        action = "MOVE_ASIDE" if target is not None else "RESUME" if key.startswith("resume_") else "REROUTE"
+        action = "MOVE_ASIDE" if target is not None else "PROCEED" if key.startswith("proceed_") else "RESUME" if key.startswith("resume_") else "REROUTE"
         return rid, path, {**decision, "action": action, "temporary_goal": target}
+
+
+class KevRecovery:
+    def __init__(self, *, stall_seconds=1.0, retry_seconds=5.0, planner=None):
+        self.planner = KevRecoveryPlanner() if planner is None else planner
+        self.stall_seconds = stall_seconds
+        self.retry_seconds = retry_seconds
+        self._fingerprint = None
+        self._since = 0.0
+        self._next_attempt = 0.0
+        self._running = False
+
+    @staticmethod
+    def _capture(store, coordinator):
+        with coordinator.transaction(store.mapf):
+            robots, paths, protected = store.mapf.snapshot()
+            registered, _ = coordinator.requests_by_robot()
+            return robots, paths, registered, protected
+
+    @staticmethod
+    def progress_signature(snapshot):
+        robots, paths, registered, protected = snapshot
+        # Reservation retries refresh timestamps without moving a robot. They
+        # must neither hide a stall nor invalidate a KEV plan. Commit always
+        # validates against the newest reservation table under the store lock.
+        fields = ("x", "y", "occupied_node", "occupied_edge", "goal_node",
+                  "navigation_id", "stop_requested", "connection_state", "kev_maneuver",
+                  "execution_blocked", "command_epoch")
+        physical = {
+            rid: {**{field: r.get(field) for field in fields},
+                  "route_nodes": (r.get("route") or {}).get("node_ids")}
+            for rid, r in robots.items()
+        }
+        return deepcopy((physical, paths, registered, protected))
+
+    @staticmethod
+    def _candidates(snapshot, now):
+        robots, paths, registered, protected = snapshot
+        blocked = {}
+        for rid, path in paths.items():
+            robot = robots[rid]
+            req = registered.get(rid)
+            route = robot.get("route") or {}
+            maneuver = robot.get("kev_maneuver")
+            if (
+                not req or req["order"]["selector"] != "kev"
+                or not _is_valid_suffix(req["result"]["path"], list(path))
+                or str(req["node"]) != str(robot.get("goal_node"))
+                or robot["status"] != "WAITING" or robot.get("stop_requested")
+                or robot.get("execution_blocked")
+                or robot.get("connection_state", "ONLINE") != "ONLINE"
+                or robot.get("occupied_node") is None or robot.get("occupied_edge") is not None
+                or (route.get("departure_at") is not None and route["departure_at"] > now)
+                or rid in protected
+                or (maneuver and maneuver["phase"] != "ASIDE")
+            ):
+                continue
+            if maneuver:
+                blocked[rid] = []  # A parked maneuver needs a KEV RESUME decision.
+                continue
+            blockers = [
+                other_id for other_id, other in robots.items()
+                if other_id != rid and other.get("occupied_node") in path[1:]
+                and other.get("status") in ("WAITING", "IDLE")
+                and (other.get("route") or {}).get("departure_at") is None
+            ]
+            if blockers:
+                blocked[rid] = blockers
+        return blocked
 
     async def run_once(self, store, coordinator, mode_manager, *, now=None):
         if self._running:
             return False
-        if mode_manager.mode != "simulation":
+        expected_mode = store.mapf.mode
+        if mode_manager.mode != expected_mode:
             self._fingerprint = None
             return False
         now = monotonic() if now is None else now
-        snapshot = self._capture(store, coordinator)
-        signature = self._progress_signature(snapshot)
+        try:
+            snapshot = self._capture(store, coordinator)
+        except (ValueError, KeyError):
+            self._fingerprint = None
+            return False
+        signature = self.progress_signature(snapshot)
         blocked = self._candidates(snapshot, now)
         if not blocked:
             self._fingerprint = None
@@ -242,25 +255,16 @@ class KevRecovery:
 
         try:
             graph = load_route_graph()
-            proposal = await asyncio.to_thread(self._plan, graph, snapshot, blocked)
-            if proposal is None or mode_manager.mode != "simulation" or load_route_graph() != graph:
+            proposal = await asyncio.to_thread(self.planner.plan, graph, snapshot, blocked)
+            if proposal is None or mode_manager.mode != expected_mode or load_route_graph() != graph:
                 return False
-            with coordinator._lock, store._lock:
-                if self._progress_signature(self._capture(store, coordinator)) != signature:
+            with coordinator.transaction(store.mapf):
+                if self.progress_signature(self._capture(store, coordinator)) != signature:
                     return False
                 rid, path, decision = proposal
-                if not store._traffic.replace_required_path_after_stop(
-                    rid, path, now=monotonic(), graph=graph,
-                    temporary_goal=decision.get("temporary_goal"),
-                ):
+                if store.mapf.recover(rid, path, decision, graph, now=monotonic()) is None:
                     return False
-                request = coordinator._route_requests[rid]
-                request["current_node"] = str(store._robots[rid]["occupied_node"])
-                request["result"] = {"path": path}
-                store._robots[rid]["kev_recovery"] = {
-                    "action": decision["action"], "path": path,
-                    "choice": decision["choice"], "confidence": decision.get("confidence"),
-                }
+                coordinator.update_active_path(rid, snapshot[0][rid]["occupied_node"], path)
                 logger.info("KEV recovery applied: robot=%s path=%s", rid, path)
                 self._fingerprint = None
                 return True

@@ -3,16 +3,14 @@
 - 기능:
   1. 단일 로봇 경로 결과 DTO 변환 (mapf_robot_from_route_result)
   2. 다중 로봇 상태·경로 검증 및 초기화 (parse_robot_state)
-  3. 주문 기반 AI 경로 preview 래퍼 (preview_order_route_for_mapf)
-  4. 다중 주문 경로 결과 통합 MAPF 계획 수립 (plan_mapf_from_route_results)
+  3. 다중 주문 경로 결과 통합 MAPF 계획 수립 (plan_mapf_from_route_results)
 """
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any
 
-from .kev_client import LiveKEV
+from .kev_client import KevPlanner, LiveKEV
 from .kev_engine import KevMAPF
 from .kev_graph import Graph, _node
 
@@ -43,7 +41,7 @@ def mapf_robot_from_route_result(
     }
 
 
-def parse_robot_state(data: dict, graph: Graph, live: Any) -> dict[str, dict]:
+def parse_robot_state(data: dict, graph: Graph, live: KevPlanner) -> dict[str, dict]:
     """입력 JSON의 `robots` 배열을 검증하고 로봇 ID별 정규화된 상태·경로 딕셔너리를 생성한다."""
     robots = {}
     for raw in data.get("robots", []):
@@ -73,7 +71,7 @@ def parse_robot_state(data: dict, graph: Graph, live: Any) -> dict[str, dict]:
             path = [_node(n) for n in raw_path]
             path_source = "provided" if source == "path" else "preview_result"
         else:
-            path_source = "kev_preview" if isinstance(live, LiveKEV) else "mock_bfs"
+            path_source = live.path_source
             path = live.route(
                 graph.data,
                 current,
@@ -96,28 +94,19 @@ def parse_robot_state(data: dict, graph: Graph, live: Any) -> dict[str, dict]:
             "model": raw.get("model"),
             "robot_type": str(raw.get("robot_type", "turtlebot3_burger")),
             "footprint_radius_m": float(raw.get("footprint_radius_m", 0.06)),
+            "execution_committed": bool(raw.get("execution_committed")),
+            "occupied_edge": raw.get("occupied_edge"),
         }
     if not robots:
         raise ValueError("MAPF needs at least one robot")
     return robots
 
 
-def preview_order_route_for_mapf(
-    graph: dict, order: dict, current_node: int | str, node: int | str
-) -> dict:
-    """결과가 아직 없을 때만 dispatcher와 같은 preview 호출로 경로를 생성한다."""
-    from backend.app.services.llm_route_preview import preview_llm_route
-
-    return preview_llm_route(
-        graph, current_node, node, selector=order["selector"], model=order["model"]
-    )
-
-
 def plan_mapf_from_route_results(
     graph: dict | Graph,
     route_requests: list[dict],
     *,
-    planner: Any | None = None,
+    planner: KevPlanner | None = None,
     config: dict | None = None,
 ) -> dict:
     """`result['path']` 생성 이후, 실제 주행 요청 전에 사용하는 동기 MAPF 계획 함수."""
@@ -140,6 +129,8 @@ def plan_mapf_from_route_results(
             task_priority=request.get("task_priority", 0),
         )
         robot.update(selector=order["selector"], model=order["model"])
+        robot.update(execution_committed=bool(request.get("execution_committed")),
+                     occupied_edge=request.get("occupied_edge"))
         if not robot["selector"] or not robot["model"]:
             raise ValueError("each order must specify its route selector and model")
         inputs.append(robot)
@@ -149,12 +140,7 @@ def plan_mapf_from_route_results(
         robot["source"] = "preview_result"
 
     if planner is None:
-        planner = LiveKEV(
-            Path(__file__).resolve().parents[4],
-            model=settings.get("mapf_model", "kev-08b"),
-            deadline=0.15,
-            max_steps=None,
-        )
+        planner = LiveKEV(model=settings.get("mapf_model", "kev-08b"))
 
     result = KevMAPF(
         route_graph, robots, planner, settings, rounds=rounds, reroutes=reroutes

@@ -3,7 +3,7 @@
 import unittest
 from unittest.mock import patch
 
-from backend.app.services.fms_mapf_coordinator import (
+from backend.app.services.kev_mapf.kev_coordinator import (
     FmsMapfCoordinator,
     _is_valid_suffix,
     is_fms_reviewable_advisory,
@@ -68,7 +68,7 @@ class KevCoordinatorAndMockTests(unittest.TestCase):
         self.assertTrue(is_fms_reviewable_advisory(review_ok))
 
     def test_coordinator_stage_and_register(self):
-        coord = FmsMapfCoordinator()
+        coord = FmsMapfCoordinator(unittest.mock.MagicMock())
         order = {"robot_id": "r1", "selector": "kev", "model": "kev-08b"}
         coord.stage_preview(order, "1", "4", {"path": ["1", "2", "4"]})
         self.assertEqual(len(coord.pending_snapshot()), 1)
@@ -82,7 +82,7 @@ class KevCoordinatorAndMockTests(unittest.TestCase):
         self.assertEqual(len(coord.snapshot()), 0)
 
     def test_coordinator_mixed_simulation_advisory_flow(self):
-        coord = FmsMapfCoordinator()
+        coord = FmsMapfCoordinator(unittest.mock.MagicMock())
         graph, _ = demo_data()
 
         order1 = {"robot_id": "r1", "selector": "kev", "model": "kev-08b"}
@@ -123,9 +123,10 @@ class KevCoordinatorAndMockTests(unittest.TestCase):
         ]
 
         fake_mock_data = unittest.mock.MagicMock()
+        coord.store.robot_snapshots.return_value = fake_snapshots
         fake_mock_data.mock_fms.robot_snapshots.return_value = fake_snapshots
         with patch.dict("sys.modules", {"backend.app.services.mock_data": fake_mock_data}):
-            advisory = coord.evaluate_mixed_simulation_advisory(
+            advisory = coord.evaluate_mixed_advisory(
                 graph.data,
                 planner=MockKEV(),
                 config={"wait_allowed_nodes": [5, 6], "max_reroutes": 0},
@@ -144,7 +145,7 @@ class KevCoordinatorAndMockTests(unittest.TestCase):
         from tests.test_kev_mapf_integration import graph_data
 
         g_data = graph_data()
-        coord = FmsMapfCoordinator()
+        coord = FmsMapfCoordinator(unittest.mock.MagicMock())
         order_a = {"robot_id": "a", "selector": "kev", "model": "kev-08b", "mode": "simulation"}
         order_b = {"robot_id": "b", "selector": "kev", "model": "kev-08b", "mode": "simulation"}
 
@@ -189,19 +190,20 @@ class KevCoordinatorAndMockTests(unittest.TestCase):
         ]
 
         fake_mock_data = unittest.mock.MagicMock()
+        coord.store.robot_snapshots.return_value = fake_snapshots
         fake_mock_data.mock_fms.robot_snapshots.return_value = fake_snapshots
         fake_mock_data.mock_fms.robot_snapshot.return_value = fake_snapshots[1]
 
         with (
             patch.dict("sys.modules", {"backend.app.services.mock_data": fake_mock_data}),
-            patch("backend.app.services.kev_mapf.kev_dispatcher.fms_mapf_coordinator", coord),
+            patch("backend.app.services.kev_mapf.kev_dispatcher.runtime_for", return_value=(fake_mock_data.mock_fms, coord)),
             patch("backend.app.services.kev_mapf.kev_dispatcher.load_route_graph", return_value=g_data),
             patch("backend.app.services.kev_mapf.kev_dispatcher.mode_manager", unittest.mock.MagicMock(mode="simulation")),
         ):
-            advisory = coord.evaluate_mixed_simulation_advisory(
+            advisory = coord.evaluate_mixed_advisory(
                 g_data,
                 planner=ReroutePlanner([5, 6, 7]),
-                config={"wait_allowed_nodes": [], "max_reroutes": 3, "priority_mode": "choice"},
+                config={"wait_allowed_nodes": [], "max_reroutes": 3, "priority_mode": "score"},
             )
             self.assertEqual(advisory["status"], "PROPOSED")
             self.assertEqual(advisory["required_paths"]["b"], ["5", "6", "7"])

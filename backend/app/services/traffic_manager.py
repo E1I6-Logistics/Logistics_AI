@@ -90,6 +90,58 @@ class TrafficManager:
         # 연결이 끊긴 주행 로봇의 남은 경로. 재연결해 실제 점유를 확인할 때까지 다른 로봇에 양보하지 않는다.
         self._protected_resources = {}
 
+    def planning_snapshot(self):
+        """계획자는 실행기 소유 상태의 복사본만 조회한다."""
+        with self.lock:
+            return (deepcopy(self._robots), dict(self._required_paths),
+                    deepcopy(self._protected_resources))
+
+    def commit_required_routes(self, graph, pending, paths, waits, ordered, *, now):
+        with self.lock:
+            previous_rows = self._reservations.snapshot()
+            trial = self._planning_copy()
+            for rid in ordered:
+                for dependency in waits[rid]:
+                    dependency["navigation_id"] = trial._robots[dependency["robot_id"]]["navigation_id"]
+                trial.request_navigation_after_stop(
+                    rid, pending[rid]["node"], now=now, graph=graph,
+                    required_path=paths[rid], mapf_wait_for=waits[rid],
+                )
+            if not self._reservations.compare_and_replace(previous_rows, trial._reservations.snapshot()):
+                return False
+            for rid, robot in trial._robots.items():
+                self._robots[rid].clear()
+                self._robots[rid].update(robot)
+            self._required_paths = trial._required_paths
+            self._pending = trial._pending
+            self._concession = trial._concession
+            self._protected_resources = trial._protected_resources
+            self._request_sequence = trial._request_sequence
+            return True
+
+    def recover_required_path(self, robot_id, path, decision, graph, *, now, initial_goal=None):
+        with self.lock:
+            target = decision.get("temporary_goal")
+            if initial_goal is not None:
+                if target is None:
+                    self.request_navigation_after_stop(
+                        robot_id, initial_goal, now=now, graph=graph, required_path=path,
+                    )
+                else:
+                    self.start_required_path_maneuver(
+                        robot_id, path, original_goal=initial_goal, temporary_goal=target,
+                        now=now, graph=graph,
+                    )
+            elif not self.replace_required_path_after_stop(
+                robot_id, path, now=now, graph=graph, temporary_goal=target,
+            ):
+                return False
+            self._robots[robot_id]["kev_recovery"] = {
+                "action": decision["action"], "path": list(path), "choice": decision["choice"],
+                "confidence": decision.get("confidence"),
+            }
+            return True
+
     # 로봇이 점유 중인 자원을 보호 목록에 넣는다.
     def protect_resources(self, robot_id, resources):
         with self.lock:
@@ -125,7 +177,7 @@ class TrafficManager:
         with self.lock:
             return bool(self._concession) or any(robot["goal_node"] is not None for robot in self._robots.values())
 
-    def request_navigation_after_stop(self, robot_id, goal_node, *, now, graph, required_path=None, task_priority=0):
+    def request_navigation_after_stop(self, robot_id, goal_node, *, now, graph, required_path=None, task_priority=0, mapf_wait_for=None):
         """기존 실행 정지와 점유 갱신 후 새 요청을 접수하고 예약한다."""
         with self.lock:
             self._validate_time(now)
@@ -160,6 +212,8 @@ class TrafficManager:
             robot["request_order"] = self._request_sequence
             robot["navigation_id"] = uuid4().hex
             robot["goal_node"] = goal_node
+            if mapf_wait_for:
+                robot["mapf_wait_for"] = deepcopy(mapf_wait_for)
             self._wait_for_reservation(robot)
             self._retry_waiting(now, graph, planner)
 
@@ -175,6 +229,7 @@ class TrafficManager:
             robot["stop_requested"] = True
             robot.pop("kev_recovery", None)
             robot.pop("kev_maneuver", None)
+            robot.pop("mapf_wait_for", None)
             self._required_paths.pop(robot_id, None)
             self._concession.pop(robot_id, None)
             self._pending.pop(robot_id, None)
@@ -218,6 +273,7 @@ class TrafficManager:
                 return False
             trial = self._planning_copy()
             mover = trial._robots[robot_id]
+            mover.pop("mapf_wait_for", None)
             trial._release_schedule(mover)
             mover["route"] = None
             if temporary_goal is None:
@@ -235,9 +291,26 @@ class TrafficManager:
                 self._release_schedule(robot)
             self._required_paths[robot_id] = fixed
             robot.pop("kev_maneuver", None)
+            robot.pop("mapf_wait_for", None)
             robot.update(mover)
             self._pending.pop(robot_id, None)
             return True
+
+    def start_required_path_maneuver(self, robot_id, path, *, original_goal, temporary_goal, now, graph):
+        """출발 대기 요청에서 KEV가 선택한 임시 경로만 예약·실행한다."""
+        with self.lock:
+            robot = self._robots[robot_id]
+            if robot["status"] != "IDLE" or robot.get("goal_node") is not None or robot.get("route") is not None:
+                raise ValueError("임시 출발은 작업이 없는 노드 위 대기 로봇에만 가능합니다.")
+            if str(original_goal) == str(temporary_goal):
+                raise ValueError("임시 대피와 원래 목적지는 구분해야 합니다.")
+            self.request_navigation_after_stop(
+                robot_id, str(temporary_goal), now=now, graph=graph, required_path=path,
+            )
+            # The reservation covers only the KEV-selected temporary route.
+            # Keep the same request ID but never complete the business task here.
+            robot["goal_node"] = str(original_goal)
+            robot["kev_maneuver"] = {"target_node": str(temporary_goal), "phase": "MOVING_ASIDE"}
 
     def retry_waiting(self, now, graph, planner=None):
         """정지 중인 대기 요청을 재계획한다. 양보 종료 시 실행 정지는 호출자 책임."""
@@ -317,6 +390,8 @@ class TrafficManager:
         with self.lock:
             self._validate_time(now)
             self._validate_time(expected_arrival_at)
+            if self._mapf_zone_waiting(self._robots[robot_id]):
+                return SegmentPermission("waiting", "mapf_priority_zone_not_clear")
             robot = self._robots[robot_id]
             route = robot["route"]
             if route is None or route.get("departure_at") is None:
@@ -423,6 +498,8 @@ class TrafficManager:
 
     # 로봇의 경로 예약을 시도한다.
     def _try_schedule(self, robot, now, graph, planner, *, vacating_nodes=None):
+        if self._mapf_zone_waiting(robot):
+            return False
         maneuver = robot.get("kev_maneuver")
         if maneuver and maneuver["phase"] == "ASIDE":
             # KEV must generate and approve the route back to the original goal.
@@ -515,6 +592,31 @@ class TrafficManager:
             robot["status"] = "WAITING" if departure > now else "NAVIGATING"
         return True
 
+    def _mapf_zone_waiting(self, robot):
+        """KEV의 WAIT는 해당 공유 구간 진입에만 적용하며 작업 완료를 기다리지 않는다."""
+        route = robot.get("route") or {}
+        nodes = route.get("node_ids") or list(self._required_paths.get(robot["robot_id"], ()))
+        index = route.get("segment_index", 0)
+        if index + 1 >= len(nodes):
+            return False
+        next_resources = {node_key(nodes[index+1]), edge_key(nodes[index], nodes[index+1])}
+        for dependency in robot.get("mapf_wait_for", []):
+            resources = {tuple(r) for r in dependency["resources"]}
+            if not next_resources & resources:
+                continue
+            high = self._robots.get(dependency["robot_id"])
+            if not high or high.get("navigation_id") != dependency["navigation_id"] or high.get("goal_node") is None:
+                continue
+            high_route = high.get("route") or {}
+            remaining = (high_route.get("node_ids") or list(self._required_paths.get(high["robot_id"], ())))[
+                high_route.get("segment_index", 0):
+            ]
+            future_nodes = remaining[1:] if high.get("occupied_edge") is not None else remaining
+            future = {node_key(n) for n in future_nodes} | {edge_key(a, b) for a, b in zip(remaining, remaining[1:])}
+            if not remaining or future & resources & next_resources:
+                return True
+        return False
+
     # 대피 도착은 원래 명령의 완료가 아니므로, 실제 점유를 유지
     # 도착한 로봇의 경로 예약을 완료 처리한다.
     def _finish_route(self, robot):
@@ -529,6 +631,7 @@ class TrafficManager:
             self._pending.setdefault(robot["robot_id"], None)
         else:
             self._required_paths.pop(robot["robot_id"], None)
+            robot.pop("mapf_wait_for", None)
             robot["goal_node"] = None
             robot["request_order"] = None
             robot["status"] = "IDLE"

@@ -95,6 +95,10 @@ def _navigation_locked(method):
 
 class RosGateway:
     # RosGateway의 초기 상태를 설정한다.
+    @property
+    def navigation(self):
+        return self._navigation
+
     def __init__(self) -> None:
         self._ros_node: FmsRosNode | None = None
         self._waiting_omx = {}
@@ -107,6 +111,7 @@ class RosGateway:
             GOAL_YAWS,
             ARRIVAL_DISTANCE_THRESHOLD,
             station_nodes=CHARGING_STATION_NODES,
+            mapf_ready=lambda rid: self._ros_node is not None and self._ros_node.is_registered(rid),
         )
 
     # ROS 노드를 설정한다.

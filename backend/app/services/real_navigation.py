@@ -28,6 +28,7 @@ from .pathfinding import DistanceAStar
 from .reservation import reservation_tables, edge_key, node_key
 from .route_graph import load_route_graph
 from .traffic_manager import TrafficManager
+from .mapf_execution import MapfExecution
 
 
 def measured_distance(robot, target, now):
@@ -52,6 +53,7 @@ def measured_distance(robot, target, now):
 
 
 class RealNavigation:
+    mode = "real"
 
     # RealNavigation의 초기 상태를 설정한다.
     def __init__(
@@ -66,6 +68,7 @@ class RealNavigation:
         reservations=None,
         clock=monotonic,
         station_nodes=None,
+        mapf_ready,
     ):
 
         self._fleet = fleet
@@ -86,6 +89,7 @@ class RealNavigation:
         )
 
         self.lock = self._traffic.lock
+        self._mapf_ready = mapf_ready
         self._executing = {}
         self._stopping = {}
         self._requests = {}
@@ -103,6 +107,83 @@ class RealNavigation:
         self._deferred_requests = {}
         self._initializing_since = {}
         self._stale_idle_reported = set()
+        self.mapf = MapfExecution(
+            self._traffic, mode=self.mode, response=self._command_response,
+            refresh=self.refresh, validate=self.validate_pending, publish=self.after_mapf_commit,
+        )
+
+    def refresh(self, graph=None):
+        graph = load_route_graph() if graph is None else graph
+        with self.lock:
+            if not self._sync(graph, DistanceAStar(graph), self._clock()):
+                raise ValueError(f"실제 로봇 위치·점유를 확인할 수 없습니다: {self._sync_errors}")
+            for rid, row in self._robots.items():
+                robot = self._fleet.get_robot(rid)
+                blocked = (rid in self._executing or rid in self._stopping
+                           or rid in self._arrivals or rid in self._cancelled)
+                try:
+                    measured_distance(robot, (row["x"], row["y"]), self._clock())
+                    fresh = True
+                except ValueError:
+                    fresh = False
+                row["connection_state"] = "ONLINE" if fresh and self._mapf_ready(rid) and rid not in self._sync_errors else "OFFLINE"
+                row["stop_requested"] = (rid in self._stopping or rid in self._cancelled
+                                         or robot.state in (RobotState.PAUSED, RobotState.EMERGENCY_STOP))
+                row["execution_blocked"] = blocked
+                row["command_epoch"] = (self._request_versions.get(rid, 0), robot.order_id,
+                                        robot.navigation_type)
+                if rid not in self._requests and not blocked:
+                    row["status"] = "IDLE" if robot.state in (RobotState.IDLE, RobotState.TASK_ASSIGNED) else robot.state.value
+
+    def robot_snapshot(self, robot_id, mode="real"):
+        with self.lock:
+            self.refresh()
+            return deepcopy(self._robots[robot_id])
+
+    def robot_snapshots(self, mode="real"):
+        with self.lock:
+            self.refresh()
+            return deepcopy(list(self._robots.values()))
+
+    def validate_pending(self, pending):
+        from .mode_service import mode_manager
+        if mode_manager.mode != self.mode:
+            raise ValueError("운용 모드가 변경되었습니다.")
+        for rid in pending:
+            robot = self._fleet.get_robot(rid)
+            row = self._robots[rid]
+            if (not self._mapf_ready(rid) or row["connection_state"] != "ONLINE"
+                    or row["execution_blocked"] or row["stop_requested"]
+                    or rid in self._requests
+                    or robot.state not in (RobotState.IDLE, RobotState.TASK_ASSIGNED)
+                    or row.get("occupied_node") is None or row.get("occupied_edge") is not None):
+                raise ValueError(f"실로봇의 정지·위치·ROS 준비 상태를 확인할 수 없습니다: {rid}")
+
+    def after_mapf_commit(self, goals):
+        for rid, goal in goals.items():
+            robot = self._fleet.get_robot(rid)
+            previous = self._requests.get(rid)
+            kind = previous[1] if previous else NavigationType.GOAL
+            if previous is None:
+                self._request_versions[rid] = self._request_versions.get(rid, 0) + 1
+            self._requests[rid] = (str(goal), kind)
+            robot.goal_node, robot.navigation_type = str(goal), kind
+            robot.set_state(RobotState.WAITING)
+        self._publish()
+
+    def navigate_to_node(self, robot_id, node, *, required_path):
+        with self.lock:
+            self.refresh()
+            self.validate_pending([robot_id])
+            self.request(robot_id, node, NavigationType.GOAL, required_path=required_path)
+            return self._command_response(robot_id, "goal-node", {"node_id": node})
+
+    def stop_robot(self, robot_id):
+        self.stop(robot_id, lambda: self.cancel_after_stop(robot_id), reason="mapf_dispatch_failed")
+
+    def _command_response(self, robot_id, command, target):
+        return {"success": True, "status": "PROCESSING", "robot_id": robot_id,
+                "command": command, "target": target, "source": "ros2", "mode": "real"}
 
     def _docked_station(self, robot_id, graph, nodes, x, y):
         """담당 충전 Node의 통로 반대쪽 도킹 공간에 있는 Pose만 해당 Node로 대응한다."""
@@ -516,7 +597,7 @@ class RealNavigation:
                         )
                         next_edge = (
                             edge_key(end, route["node_ids"][index + 2])
-                            if index + 2 < len(route["node_ids"])
+                            if rid not in self._traffic._required_paths and index + 2 < len(route["node_ids"])
                             else None
                         )
 
@@ -1260,6 +1341,7 @@ class RealNavigation:
                         rid in self._requests
                         and state["goal_node"] is None
                         and rid not in self._executing
+                        and not state.get("kev_maneuver")
                     ):
                         self._send(rid, self._requests[rid][0], None, planner)
 
@@ -1328,6 +1410,10 @@ class RealNavigation:
 
                         self._pause(rid, "current_segment_occupied")
                         self.stop(rid, reason="current_segment_occupied")
+                        continue
+
+                    # KEV 경로는 Action 종료와 실측 도착이 확인된 구간만 진행한다.
+                    if rid in self._traffic._required_paths:
                         continue
 
                     reason = self._next_segment_reason(rid, route, planner, graph, now)
@@ -1432,7 +1518,8 @@ class RealNavigation:
             route = state["route"]
             nodes = route["node_ids"]
 
-            for index in range(segment_index + 1, len(nodes)):
+            stop_index = segment_index + 2 if rid in self._traffic._required_paths else len(nodes)
+            for index in range(segment_index + 1, stop_index):
                 node = nodes[index]
                 x, y = planner.nodes[node]
                 # 중간 Node는 다음 이동 방향, 마지막 Node는 진입 방향.
@@ -1443,7 +1530,7 @@ class RealNavigation:
                 )
                 waypoints.append((x, y, yaw))
 
-            target = nodes[-1]
+            target = nodes[stop_index - 1]
 
         else:
             x, y = planner.nodes[target]
@@ -1453,6 +1540,7 @@ class RealNavigation:
             rid in self._requests
             and target == self._requests[rid][0]
             and rid not in self._traffic._concession
+            and not state.get("kev_maneuver")
         )
 
         if final:
@@ -1497,6 +1585,7 @@ class RealNavigation:
             raise
 
         if rid in self._executing:
+            state["status"] = "NAVIGATING"
             robot.set_state(RobotState.NAVIGATING)
 
     # execution 오류 이벤트를 처리한다.
@@ -1544,11 +1633,14 @@ class RealNavigation:
 
             route = self._robots[robot_id]["route"]
 
-            if execution[2] is not None and (
-                route is None
-                or route["node_ids"][-1] != execution[1]
-                or route["segment_index"] != len(route["node_ids"]) - 2
-            ):
+            fixed = robot_id in self._traffic._required_paths
+            valid_progress = route is not None and (
+                (fixed and route["segment_index"] == execution[2]
+                 and route["node_ids"][route["segment_index"] + 1] == execution[1])
+                or (not fixed and route["node_ids"][-1] == execution[1]
+                    and route["segment_index"] == len(route["node_ids"]) - 2)
+            )
+            if execution[2] is not None and not valid_progress:
                 self._pause(robot_id, "route_progress_unconfirmed")
                 return  # 통과하지 못한 중간 Node를 성공으로 간주하거나 예약을 해제하지 않는다.
 
@@ -1621,6 +1713,8 @@ class RealNavigation:
 
         if segment_index is not None:
             self._traffic.confirm_node_arrival(robot_id, target)
+            if state["route"] is not None:
+                state["status"] = "WAITING"
 
         robot.current_node = robot.occupied_node = target
         robot.occupied_edge = None
@@ -1632,7 +1726,7 @@ class RealNavigation:
 
         elif state["route"] is None and robot_id not in self._traffic._concession:
             robot.route = None
-            robot.set_state(RobotState.IDLE)
+            robot.set_state(RobotState.WAITING if state.get("kev_maneuver") else RobotState.IDLE)
 
         self._publish()
 

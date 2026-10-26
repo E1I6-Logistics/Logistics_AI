@@ -107,6 +107,19 @@ class ReservationTable:
         with self._lock:
             return tuple(self._rows)
 
+    def compare_and_replace(self, expected, candidates) -> bool:
+        """Publish a fleet reservation trial atomically if the live table is unchanged."""
+        batch = tuple(candidates)
+        with self._lock:
+            if tuple(self._rows) != tuple(expected):
+                return False
+            for i, a in enumerate(batch):
+                for b in batch[i+1:]:
+                    if a.robot_id != b.robot_id and a.resource == b.resource and overlaps(a, b):
+                        return False
+            self._rows = list(batch)
+            return True
+
     # 정지 상태에서 시간표를 교체
     # 요청을 교체한다.
     def replace_request(self, robot_id, navigation_id, candidates) -> bool:

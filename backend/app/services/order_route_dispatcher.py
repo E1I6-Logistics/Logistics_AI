@@ -1,21 +1,17 @@
 """[모듈: order_route_dispatcher.py - 주문 이동 Algorithm/AI 경로 주행 배차기]
 - 역할:
   1. 일반 주문 경로(Algorithm 또는 단일 AI 경로)를 생성하여 시뮬레이션(`mock_fms`) 또는 실제 로봇(`ros_gateway`) 주행기로 전달한다.
-  2. 시뮬레이션 AI 주행에서 `FMS_SIM_MAPF_ENABLED=1`인 경우, `kev_mapf/kev_dispatcher.py`의 KEV-MAPF 실행 게이트(`dispatch_simulation_mapf`)로 위임한다.
+  2. 시뮬레이션 AI 주행에서 `FMS_SIM_MAPF_ENABLED=1`인 경우, `kev_mapf/kev_dispatcher.py`의 KEV-MAPF 실행 게이트(`dispatch_mapf`)로 위임한다.
 """
 
 from __future__ import annotations
 
 import asyncio
-import os
 
-from .kev_mapf.kev_coordinator import fms_mapf_coordinator
 from .kev_mapf.kev_dispatcher import (
-    dispatch_prepared_order_route,
-    dispatch_simulation_mapf as _dispatch_simulation_mapf,
-    prepare_order_route,
-    review_prepared_mapf_candidate,
-    validate_prepared_order_route,
+    dispatch_mapf as _dispatch_mapf,
+    mapf_enabled,
+    runtime_for,
 )
 from .mode_service import feature_engine, mode_manager
 from .route_graph import load_route_graph
@@ -33,11 +29,10 @@ async def dispatch_order_route(order, node, current_node, valid=None):
 
     # 시뮬레이션 AI 주행에서 KEV-MAPF 게이트가 활성화된 경우 kev_dispatcher로 위임
     if (
-        mode == "simulation"
-        and os.getenv("FMS_SIM_MAPF_ENABLED", "0") == "1"
+        mapf_enabled(mode)
         and feature_engine("route", operation_mode) == "ai"
     ):
-        return await _dispatch_simulation_mapf(order, node, current_node, valid=valid)
+        return await _dispatch_mapf(order, node, current_node, valid=valid)
 
     required_path = None
     result = None
@@ -70,6 +65,7 @@ async def dispatch_order_route(order, node, current_node, valid=None):
 
     if mode == "simulation":
         from .mock_data import mock_fms
+        _, coordinator = runtime_for(mode)
 
         snapshot = mock_fms.robot_snapshot(order["robot_id"], mode)
         if snapshot["goal_node"] is not None:
@@ -85,7 +81,7 @@ async def dispatch_order_route(order, node, current_node, valid=None):
             raise ValueError("경로 생성 중 로봇의 현재 위치가 변경되었습니다.")
 
         if required_path is not None:
-            fms_mapf_coordinator.stage_preview(
+            coordinator.stage_preview(
                 order=order, current_node=current_node, goal_node=node, result=result
             )
 
@@ -95,16 +91,16 @@ async def dispatch_order_route(order, node, current_node, valid=None):
             )
         except Exception:
             if required_path is not None:
-                fms_mapf_coordinator.discard_pending(order["robot_id"])
+                coordinator.discard_pending(order["robot_id"])
             raise
 
         if required_path is not None:
             try:
-                fms_mapf_coordinator.register_preview(
+                coordinator.register_preview(
                     order=order, current_node=current_node, goal_node=node, result=result
                 )
             finally:
-                fms_mapf_coordinator.discard_pending(order["robot_id"])
+                coordinator.discard_pending(order["robot_id"])
 
         return response
 
@@ -121,9 +117,4 @@ async def dispatch_order_route(order, node, current_node, valid=None):
 
 __all__ = [
     "dispatch_order_route",
-    "prepare_order_route",
-    "validate_prepared_order_route",
-    "dispatch_prepared_order_route",
-    "review_prepared_mapf_candidate",
-    "_dispatch_simulation_mapf",
 ]

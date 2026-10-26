@@ -1,14 +1,15 @@
-"""[모듈: kev_dispatcher.py - 시뮬레이션 KEV-MAPF 경로 준비·검증 및 배차 실행 게이트]
+"""[모듈: kev_dispatcher.py - 실제·시뮬레이션 KEV-MAPF 경로 준비·검증 및 배차 실행 게이트]
 - 역할:
   1. 주문의 AI 경로를 생성하여 FMS 주행 전 Pending 목록에 등록한다 (prepare_order_route).
   2. 준비된 경로의 실행 직전 상태 무결성을 검증한다 (validate_prepared_order_route).
   3. KEV-MAPF 분석 결과(우회 경로 REROUTE 포함)와 현재 FMS 상태를 대조 검증한다 (review_prepared_mapf_candidate).
-  4. Active/Pending 통합 MAPF 평가를 거쳐 FMS `navigate_to_node()`로 최종 주행을 배차한다 (dispatch_simulation_mapf).
+  4. Active/Pending 통합 MAPF 평가를 거쳐 FMS `navigate_to_node()`로 최종 주행을 배차한다 (dispatch_mapf).
 """
 
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 from copy import deepcopy
 from time import monotonic
@@ -16,21 +17,50 @@ from typing import Any
 
 from ..mode_service import feature_engine, mode_manager
 from ..route_graph import load_route_graph
-from .kev_coordinator import fms_mapf_coordinator, is_fms_reviewable_advisory
+from .kev_coordinator import FmsMapfCoordinator, is_fms_reviewable_advisory
 from .kev_graph import Graph
 from .kev_traffic import live_traffic
 
+logger = logging.getLogger("uvicorn.error")
+_coordinators = {}
+
+
+def mapf_enabled(mode=None) -> bool:
+    mode = mode_manager.mode if mode is None else mode
+    return mode == "real" or os.getenv("FMS_SIM_MAPF_ENABLED", "1") == "1"
+
+
+def runtime_for(mode):
+    if mode == "simulation":
+        from ..mock_data import mock_fms
+        store = mock_fms
+    elif mode == "real":
+        from ...ros2.ros_gateway import ros_gateway
+        store = ros_gateway.navigation
+    else:
+        raise ValueError("알 수 없는 운용 모드입니다.")
+    coordinator = _coordinators.get(mode)
+    if coordinator is None or coordinator.store is not store:
+        coordinator = _coordinators[mode] = FmsMapfCoordinator(store)
+    return store, coordinator
+
+
+def mapf_priority_mode() -> str:
+    mode = os.getenv("FMS_MAPF_PRIORITY_MODE", "score")
+    if mode != "score":
+        raise ValueError("FMS_MAPF_PRIORITY_MODE supports only score")
+    return mode
+
 
 async def prepare_order_route(order: dict, node: Any, current_node: Any, valid: Any = None) -> dict:
-    """시뮬레이션 AI 경로를 생성하고 Pending에 등록한다. FMS 주행 요청이나 예약은 수행하지 않는다."""
+    """AI 경로를 생성하고 Pending에 등록한다. FMS 주행 요청이나 예약은 수행하지 않는다."""
     from ..llm_route_preview import preview_llm_route
-    from ..mock_data import mock_fms
-
     mode = order["mode"]
+    store, c = runtime_for(mode)
     robot_id = order["robot_id"]
 
-    if mode != "simulation" or mode_manager.mode != mode:
-        raise ValueError("시뮬레이션 모드에서만 경로를 준비할 수 있습니다.")
+    if mode not in ("simulation", "real") or mode_manager.mode != mode:
+        raise ValueError("현재 운용 모드에서 경로를 준비할 수 없습니다.")
 
     operation_mode = order.get(
         "operation_mode", "ai" if order["driving_mode"] == "llm" else "algorithm"
@@ -42,7 +72,7 @@ async def prepare_order_route(order: dict, node: Any, current_node: Any, valid: 
     if valid is not None and not valid():
         raise ValueError("주문 단계가 변경되었습니다.")
 
-    before = mock_fms.robot_snapshot(robot_id, mode)
+    before = store.robot_snapshot(robot_id, mode)
     if (
         before["goal_node"] is not None
         or before.get("route") is not None
@@ -53,7 +83,7 @@ async def prepare_order_route(order: dict, node: Any, current_node: Any, valid: 
         raise ValueError("로봇이 경로 준비 가능한 정지 상태가 아닙니다.")
 
     graph = load_route_graph()
-    traffic = live_traffic(robot_id, graph=graph)
+    traffic = live_traffic(robot_id, graph=graph, snapshots=store.robot_snapshots(mode))
     try:
         result = await asyncio.to_thread(
             preview_llm_route,
@@ -72,7 +102,7 @@ async def prepare_order_route(order: dict, node: Any, current_node: Any, valid: 
     if valid is not None and not valid():
         raise ValueError("경로 생성 중 주문 단계가 변경되었습니다.")
 
-    after = mock_fms.robot_snapshot(robot_id, mode)
+    after = store.robot_snapshot(robot_id, mode)
     fields = (
         "status",
         "connection_state",
@@ -82,12 +112,15 @@ async def prepare_order_route(order: dict, node: Any, current_node: Any, valid: 
         "goal_node",
         "navigation_id",
         "route",
+        "command_epoch",
+        "execution_blocked",
     )
     if any(before.get(k) != after.get(k) for k in fields):
         raise ValueError("경로 생성 중 로봇 상태가 변경되었습니다.")
 
-    request = fms_mapf_coordinator.stage_preview(
-        order=order, current_node=current_node, goal_node=node, result=result
+    request = c.stage_preview(
+        order=order, current_node=current_node, goal_node=node, result=result,
+        execution_epoch=after.get("command_epoch"),
     )
     return {
         "graph": graph,
@@ -101,12 +134,11 @@ def validate_prepared_order_route(
     order: dict, node: Any, current_node: Any, prepared: dict, valid: Any = None
 ) -> list[str]:
     """Prepared 경로의 실행 직전 유효성을 검사한다."""
-    from ..mock_data import mock_fms
-
     robot_id = str(order["robot_id"])
     mode = order["mode"]
+    store, c = runtime_for(mode)
 
-    if mode != "simulation" or mode_manager.mode != mode:
+    if mode not in ("simulation", "real") or mode_manager.mode != mode:
         raise ValueError("운용 모드가 변경되었습니다.")
     if valid is not None and not valid():
         raise ValueError("주문 단계가 변경되었습니다.")
@@ -137,7 +169,7 @@ def validate_prepared_order_route(
     pending = next(
         (
             item
-            for item in fms_mapf_coordinator.pending_snapshot()
+            for item in c.pending_snapshot()
             if str(item["order"]["robot_id"]) == robot_id
         ),
         None,
@@ -145,48 +177,18 @@ def validate_prepared_order_route(
     if pending != request:
         raise ValueError("Pending 경로가 변경되거나 삭제되었습니다.")
 
-    snapshot = mock_fms.robot_snapshot(robot_id, mode)
+    snapshot = store.robot_snapshot(robot_id, mode)
     if (
         snapshot["status"] != "IDLE"
         or snapshot["occupied_node"] != str(current_node)
         or snapshot.get("occupied_edge") is not None
         or snapshot["goal_node"] is not None
         or snapshot.get("route") is not None
+        or ("execution_epoch" in request and request["execution_epoch"] != snapshot.get("command_epoch"))
     ):
         raise ValueError("경로 준비 이후 로봇 상태가 변경되었습니다.")
 
     return path
-
-
-def dispatch_prepared_order_route(
-    order: dict,
-    node: Any,
-    current_node: Any,
-    prepared: dict,
-    *,
-    valid: Any = None,
-    test_only: bool = False,
-) -> dict:
-    """Prepared 경로를 재생성 없이 FMS에 전달한다 (테스트 전용 헬퍼)."""
-    if not test_only:
-        raise RuntimeError("MAPF 실행 게이트가 아직 연결되지 않았습니다.")
-    if order["mode"] != "simulation":
-        raise ValueError("시뮬레이션에서만 사용할 수 있습니다.")
-
-    from ..mock_data import mock_fms
-
-    path = validate_prepared_order_route(order, node, current_node, prepared, valid=valid)
-    response = mock_fms.navigate_to_node(order["robot_id"], node, required_path=path)
-    try:
-        fms_mapf_coordinator.register_preview(
-            order=order,
-            current_node=current_node,
-            goal_node=node,
-            result=prepared["result"],
-        )
-    finally:
-        fms_mapf_coordinator.discard_pending(order["robot_id"])
-    return response
 
 
 def review_prepared_mapf_candidate(
@@ -199,6 +201,7 @@ def review_prepared_mapf_candidate(
     valid: Any = None,
 ) -> dict:
     """MAPF 실행 후보(우회 경로 REROUTE 포함)와 Prepared 경로를 검증하고 최종 주행 경로를 확정한다."""
+    store, c = runtime_for(order["mode"])
     robot_id = str(order["robot_id"])
 
     def blocked(reason: str) -> dict:
@@ -210,10 +213,10 @@ def review_prepared_mapf_candidate(
             "fms_execution_approved": False,
         }
 
-    fms_before = fms_mapf_coordinator._simulation_signature()
-    pending_before = fms_mapf_coordinator.pending_snapshot()
+    fms_before = c.state_signature()
+    pending_before = c.pending_snapshot()
 
-    policy = fms_mapf_coordinator.classify_mixed_pending_advisory(advisory)
+    policy = c.classify_mixed_pending_advisory(advisory)
     if policy["status"] != "REVIEW_ONLY":
         return blocked(policy.get("reason", "MAPF_POLICY_NOT_READY"))
     if robot_id not in advisory.get("pending_robot_ids", []):
@@ -256,8 +259,8 @@ def review_prepared_mapf_candidate(
         final_path = path
 
     if (
-        fms_before != fms_mapf_coordinator._simulation_signature()
-        or pending_before != fms_mapf_coordinator.pending_snapshot()
+        fms_before != c.state_signature()
+        or pending_before != c.pending_snapshot()
     ):
         return blocked("STATE_CHANGED_DURING_REVIEW")
 
@@ -271,17 +274,16 @@ def review_prepared_mapf_candidate(
     }
 
 
-async def dispatch_simulation_mapf(
+async def dispatch_mapf(
     order: dict, node: Any, current_node: Any, valid: Any = None
 ) -> dict:
-    """KEV-MAPF 판단(WAIT / REROUTE / HOLD) 후 FMS에 배차하는 시뮬레이션 실행 게이트."""
-    from ..mock_data import mock_fms
-
-    c = fms_mapf_coordinator
+    """KEV-MAPF 판단(WAIT / REROUTE / HOLD) 후 FMS에 배차하는 공통 실행 게이트."""
+    mode = order["mode"]
+    store, c = runtime_for(mode)
     rid = str(order["robot_id"])
 
-    with c._lock, mock_fms._lock:
-        state = mock_fms.robot_snapshot(rid, "simulation")
+    with c.transaction(store.mapf):
+        state = store.robot_snapshot(rid, mode)
         if (
             state["status"] == "IDLE"
             and state["goal_node"] is None
@@ -290,9 +292,41 @@ async def dispatch_simulation_mapf(
             c.remove(rid)
 
     prepared = await prepare_order_route(order, node, current_node, valid=valid)
+    c.admission.register(prepared["request"]["request_id"], valid)
     deadline = monotonic() + float(os.getenv("FMS_SIM_MAPF_MAX_WAIT", "180"))
     max_reroutes = int(os.getenv("FMS_MAPF_MAX_REROUTES", "3"))
     last_state = None
+    next_recovery = 0.0
+    last_analysis = None
+
+    async def recover_pending():
+        nonlocal next_recovery
+        from .kev_admission_recovery import admission_snapshot, plan_admission_recovery, apply_admission_recovery
+
+        if monotonic() < next_recovery:
+            return None
+        next_recovery = monotonic() + 2.0
+        snapshot = admission_snapshot(store, c)
+        if snapshot is None:
+            return None
+        try:
+            proposal = await asyncio.to_thread(plan_admission_recovery, prepared["graph"], snapshot)
+        except (RuntimeError, ValueError):
+            logger.exception("KEV MAPF admission recovery failed; retaining pending request")
+            return None
+        if mode_manager.mode != mode or load_route_graph() != prepared["graph"]:
+            raise ValueError("복구 추론 중 운용 모드 또는 지도가 변경되었습니다.")
+        result = apply_admission_recovery(
+            store, c, prepared["graph"], snapshot, proposal,
+            robot_id=rid, prepared=prepared, valid=valid,
+        )
+        if result is not None:
+            result["mapf"]["predeparture_advisory"] = {
+                "status": last_analysis.get("status"),
+                "decisions": last_analysis.get("decisions", []),
+                "metrics": last_analysis.get("metrics", {}),
+            } if last_analysis else {"status": "WAITING_FOR_STABLE_FLEET"}
+        return result
 
     try:
         await asyncio.sleep(0.5)
@@ -300,23 +334,35 @@ async def dispatch_simulation_mapf(
         while True:
             if valid is not None and not valid():
                 raise ValueError("주문 단계가 변경되었습니다.")
-            if mode_manager.mode != "simulation":
+            if mode_manager.mode != mode:
                 raise ValueError("운용 모드가 변경되었습니다.")
             if monotonic() > deadline:
                 raise ValueError("KEV-MAPF 배차 대기시간을 초과했습니다.")
 
-            retired = c.retire_completed_simulation_routes()
+            parallel = await c.admission.admit(store.mapf, prepared["graph"], prepared, config={
+                "max_rounds": 20, "max_reroutes": max_reroutes,
+                "priority_mode": mapf_priority_mode(),
+                "allow_proactive_hold": os.getenv("FMS_MAPF_ALLOW_HOLD", "0") == "1",
+            })
+            if parallel is not None:
+                parallel["llm_preview"] = {**prepared["result"], **parallel["llm_preview"]}
+                return parallel
+
+            retired = c.retire_completed_routes()
             if retired["status"] != "RECONCILED":
                 await asyncio.sleep(0.2)
                 continue
 
-            current_state = c._state_triplet()
+            current_state = c.state_triplet()
             if current_state == last_state:
                 await asyncio.sleep(0.2)
                 continue
 
-            mixed = c.prepare_mixed_simulation_requests()
+            mixed = c.prepare_mixed_requests()
             if mixed["issues"]:
+                recovered = await recover_pending()
+                if recovered is not None:
+                    return recovered
                 last_state = None
                 await asyncio.sleep(0.2)
                 continue
@@ -340,36 +386,56 @@ async def dispatch_simulation_mapf(
                     if req["order"]["robot_id"] in mixed["pending_robot_ids"]
                 ]
                 advisory = await asyncio.to_thread(
-                    c.evaluate_mixed_simulation_advisory,
+                    c.evaluate_mixed_advisory,
                     prepared["graph"],
                     config={
                         "wait_allowed_nodes": wait_nodes,
                         "max_rounds": 20,
                         "max_reroutes": max_reroutes,
-                        "priority_mode": os.getenv("FMS_MAPF_PRIORITY_MODE", "score"),
+                        "priority_mode": mapf_priority_mode(),
                         "allow_proactive_hold": os.getenv("FMS_MAPF_ALLOW_HOLD", "0") == "1",
                     },
                 )
+                last_analysis = advisory
+                logger.info(
+                    "KEV MAPF analysis: pending=%s active=%s status=%s decisions=%s metrics=%s",
+                    mixed["pending_robot_ids"], mixed["active_robot_ids"],
+                    advisory.get("status"), advisory.get("decisions"), advisory.get("metrics"),
+                )
                 if not is_fms_reviewable_advisory(advisory):
+                    recovered = await recover_pending()
+                    if recovered is not None:
+                        return recovered
                     last_state = None
                     await asyncio.sleep(0.2)
                     continue
 
                 policy = c.classify_mixed_pending_advisory(advisory)
+                logger.info("KEV MAPF dispatch review: robot=%s policy=%s", rid, policy)
                 if policy["status"] != "REVIEW_ONLY":
+                    recovered = await recover_pending()
+                    if recovered is not None:
+                        return recovered
                     last_state = None
                     await asyncio.sleep(0.2)
                     continue
                 if rid not in policy["fms_check_candidates"]:
+                    if not policy["fms_check_candidates"]:
+                        recovered = await recover_pending()
+                        if recovered is not None:
+                            return recovered
+                        last_state = None
+                        await asyncio.sleep(0.2)
+                        continue
                     last_state = deepcopy(current_state)
                     continue
 
-            with c._lock, mock_fms._lock:
+            with c.transaction(store.mapf):
                 if valid is not None and not valid():
                     raise ValueError("주문 단계가 변경되었습니다.")
 
                 if single:
-                    latest = c.prepare_mixed_simulation_requests()
+                    latest = c.prepare_mixed_requests()
                     if (
                         latest["issues"]
                         or len(latest["requests"]) != 1
@@ -390,7 +456,7 @@ async def dispatch_simulation_mapf(
                         continue
                     path = reviewed["required_path"]
 
-                response = mock_fms.navigate_to_node(rid, node, required_path=path)
+                response = store.navigate_to_node(rid, node, required_path=path)
                 try:
                     c.register_preview(
                         order=order,
@@ -399,11 +465,21 @@ async def dispatch_simulation_mapf(
                         result={"path": path},
                     )
                 except Exception:
-                    mock_fms.stop_robot(rid)
+                    store.stop_robot(rid)
                     c.remove(rid)
                     raise
 
                 c.discard_pending(rid)
-                return response
+                summary = {
+                    "enabled": True,
+                    "analysis_source": "SINGLE_ROBOT_NO_CONFLICT" if single else advisory["analysis_source"],
+                    "robot_count": 1 if single else advisory["robot_count"],
+                    "decisions": [] if single else advisory["decisions"],
+                    "metrics": {} if single else advisory.get("metrics", {}),
+                    "priority_mode": mapf_priority_mode(),
+                    "priority_scores": {} if single else advisory.get("priority_scores", {}),
+                }
+                logger.info("KEV MAPF dispatched: robot=%s path=%s summary=%s", rid, path, summary)
+                return dict(response, llm_preview={**prepared["result"], "path": path}, mapf=summary)
     finally:
-        c.discard_pending(rid)
+        c.finish_request(rid, prepared["request"])
