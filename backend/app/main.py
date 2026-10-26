@@ -17,11 +17,14 @@ from .routers.websocket import router as websocket_router
 from .routers.orders import router as orders_router
 from .routers.omx import router as omx_router
 from .routers.scenarios import router as scenarios_router
-from .services.scenario_service import scenario_manager
 
+from .services.scenario_service import scenario_manager
 from .services.map_service import load_map_metadata
 from .services.mode_service import mode_manager
 from .services.route_graph import load_route_graph
+from .services.websocket_manager import manager
+from .services.mqtt_manager import mqtt_manager
+
 import threading
 
 import rclpy
@@ -34,8 +37,6 @@ import asyncio
 from contextlib import suppress
 from time import monotonic, strftime
 
-from .services.websocket_manager import manager
-from .services.mqtt_manager import mqtt_manager
 
 # Uvicorn 자체 로그에도 날짜와 시각을 표시한다.
 for logger_name in ("uvicorn.error", "uvicorn.access"):
@@ -151,7 +152,7 @@ async def health():
 
 # 모의 시뮬레이션을 실행한다.
 async def run_mock_simulation() -> None:
-    interval = 0.1  # 약 10Hz
+    interval = REAL_NAVIGATION_INTERVAL_S
     previous_time = monotonic()
 
     while True:
