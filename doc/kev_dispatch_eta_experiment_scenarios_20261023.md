@@ -255,3 +255,19 @@ S0~S4 모두 D-6과 같은 결과로 통과했다. 원본 로그는 `logs/testD7
 - 2초 범위가 담는 거리는 시뮬레이션(0.2 m/s) 0.4 m, 실제 설정(0.06 m/s) 0.12 m다. S2 배치(N6까지 0.513 m와 0.822 m)는 시뮬레이션에서는 KEV 후보군이 되지만 실제 설정에서는 robot1이 ETA winner가 된다.
 - 시뮬레이션 이동(`mock_data.py`)은 구간을 일정 속도로 이동하고 회전은 yaw만 즉시 바꾼다. 실제 로봇은 회전에서 시간을 많이 쓴다(N7→N5 0.377 m, 약 105° 회전, 평균 10.7초). 거리는 비슷하고 회전 수가 다른 후보는 실제에서 순서가 뒤집힐 수 있으나, 실측은 같은 모양의 경로뿐이라 아직 확인하지 않았다.
 - 실제 로봇은 같은 경로에서도 회차마다 약 4초(robot2 18.7~22.6초) 흔들려, 거리 차이가 작은 동률 상황의 실제 도착 순서는 보장되지 않는다.
+
+## 12. D-8 S2 재확인 - 질문 ID 변경 후 (2026-10-26)
+
+로봇 배차 KEV 질문 ID를 `dispatch_{order_uuid}`에서 `dispatch_order_{queue_sequence}_retry_{retry_count}`로 바꾼 코드(`cb56d2a`)에서 S2만 다시 실행했다. 조건은 3절과 같다(`KEV_DISPATCH_ETA_SPEED_MPS=0.2`, `SIM_BATTERY_OVERRIDE="robot1=40,robot2=90,robot3=70"`, `KEV_DISPATCH_DEBUG=1`, 재시작 직후).
+
+| 항목 | D-6·D-7 | D-8 |
+| --- | --- | --- |
+| question_id | `dispatch_{order_uuid}` | `dispatch_order_1_retry_0` |
+| 후보 / 제외 | robot1·2 / robot3 | robot1·2 / robot3 |
+| 기준선 | robot2 | robot2 |
+| KEV choice | robot2 | robot2 |
+| 확률 | robot1 0.4653, robot2 0.5347 | robot1 0.4653, robot2 0.5347 |
+| confidence | 0.0695 | 0.0695 |
+| 최종 배정 / 완료 | robot2 / COMPLETED | robot2 / COMPLETED |
+
+질문 ID 변경 후에도 선택과 확률이 같았다. 원본 로그는 `logs/testD8_S2_backend.log`(git 제외).
