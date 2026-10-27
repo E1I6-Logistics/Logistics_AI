@@ -417,7 +417,9 @@ class OrderManager:
             return
         phase = row["phase"]
         if phase == "WAITING_WORKSTATION":
-            node = workstation_manager.choose(order_id, "real", row["operation_mode"])
+            node = await workstation_manager.choose_with_kev(
+                order_id, "real", row["operation_mode"], robot.robot_id, robot.current_node
+            )
             if node is None:
                 return
             with self.lock:

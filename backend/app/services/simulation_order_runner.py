@@ -218,7 +218,10 @@ class SimulationOrderRunner:
 
             order_manager.set_phase(order_id, "WAITING_WORKSTATION")
             while order_manager.is_current(order_id, robot_id, "WAITING_WORKSTATION"):
-                node = workstation_manager.choose(order_id, "simulation", order["operation_mode"])
+                snapshot = mock_fms.robot_snapshot(robot_id, "simulation")
+                node = await workstation_manager.choose_with_kev(
+                    order_id, "simulation", order["operation_mode"], robot_id, snapshot["occupied_node"]
+                )
                 if node is not None:
                     if not order_manager.is_current(order_id, robot_id, "WAITING_WORKSTATION"):
                         workstation_manager.release(order_id)

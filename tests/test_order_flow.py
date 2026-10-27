@@ -9,6 +9,7 @@ from backend.app.services.mode_service import mode_manager
 from backend.app.services.order_manager import order_manager
 from backend.app.services.simulation_order_runner import simulation_order_runner
 from backend.app.services.workstation_manager import workstation_manager
+from backend.app.services.kev_mapf.kev_workstation_dispatcher import kev_workstation_dispatcher
 
 
 @pytest.mark.parametrize("previous_phase,previous_pickups", [
@@ -58,6 +59,7 @@ def _reset(monkeypatch):
     monkeypatch.setenv("FMS_SIM_KEV_DISPATCH_ENABLED", "0")
     monkeypatch.setenv("FMS_REAL_KEV_DISPATCH_ENABLED", "0")
     order_manager._robot_dispatcher.discard()
+    monkeypatch.setenv("KEV_WORKSTATION_ENABLED", "0")
     mode_manager.set_mode("simulation", "algorithm")
     mock_fms.reset()
     order_manager.orders.clear()
@@ -66,6 +68,8 @@ def _reset(monkeypatch):
     order_manager._return_started.clear()
     order_manager._route_tasks.clear()
     workstation_manager._assigned.clear()
+    workstation_manager._assignment_history.clear()
+    kev_workstation_dispatcher._selector = None
     simulation_order_runner.tasks.clear()
     simulation_order_runner.work_seconds = 0.01
     visits = []
@@ -131,7 +135,7 @@ def test_four_operating_modes_use_feature_policies(monkeypatch, environment, ope
         assert result["feature_engines"] == {
             "route": "ai" if operation == "ai" else "algorithm",
             "dispatch": "ai" if operation == "ai" and environment == "simulation" else "algorithm",
-            "workstation": "algorithm",
+            "workstation": "ai" if operation == "ai" else "algorithm",
         }
         order = await create_order(
             CreateOrderRequest(
@@ -214,6 +218,28 @@ def test_workstation_assignment_is_unique(monkeypatch):
     assert workstation_manager.choose("third", "simulation") is None
     workstation_manager.release("first")
     assert workstation_manager.choose("third", "simulation") == "3"
+
+
+def test_ai_workstation_dispatch_uses_kev_and_reserves_one_free_node(monkeypatch):
+    _reset(monkeypatch)
+    monkeypatch.setenv("KEV_WORKSTATION_ENABLED", "1")
+    calls = []
+
+    class FakeKevSelector:
+        def select_choice(self, **kwargs):
+            calls.append(kwargs)
+            return {"choice": "4"}
+
+    kev_workstation_dispatcher._selector = FakeKevSelector()
+
+    async def scenario():
+        chosen = await workstation_manager.choose_with_kev("kev-order", "simulation", "ai", "robot1", "5")
+        assert chosen == "4"
+        assert workstation_manager._assigned == {"4": "kev-order"}
+
+    asyncio.run(scenario())
+    assert len(calls) == 1
+    assert set(calls[0]["candidates"]) == {"3", "4"}
 
 
 # 주문 완료 후 남은 대기 주문을 배차하는지 검증한다.

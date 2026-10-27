@@ -14,7 +14,7 @@ OperationMode = Literal["algorithm", "ai"]
 # Traffic and safety continue to use the existing algorithms in both modes.
 FEATURE_ENGINES = {
     "algorithm": {"route": "algorithm", "dispatch": "algorithm", "workstation": "algorithm"},
-    "ai": {"route": "ai", "dispatch": "ai", "workstation": "algorithm"},
+    "ai": {"route": "ai", "dispatch": "ai", "workstation": "ai"},
 }
 
 

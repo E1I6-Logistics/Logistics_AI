@@ -1,9 +1,13 @@
-"""N3/N4의 실제 점유와 주문별 임시 할당을 함께 관리한다."""
+"""N3/N4 컨베이어의 점유·예약과 KEV 기반 분산 선택을 함께 관리한다."""
 
+import os
 from threading import RLock
 from time import monotonic
+from collections import deque
 
 from ..config import REAL_POSE_TIMEOUT_S
+from .kev_mapf.kev_workstation_dispatcher import kev_workstation_dispatcher
+from .route_service import plan_route
 
 
 class WorkstationManager:
@@ -11,6 +15,28 @@ class WorkstationManager:
     def __init__(self):
         self._lock = RLock()
         self._assigned = {}  # node -> order_id
+        self._assignment_history = deque()  # (시각, 작업대 노드)
+
+    def _available_nodes(self, order_id, mode):
+        occupied, unknown = self._occupied(mode)
+        if unknown:
+            return []
+        return [
+            node for node in ("3", "4")
+            if node not in occupied and self._assigned.get(node) in (None, order_id)
+        ]
+
+    def _record_assignment(self, node):
+        now = monotonic()
+        window = float(os.getenv("KEV_WORKSTATION_WORKLOAD_WINDOW_SECONDS", "600"))
+        while self._assignment_history and self._assignment_history[0][0] < now - window:
+            self._assignment_history.popleft()
+        self._assignment_history.append((now, node))
+
+    def _reserve(self, order_id, node):
+        self._assigned[node] = order_id
+        self._record_assignment(node)
+        return node
 
     # 작업대가 현재 점유 중인지 확인한다.
     def _occupied(self, mode):
@@ -38,20 +64,47 @@ class WorkstationManager:
 
     # 관련을 선택한다.
     def choose(self, order_id, mode, operation_mode="algorithm"):
-        from .mode_service import feature_engine
-
-        # A future AI selector can branch here without changing traffic control.
-        if feature_engine("workstation", operation_mode) != "algorithm":
-            raise ValueError("지원하지 않는 작업대 선택 방식입니다.")
         with self._lock:
-            occupied, unknown = self._occupied(mode)
-            if unknown:
+            nodes = self._available_nodes(order_id, mode)
+            return self._reserve(order_id, nodes[0]) if nodes else None
+
+    async def choose_with_kev(self, order_id, mode, operation_mode, robot_id, current_node):
+        """AI 모드에서 비어 있는 N3/N4 중 한 곳을 KEV가 고르게 한다."""
+        if operation_mode != "ai" or os.getenv("KEV_WORKSTATION_ENABLED", "1") != "1":
+            return self.choose(order_id, mode, operation_mode)
+        with self._lock:
+            nodes = self._available_nodes(order_id, mode)
+            if len(nodes) <= 1:
+                return self._reserve(order_id, nodes[0]) if nodes else None
+            if current_node is None:
                 return None
-            for node in ("3", "4"):
-                if node not in occupied and self._assigned.get(node) in (None, order_id):
-                    self._assigned[node] = order_id
-                    return node
-            return None
+            counts = {node: sum(1 for _, assigned_node in self._assignment_history if assigned_node == node) for node in nodes}
+            distances = {node: float(plan_route(str(current_node), node)["cost"]) for node in nodes}
+            state = {
+                "order": {"order_id": order_id, "robot_id": robot_id, "current_node": str(current_node)},
+                "workstations": [
+                    {"node": node, "route_distance_m": distances[node], "recent_assignment_count": counts[node]}
+                    for node in nodes
+                ],
+            }
+            choices = {
+                node: f"node=N{node}, route_distance_m={distances[node]:.3f}, recent_assignment_count={counts[node]}"
+                for node in nodes
+            }
+
+        try:
+            chosen = await kev_workstation_dispatcher.select(state, choices, f"workstation_{order_id}")
+        except Exception:
+            # KEV 장애 시에도 N3 고정 대신 최근 작업량과 거리로 균형 있게 대체한다.
+            chosen = min(nodes, key=lambda node: (counts[node], distances[node], node))
+
+        with self._lock:
+            available = self._available_nodes(order_id, mode)
+            if chosen in available:
+                return self._reserve(order_id, chosen)
+            if not available:
+                return None
+            return self._reserve(order_id, min(available, key=lambda node: (counts.get(node, 0), distances.get(node, float("inf")), node)))
 
     # 관련을 해제한다.
     def release(self, order_id):
