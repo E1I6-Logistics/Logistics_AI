@@ -1,4 +1,4 @@
-"""명령 전 정지, 첫 노드 합류, 물리 접촉 해제와 실행 종료를 함께 검증한다."""
+"""CHARGING 전용 직진 이탈과 일반 출발의 분리, 실제 도착·실행 종료를 검증한다."""
 
 import math
 from unittest.mock import Mock
@@ -28,7 +28,7 @@ def start_exit(ctx):
     ctx.clock[0] += 1
     ctx.fleet.get_robot("robot1").pose_received_at = ctx.clock[0]
     ctx.nav.tick()
-    ctx.node.send_station_exit.assert_called_once_with("robot1", pytest.approx(.2), .03, 20.)
+    ctx.node.send_station_exit.assert_called_once_with("robot1", pytest.approx(.2), .09, 20.)
     ctx.gateway._on_dock_navigation_started("robot1")
 
 
@@ -39,7 +39,7 @@ def release(ctx):
     ctx.fleet.get_robot("robot1").pose_received_at = ctx.clock[0]
 
 
-def test_charge_exit_waits_for_contact_action_and_measured_front_node(exit_context):
+def test_charge_exit_waits_for_action_and_measured_front_node(exit_context):
     ctx = exit_context
     start_exit(ctx)
     robot = ctx.fleet.get_robot("robot1")
@@ -65,17 +65,98 @@ def test_charge_exit_waits_for_contact_action_and_measured_front_node(exit_conte
     assert ctx.sent[0]["waypoints"][0][:2] == (0, 1)
 
 
-@pytest.mark.parametrize("case", ["still_pressed", "wrong_position", "late_result", "disconnect", "stale_pose"])
+@pytest.mark.parametrize("sensor", ["on", "off", "disconnected", "reconnected"])
+def test_exit_completes_from_action_and_pose_independently_of_sensor(exit_context, sensor):
+    ctx = exit_context
+    start_exit(ctx)
+    robot = ctx.fleet.get_robot("robot1")
+    if sensor == "off":
+        release(ctx)
+    elif sensor in ("disconnected", "reconnected"):
+        ctx.mqtt._on_disconnect(None, None, 1)
+        if sensor == "reconnected":
+            ctx.mqtt._on_connect(Mock(), None, {}, 0)
+    ctx.clock[0] += .1
+    robot.update_pose(0., 0., 0.)
+    ctx.gateway.on_station_exit_result("robot1", GoalStatus.STATUS_SUCCEEDED)
+    assert not ctx.gateway._departing_docks
+    assert not ctx.nav._preparing
+    assert not ctx.cancels
+    assert robot.state == RobotState.WAITING
+    ctx.nav.tick()
+    ctx.clock[0] += 1
+    robot.pose_received_at = ctx.clock[0]
+    ctx.nav.tick()
+    assert ctx.sent
+
+
+def test_exit_requires_pose_received_after_action_result(exit_context):
+    ctx = exit_context
+    start_exit(ctx)
+    robot = ctx.fleet.get_robot("robot1")
+    robot.update_pose(0., 0., 0.)
+    ctx.clock[0] += .1
+    ctx.gateway.on_station_exit_result("robot1", GoalStatus.STATUS_SUCCEEDED)
+    assert "robot1" in ctx.nav._preparing
+    assert not ctx.sent
+    ctx.clock[0] += .1
+    robot.update_pose(0., 0., 0.)
+    ctx.gateway._tick_charging_docks()
+    assert not ctx.nav._preparing
+
+
+def test_consumed_on_cannot_recreate_charging_after_exit_or_normal_return(exit_context):
+    ctx = exit_context
+    start_exit(ctx)
+    robot = ctx.fleet.get_robot("robot1")
+    robot.update_pose(0., 0., 0.)
+    ctx.gateway.on_station_exit_result("robot1", GoalStatus.STATUS_SUCCEEDED)
+    ctx.nav.cancel_after_stop("robot1")
+    robot.goal_node = robot.navigation_type = None
+    robot.set_state(RobotState.IDLE)
+    ctx.clock[0] += .5
+    ctx.mqtt._on_message(None, None, message())  # 같은 ON의 반복 발행도 새 접촉은 아니다.
+    ctx.gateway._tick_charging_docks()
+    assert robot.state == RobotState.IDLE
+    assert not ctx.gateway._charging_docks
+    release(ctx)
+    ctx.gateway._tick_charging_docks()
+    ctx.clock[0] += .01
+    ctx.mqtt._on_message(None, None, message())
+    ctx.clock[0] += .31
+    ctx.gateway._tick_charging_docks()
+    assert robot.state == RobotState.CHARGING  # 새 OFF→ON 접촉은 다시 인식한다.
+
+
+@pytest.mark.parametrize("state", [RobotState.TASK_ASSIGNED, RobotState.WAITING,
+                                  RobotState.NAVIGATING, RobotState.UNDOCKING,
+                                  RobotState.PAUSED, RobotState.EMERGENCY_STOP])
+def test_contact_event_never_overwrites_active_work_or_stop(docking, state):
+    ctx = docking
+    robot = ctx.fleet.get_robot("robot1")
+    robot.navigation_type = robot.goal_node = None
+    if state == RobotState.PAUSED:
+        robot.pause("navigation_aborted")
+    else:
+        robot.set_state(state)
+    ctx.mqtt._on_message(None, None, message())
+    ctx.clock[0] += .31
+    ctx.gateway._tick_charging_docks()
+    assert robot.state == state
+    assert not ctx.gateway._charging_docks
+    ctx.node.send_station_exit.assert_not_called()
+
+
+@pytest.mark.parametrize("case", ["wrong_position", "late_result", "offline", "stale_pose"])
 def test_exit_failure_never_releases_robot_into_order_route(exit_context, case):
     ctx = exit_context
     start_exit(ctx)
     robot = ctx.fleet.get_robot("robot1")
-    if case != "still_pressed":
-        release(ctx)
+    release(ctx)
     if case != "wrong_position":
         robot.x = 0.
-    if case == "disconnect":
-        ctx.mqtt._on_disconnect(None, None, 1)
+    if case == "offline":
+        robot.set_connected(False)
     elif case == "stale_pose":
         robot.pose_received_at = ctx.clock[0] - 3
     elif case == "late_result":
@@ -92,11 +173,12 @@ def test_exit_failure_never_releases_robot_into_order_route(exit_context, case):
     assert ctx.nav._traffic._protected_resources["robot1"] == {("node", "0")}
 
 
-def test_startup_off_waits_without_motion_and_first_order_joins_front_node(docking, monkeypatch):
+@pytest.mark.parametrize("pose", [(-.2, 0, 0), (-.04, 0, math.pi), (0, 0, math.pi / 2)])
+def test_normal_startup_uses_existing_route_without_straight_exit(docking, monkeypatch, pose):
     ctx = docking
     robot = ctx.fleet.get_robot("robot1")
     robot.navigation_type = robot.goal_node = None
-    robot.update_pose(-.2, 0, 0)
+    robot.update_pose(*pose)
     robot.set_state(RobotState.IDLE)
     ctx.mqtt._on_message(None, None, message(status=0))
     ctx.clock[0] += .31
@@ -111,29 +193,27 @@ def test_startup_off_waits_without_motion_and_first_order_joins_front_node(docki
     ctx.clock[0] += 1
     robot.pose_received_at = ctx.clock[0]
     nav.tick()
-    ctx.node.send_station_exit.assert_called_once()
-    ctx.gateway._on_dock_navigation_started("robot1")
-    robot.x = 0.
-    ctx.gateway.on_station_exit_result("robot1", GoalStatus.STATUS_SUCCEEDED)
-    assert not nav._preparing  # 처음부터 OFF였으므로 새 OFF 전이를 요구하지 않는다.
+    ctx.node.send_station_exit.assert_not_called()
+    assert sent
+    assert not nav._preparing
     assert not ctx.gateway._unverified_docks
-    assert robot.state == RobotState.WAITING
+    assert robot.state == RobotState.NAVIGATING
 
 
-def test_startup_unknown_recovers_to_idle_after_live_off_without_redocking(docking):
+def test_unknown_or_retained_sensor_does_not_pause_idle_robot(docking):
     ctx = docking
     robot = ctx.fleet.get_robot("robot1")
     robot.navigation_type = robot.goal_node = None
     robot.set_state(RobotState.IDLE)
     ctx.gateway._tick_charging_docks()
-    assert robot.pause_reason_code == "dock_startup_sensor_wait"
+    assert robot.state == RobotState.IDLE
     ctx.mqtt._on_message(None, None, message(status=0, retain=True))
     ctx.clock[0] += 1
     ctx.gateway._tick_charging_docks()
-    assert robot.state == RobotState.PAUSED
+    assert robot.state == RobotState.IDLE
     ctx.mqtt._on_message(None, None, message(status=0))
     ctx.gateway._tick_charging_docks()
-    assert robot.state == RobotState.PAUSED  # debounce
+    assert robot.state == RobotState.IDLE
     ctx.clock[0] += .31
     ctx.gateway._tick_charging_docks()
     assert robot.state == RobotState.IDLE
@@ -141,15 +221,47 @@ def test_startup_unknown_recovers_to_idle_after_live_off_without_redocking(docki
     ctx.node.send_precision_dock.assert_not_called()
 
 
-def test_startup_pressed_does_not_silently_claim_verified_charging(docking):
+@pytest.mark.parametrize("robot_id,node,path,pose", [
+    ("robot1", "0", ["0", "2", "3"], (-.04, 0, math.pi)),
+    ("robot2", "1", ["1", "3"], (.96, 0, math.pi)),
+    ("robot3", "2", ["2", "3"], (-.04, 1, math.pi)),
+])
+def test_each_front_node_allows_normal_order_without_sensor_or_straight_heading(
+    docking, monkeypatch, robot_id, node, path, pose
+):
+    ctx = docking
+    robot = ctx.fleet.get_robot(robot_id)
+    robot.navigation_type = robot.goal_node = None
+    robot.set_state(RobotState.IDLE)
+    robot.update_pose(*pose)
+    nav, sent, _, _ = real_executor(ctx, monkeypatch, robot_id)
+    nav.refresh()
+    ctx.gateway._tick_charging_docks()
+    assert robot.occupied_node == node
+    assert robot.state == RobotState.IDLE
+    robot.assign_order("normal-order", {"A": 1}, 1, ["3"], None)
+    nav.request(robot_id, "3", NavigationType.GOAL, required_path=path)
+    ctx.clock[0] += 1
+    robot.pose_received_at = ctx.clock[0]
+    nav.tick()
+    assert sent
+    assert robot.order_id == "normal-order"
+    ctx.node.send_station_exit.assert_not_called()
+    assert not ctx.gateway._departing_docks
+
+
+def test_live_contact_reconstructs_charging_without_docking_history(docking):
     robot = docking.fleet.get_robot("robot1")
     robot.navigation_type = robot.goal_node = None
     robot.set_state(RobotState.IDLE)
     docking.mqtt._on_message(None, None, message())
     docking.clock[0] += .31
     docking.gateway._tick_charging_docks()
-    assert robot.pause_reason_code == "dock_restart_unverified"
-    assert robot.state != RobotState.CHARGING
+    assert robot.state == RobotState.CHARGING
+    assert docking.gateway.charging_dispatch_ready("robot1")
+    assert docking.gateway.docking_station_snapshots()[0]["docking_complete"]
+    docking.node.send_precision_dock.assert_not_called()
+    docking.node.send_station_exit.assert_not_called()
 
 
 @pytest.mark.parametrize("x,y,yaw", [(0.2, 0, 0), (-.2, .08, 0), (-.2, 0, math.pi), (-.5, 0, 0)])
@@ -206,7 +318,7 @@ def test_emergency_stop_waits_for_straight_action_terminal_before_releasing_stat
     assert not ctx.sent
 
 
-def test_operator_redock_request_exits_pressed_startup_before_docking(docking, monkeypatch):
+def test_contact_based_charging_exits_after_order_changes_state(docking, monkeypatch):
     ctx = docking
     robot = ctx.fleet.get_robot("robot1")
     robot.navigation_type = robot.goal_node = None
@@ -215,13 +327,16 @@ def test_operator_redock_request_exits_pressed_startup_before_docking(docking, m
     ctx.mqtt._on_message(None, None, message())
     ctx.clock[0] += .31
     ctx.gateway._tick_charging_docks()
-    assert robot.pause_reason_code == "dock_restart_unverified"
+    assert robot.state == RobotState.CHARGING
+    robot.assign_order("first-order", {"A": 1}, 1, ["3"], None)
+    assert robot.state == RobotState.TASK_ASSIGNED
     nav, sent, cancels, _ = real_executor(ctx, monkeypatch)
-    ctx.gateway._start_navigation("robot1", "0", NavigationType.CHARGING)
+    nav.request("robot1", "3", NavigationType.GOAL, required_path=["0", "2", "3"])
     ctx.clock[0] += 1
     robot.pose_received_at = ctx.clock[0]
     nav.tick()
     ctx.node.send_station_exit.assert_called_once()
+    assert robot.order_id == "first-order"
     ctx.node.send_precision_dock.assert_not_called()
     assert not sent
 

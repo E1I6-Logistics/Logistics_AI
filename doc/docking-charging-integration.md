@@ -1,5 +1,7 @@
 # ESP32 도킹·CHARGING 통합 운영 계약
 
+> 아래 내용은 최초 통합 당시의 기록이다. 시작 위치 보류·과거 도킹 이력·출발 시 OFF 필수 조건·자동 충전 복귀에 관한 현재 정책은 [CHARGING 전용 직진 이탈 설계](station-departure-20261027.md)를 따른다.
+
 기준: `origin/jhlee` `4ee9d80e9414bbeb4b703505204a22948b968944`.
 개발: `feature/jhlee-docking-integration`. 소프트웨어 테스트 완료, 실기체 검증 전.
 CHARGING은 배터리가 실제로 충전된다는 뜻이 아니라 FMS가 현재 도킹 시도의 완료를 검증했다는 뜻이다.

@@ -71,7 +71,7 @@ DOCK_ACTION_TIMEOUT_S = float(os.getenv("FMS_DOCK_ACTION_TIMEOUT_S", "60"))
 # 0: 이벤트 기반. 주기 발행이 확인됐을 때만 최대 수신 간격을 설정한다.
 DOCK_SENSOR_MAX_AGE_S = float(os.getenv("FMS_DOCK_SENSOR_MAX_AGE_S", "0"))
 # 앞 노드 합류/충전 이탈은 Nav2 DriveOnHeading으로 수행한다. 시간만으로 도착을 판정하지 않는다.
-STATION_EXIT_SPEED_MPS = float(os.getenv("FMS_STATION_EXIT_SPEED_MPS", "0.03"))
+STATION_EXIT_SPEED_MPS = float(os.getenv("FMS_STATION_EXIT_SPEED_MPS", "0.09"))
 STATION_EXIT_TIMEOUT_S = float(os.getenv("FMS_STATION_EXIT_TIMEOUT_S", "20"))
 STATION_EXIT_TOLERANCE_M = float(os.getenv("FMS_STATION_EXIT_TOLERANCE_M", "0.03"))
 STATION_EXIT_MAX_DISTANCE_M = float(os.getenv("FMS_STATION_EXIT_MAX_DISTANCE_M", "0.25"))

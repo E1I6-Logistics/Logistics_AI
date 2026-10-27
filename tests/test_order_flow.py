@@ -374,6 +374,7 @@ def test_real_dispatch_waits_for_navigation_to_finish(monkeypatch):
     robot.occupied_node = "0"
     robot.set_state(RobotState.IDLE)
     monkeypatch.setattr(fleet_manager, "get_all_robots", lambda: [robot])
+    monkeypatch.setattr(fleet_manager, "get_robot", lambda _id: robot)
     monkeypatch.setattr(ros_gateway, "navigation_active", lambda _id: True)
     assert available_robots("real", set()) == []
     monkeypatch.setattr(ros_gateway, "navigation_active", lambda _id: False)

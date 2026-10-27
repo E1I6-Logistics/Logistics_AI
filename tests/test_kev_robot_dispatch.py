@@ -93,7 +93,7 @@ def test_kev_choice_does_not_change_ai_route_or_take_locks(context, monkeypatch)
         await answer(manager)
         result = manager.get_order(public["order_id"])
         assert (result["robot_id"], result["driving_mode"], result["operation_mode"]) == ("robot3", "llm", "ai")
-        assert feature_engines("ai") == {"route": "ai", "dispatch": "ai", "workstation": "algorithm"}
+        assert feature_engines("ai") == {"route": "ai", "dispatch": "ai", "workstation": "ai"}
     asyncio.run(run())
 
 
@@ -252,7 +252,7 @@ def test_fifo_waits_for_first_response_and_never_double_assigns(context, monkeyp
 def test_environment_gate_preserves_ai_route(context, monkeypatch, real_enabled):
     monkeypatch.setenv("FMS_REAL_KEV_DISPATCH_ENABLED", real_enabled)
     assert feature_engines("ai", mode="real") == {
-        "route": "ai", "dispatch": "ai" if real_enabled == "1" else "algorithm", "workstation": "algorithm"
+        "route": "ai", "dispatch": "ai" if real_enabled == "1" else "algorithm", "workstation": "ai"
     }
     assert feature_engines("algorithm", mode="simulation")["dispatch"] == "algorithm"
 

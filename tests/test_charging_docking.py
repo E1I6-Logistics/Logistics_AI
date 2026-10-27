@@ -17,6 +17,7 @@ from tests.test_dock_mqtt import message
 @pytest.fixture
 def docking(monkeypatch):
     clock = [100.0]
+    monkeypatch.setattr("backend.app.models.robot.monotonic", lambda: clock[0])
     monkeypatch.setattr(gateway_module, "monotonic", lambda: clock[0])
     monkeypatch.setattr(mqtt_module.time, "monotonic", lambda: clock[0])
     monkeypatch.setattr(mqtt_module, "DOCK_DEBOUNCE_S", 0.3)
@@ -234,7 +235,7 @@ def test_new_order_uses_existing_stop_and_reserved_navigation(docking, monkeypat
     assert "robot1" in docking.gateway._charging_docks
 
 
-def test_departure_monitors_release_without_starting_motion_from_sensor(docking, monkeypatch):
+def test_departure_does_not_require_switch_release_or_start_motion_from_sensor(docking, monkeypatch):
     finish(docking)
     docking.gateway._on_dock_navigation_requested("robot1")
     docking.gateway._on_dock_navigation_started("robot1")
@@ -245,8 +246,9 @@ def test_departure_monitors_release_without_starting_motion_from_sensor(docking,
     docking.gateway._tick_charging_docks()
     docking.clock[0] += 11
     docking.gateway._tick_charging_docks()
-    assert robot.pause_reason_code == "dock_release_timeout"
-    stop.assert_called_once()
+    assert robot.state == RobotState.NAVIGATING
+    stop.assert_not_called()
+    docking.node.send_follow_waypoints_goal.assert_not_called()
 
 
 def test_station_api_hides_real_sensors_in_simulation(docking, monkeypatch):
@@ -276,8 +278,11 @@ def test_charging_contact_loss_never_starts_motion(docking, loss):
         docking.mqtt._on_message(None, None, message(status=0))
     else:
         docking.mqtt._on_disconnect(None, None, 1)
+    docking.clock[0] += .31
     docking.gateway._tick_charging_docks()
-    assert docking.fleet.get_robot("robot1").state == RobotState.PAUSED
+    assert docking.fleet.get_robot("robot1").state == (RobotState.IDLE if loss == "release" else RobotState.CHARGING)
+    if loss == "mqtt_disconnect":
+        assert not docking.gateway.charging_dispatch_ready("robot1")
     docking.node.send_follow_waypoints_goal.assert_not_called()
 
 
@@ -405,7 +410,7 @@ def test_charging_departure_really_reserves_the_selected_route(docking, monkeypa
 
 
 @pytest.mark.parametrize("delay", [0, 20, 120])
-def test_departure_timeout_starts_only_at_nav2_acceptance(docking, delay):
+def test_waiting_for_departure_has_no_switch_release_timeout(docking, delay):
     finish(docking)
     gateway = docking.gateway
     gateway._on_dock_navigation_requested("robot1")
@@ -422,8 +427,8 @@ def test_departure_timeout_starts_only_at_nav2_acceptance(docking, delay):
     docking.clock[0] += .2
     gateway._navigation.stop = Mock()
     gateway._tick_charging_docks()
-    assert robot.pause_reason_code == "dock_release_timeout"
-    gateway._navigation.stop.assert_called_once()
+    assert robot.state == RobotState.WAITING
+    gateway._navigation.stop.assert_not_called()
 
 
 def test_release_before_acceptance_or_repeated_level_is_not_departure_proof(docking):
@@ -440,17 +445,15 @@ def test_release_before_acceptance_or_repeated_level_is_not_departure_proof(dock
 
 
 @pytest.mark.parametrize("state", [RobotState.IDLE, RobotState.TASK_ASSIGNED])
-def test_restart_unknown_station_robot_cannot_start_order(docking, state):
+def test_normal_station_robot_does_not_require_sensor_to_start(docking, state):
     robot = docking.fleet.get_robot("robot1")
     robot.navigation_type = None
     robot.goal_node = None
     robot.set_state(state)
     docking.gateway._tick_charging_docks()
-    assert robot.pause_reason_code == "dock_startup_sensor_wait"
-    with pytest.raises(ValueError):
-        docking.gateway._validate_dock_departure("robot1")
-    with pytest.raises(ValueError):
-        docking.gateway.cmd_vel("robot1", .1, 0)
+    assert robot.state == state
+    docking.gateway._validate_dock_departure("robot1")
+    assert not docking.gateway._departing_docks
     docking.node.send_follow_waypoints_goal.assert_not_called()
 
 
@@ -461,33 +464,35 @@ def test_invalid_battery_blocks_charging_dispatch(docking, battery):
     assert not docking.gateway.charging_dispatch_ready("robot1")
 
 
-def test_contact_lost_then_reconnect_does_not_restore_automatic_departure(docking):
+def test_stable_contact_release_does_not_leave_docking_history_block(docking):
     finish(docking)
     docking.mqtt._on_message(None, None, message(status=0))
+    docking.clock[0] += .31
     docking.gateway._tick_charging_docks()
     robot = docking.fleet.get_robot("robot1")
     robot.set_connected(False)
     robot.set_connected(True)
-    with pytest.raises(ValueError):
-        docking.gateway._validate_dock_departure("robot1")
+    assert robot.state == RobotState.IDLE
+    docking.gateway._validate_dock_departure("robot1")
+    assert not docking.gateway._charging_docks
 
 
-def real_executor(ctx, monkeypatch):
+def real_executor(ctx, monkeypatch, robot_id="robot1"):
     from backend.app.services import real_navigation
     from backend.app.services.reservation import ReservationTable
     from tests.test_fixed_route_reservation import graph
-    robot = ctx.fleet.get_robot("robot1")
+    robot = ctx.fleet.get_robot(robot_id)
     robot.pose_received_at = ctx.clock[0]
     if robot.state == RobotState.CHARGING:
         robot.update_pose(-.2, 0., 0.)
         robot.pose_received_at = ctx.clock[0]
-    ctx.fleet._robots = {"robot1": robot}
+    ctx.fleet._robots = {robot_id: robot}
     sent, cancels = [], []
     nav = real_navigation.RealNavigation(
         ctx.fleet, lambda **kw: sent.append(kw),
         lambda rid, callback: cancels.append((rid, callback)), Mock(), {}, .15,
         reservations=ReservationTable(), clock=lambda: ctx.clock[0],
-        station_nodes={"robot1": "0"}, mapf_ready=lambda _: True,
+        station_nodes=gateway_module.CHARGING_STATION_NODES, mapf_ready=lambda _: True,
         before_send=ctx.gateway._before_dock_navigation_send,
         departure_ready=ctx.gateway._dock_planning_ready,
         before_request=ctx.gateway._validate_dock_departure,
@@ -530,7 +535,7 @@ def test_charging_atomic_mapf_rejects_reconnected_sensor(docking, monkeypatch):
     assert not nav._traffic._reservations.snapshot()
 
 
-def test_sensor_failure_during_departure_preserves_reservation_until_terminal(docking, monkeypatch):
+def test_sensor_failure_during_departure_does_not_cancel_exit_or_drop_reservation(docking, monkeypatch):
     finish(docking)
     nav, sent, cancels, graph = real_executor(docking, monkeypatch)
     nav.request("robot1", "3", NavigationType.GOAL, required_path=["0", "2", "3"])
@@ -545,25 +550,28 @@ def test_sensor_failure_during_departure_preserves_reservation_until_terminal(do
     docking.gateway._tick_charging_docks()
     assert nav._traffic._reservations.snapshot() == before
     assert "robot1" in nav._preparing
-    assert cancels
-    cancels[-1][1]()
-    assert "robot1" not in nav._requests
+    assert not cancels
+    docking.fleet.get_robot("robot1").x = 0.
+    docking.gateway.on_station_exit_result("robot1", GoalStatus.STATUS_SUCCEEDED)
+    assert not nav._preparing
+    assert "robot1" in nav._requests
     assert "robot1" not in nav._executing
     assert nav._robots["robot1"]["occupied_node"] == "0"
 
 
-def test_sensor_failure_while_waiting_prevents_goal_send(docking, monkeypatch):
+def test_sensor_failure_after_departure_admission_still_starts_only_straight_action(docking, monkeypatch):
     finish(docking)
     nav, sent, cancels, graph = real_executor(docking, monkeypatch)
     nav.request("robot1", "3", NavigationType.GOAL, required_path=["0", "2", "3"])
-    before = nav._traffic._reservations.snapshot()
     docking.mqtt._on_disconnect(None, None, 1)
     docking.clock[0] += 1
     docking.fleet.get_robot("robot1").pose_received_at = docking.clock[0]
     nav.tick()
     assert not sent
-    assert cancels
-    assert nav._traffic._reservations.snapshot() == before
+    assert not cancels
+    docking.node.send_station_exit.assert_called_once()
+    assert "robot1" in nav._preparing
+    assert nav._traffic._protected_resources["robot1"] == {("node", "0")}
 
 
 def test_failed_departure_can_redock_only_after_stop_confirmation(docking, monkeypatch):
@@ -574,7 +582,7 @@ def test_failed_departure_can_redock_only_after_stop_confirmation(docking, monke
     docking.fleet.get_robot("robot1").pose_received_at = docking.clock[0]
     nav.tick()
     docking.gateway._on_dock_navigation_started("robot1")
-    docking.clock[0] += 10.1
+    docking.clock[0] += 20.1
     robot = docking.fleet.get_robot("robot1")
     robot.pose_received_at = docking.clock[0]
     docking.gateway._tick_charging_docks()
@@ -592,7 +600,6 @@ def test_mapf_order_return_does_not_request_docking(docking, monkeypatch):
     robot.navigation_type = robot.goal_node = None
     robot.occupied_node = "3"
     robot.set_state(RobotState.IDLE)
-    docking.gateway._dock_startup_checked.add("robot1")
     nav, sent, cancels, graph = real_executor(docking, monkeypatch)
     robot.x, robot.y = 2., 0.
     monkeypatch.setattr(order_manager, "returning", {"robot1": "old-order"})
@@ -742,9 +749,24 @@ def test_failed_action_keeps_departure_block_even_after_emergency_release(dockin
     robot.set_state(RobotState.EMERGENCY_STOP)
     result = docking.gateway.emergency_release("robot1")
     assert result["state"] == "PAUSED"
-    assert robot.pause_reason_code == "dock_restart_unverified"
+    assert robot.pause_reason_code == "dock_recovery_required"
     with pytest.raises(ValueError):
         docking.gateway._validate_dock_departure("robot1")
+
+
+def test_emergency_stop_during_precision_docking_requires_explicit_recovery(docking):
+    begin(docking)
+    terminal_callbacks = []
+    docking.node.cancel_follow_waypoints.side_effect = lambda rid, callback: terminal_callbacks.append(callback)
+    docking.gateway.emergency_stop("robot1")
+    assert not docking.gateway._dock_attempts
+    with pytest.raises(ValueError, match="취소 종료"):
+        docking.gateway.emergency_release("robot1")
+    terminal_callbacks[-1]()
+    result = docking.gateway.emergency_release("robot1")
+    assert result["state"] == "PAUSED"
+    assert docking.fleet.get_robot("robot1").pause_reason_code == "dock_recovery_required"
+    docking.node.send_station_exit.assert_not_called()
 
 
 def test_real_dispatch_acquires_navigation_lock_before_order_lock(docking, monkeypatch):
