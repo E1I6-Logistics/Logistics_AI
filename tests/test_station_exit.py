@@ -264,7 +264,7 @@ def test_live_contact_reconstructs_charging_without_docking_history(docking):
     docking.node.send_station_exit.assert_not_called()
 
 
-@pytest.mark.parametrize("x,y,yaw", [(0.2, 0, 0), (-.2, .08, 0), (-.2, 0, math.pi), (-.5, 0, 0)])
+@pytest.mark.parametrize("x,y,yaw", [(0.2, 0, 0), (-.2, 0, math.pi), (-.5, 0, 0)])
 def test_wrong_start_geometry_does_not_start_straight_motion(exit_context, x, y, yaw):
     robot = exit_context.fleet.get_robot("robot1")
     robot.update_pose(x, y, yaw)
@@ -272,6 +272,26 @@ def test_wrong_start_geometry_does_not_start_straight_motion(exit_context, x, y,
     with pytest.raises(ValueError):
         forward_distance(robot, (0, 0), exit_context.clock[0])
     exit_context.node.send_station_exit.assert_not_called()
+
+
+@pytest.mark.parametrize("pose", [(-.2, -.08, 0), (-.2, 0, math.radians(20))])
+def test_exit_does_not_reject_lateral_or_heading_thresholds(exit_context, pose):
+    ctx = exit_context
+    robot = ctx.fleet.get_robot("robot1")
+    robot.update_pose(*pose)
+    ctx.nav.request("robot1", "3", NavigationType.GOAL, required_path=["0", "2", "3"])
+    ctx.clock[0] += 1
+    robot.pose_received_at = ctx.clock[0]
+    ctx.nav.tick()
+    ctx.node.send_station_exit.assert_called_once()
+    assert not ctx.sent
+    assert robot.state == RobotState.UNDOCKING
+    ctx.gateway.on_station_exit_result("robot1", GoalStatus.STATUS_SUCCEEDED)
+    ctx.clock[0] += 1.01
+    robot.pose_received_at = ctx.clock[0]
+    ctx.gateway._tick_charging_docks()
+    assert robot.state == RobotState.PAUSED  # 출발 문턱을 없애도 앞 노드 도착을 가정하지 않는다.
+    assert not ctx.sent
 
 
 def test_exit_action_cancel_is_held_until_terminal_and_ignores_stale_response():

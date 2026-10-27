@@ -2,10 +2,7 @@
 
 import math
 
-from ..config import (
-    STATION_EXIT_MAX_DISTANCE_M, STATION_EXIT_MAX_HEADING_DEG,
-    STATION_EXIT_TOLERANCE_M,
-)
+from ..config import STATION_EXIT_MAX_DISTANCE_M, STATION_EXIT_TOLERANCE_M
 from .real_navigation import measured_distance
 
 
@@ -25,8 +22,8 @@ def forward_distance(robot, target, now):
         raise StationExitError("로봇 방향을 확인할 수 없습니다.")
     dx, dy = target[0] - x, target[1] - y
     forward = dx * math.cos(yaw) + dy * math.sin(yaw)
-    lateral = abs(-dx * math.sin(yaw) + dy * math.cos(yaw))
-    angle = abs(math.atan2(lateral, forward))
-    if forward <= 0 or lateral > STATION_EXIT_TOLERANCE_M or angle > math.radians(STATION_EXIT_MAX_HEADING_DEG):
-        raise StationExitError("앞 노드가 직진 가능한 방향에 없습니다. 초기 위치·방향을 확인하세요.")
+    # 도킹 자세가 앞 노드를 향한다는 운영 전제에 따라 별도 횡오차·각도 문턱은 두지 않는다.
+    # 전진 성분만 요청하고, 실제 앞 노드 도착은 Action 종료 후 원본 Pose로 확인한다.
+    if forward <= 0:
+        raise StationExitError("앞 노드가 로봇의 전방에 없습니다. 초기 위치·방향을 확인하세요.")
     return forward

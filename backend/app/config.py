@@ -75,11 +75,10 @@ STATION_EXIT_SPEED_MPS = float(os.getenv("FMS_STATION_EXIT_SPEED_MPS", "0.09"))
 STATION_EXIT_TIMEOUT_S = float(os.getenv("FMS_STATION_EXIT_TIMEOUT_S", "20"))
 STATION_EXIT_TOLERANCE_M = float(os.getenv("FMS_STATION_EXIT_TOLERANCE_M", "0.03"))
 STATION_EXIT_MAX_DISTANCE_M = float(os.getenv("FMS_STATION_EXIT_MAX_DISTANCE_M", "0.25"))
-STATION_EXIT_MAX_HEADING_DEG = float(os.getenv("FMS_STATION_EXIT_MAX_HEADING_DEG", "15"))
 if any(not math.isfinite(value) or value <= 0 for value in (
     STATION_EXIT_SPEED_MPS, STATION_EXIT_TIMEOUT_S, STATION_EXIT_TOLERANCE_M,
-    STATION_EXIT_MAX_DISTANCE_M, STATION_EXIT_MAX_HEADING_DEG,
-)) or STATION_EXIT_TOLERANCE_M >= STATION_EXIT_MAX_DISTANCE_M or STATION_EXIT_MAX_HEADING_DEG >= 90:
+    STATION_EXIT_MAX_DISTANCE_M,
+)) or STATION_EXIT_TOLERANCE_M >= STATION_EXIT_MAX_DISTANCE_M:
     raise ValueError("Station exit limits must be finite, positive and geometrically valid")
 if any(not math.isfinite(value) or value < 0 for value in (DOCK_DEBOUNCE_S, DOCK_SENSOR_MAX_AGE_S)):
     raise ValueError("Dock debounce and sensor maximum age must be finite and nonnegative")

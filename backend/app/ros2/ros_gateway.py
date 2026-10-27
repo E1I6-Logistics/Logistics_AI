@@ -112,6 +112,7 @@ class RosGateway:
         self._departing_docks = {}
         self._consumed_contacts = {}  # 출발에 사용한 ON이 뒤늦게 CHARGING을 다시 만들지 못하게 한다.
         self._unverified_docks = set()  # 실제 도킹/이탈 실패만 보류한다. 시작 위치는 보류하지 않는다.
+        self._station_exit_manual_ready = set()  # 이탈 실패 후 기존 Action의 종료가 확인된 로봇
         self._navigation = RealNavigation(
             fleet_manager,
             lambda **kwargs: self._ros_node.send_follow_waypoints_goal(**kwargs),
@@ -364,6 +365,7 @@ class RosGateway:
             return False
 
     def _on_dock_navigation_requested(self, robot_id):
+        self._station_exit_manual_ready.discard(robot_id)
         if robot_id in self._departing_docks:
             if robot_id in self._navigation._robots:
                 self._navigation.protect_station_exit(robot_id)
@@ -428,6 +430,7 @@ class RosGateway:
         self._tick_charging_docks()
 
     def _fail_station_exit(self, robot_id, reason):
+        self._station_exit_manual_ready.discard(robot_id)
         departure = self._departing_docks[robot_id]
         departure["stop_requested"] = True
         self._unverified_docks.add(robot_id)
@@ -438,6 +441,16 @@ class RosGateway:
 
     def _cancel_navigation_goal(self, robot_id, callback):
         """직진 Action도 terminal result가 확인되어야 기존 Nav2 정지가 완료된다."""
+        robot = fleet_manager.get_robot(robot_id)
+        failed_exit = robot is not None and robot.pause_reason_code == "station_exit_failed"
+
+        def navigation_stopped():
+            callback()
+            if failed_exit and robot.state in (RobotState.PAUSED, RobotState.EMERGENCY_STOP):
+                # 취소 수락이나 시간 초과가 아닌 실제 종료 콜백에서만 수동 복구를 허용한다.
+                self._unverified_docks.add(robot_id)
+                self._station_exit_manual_ready.add(robot_id)
+
         def stopped_auxiliary():
             departure = self._departing_docks.pop(robot_id, None)
             if departure is not None:
@@ -446,7 +459,7 @@ class RosGateway:
                     self._consumed_contacts.pop(robot_id, None)
                 else:
                     self._unverified_docks.add(robot_id)
-            self._ros_node.cancel_follow_waypoints(robot_id, callback=callback)
+            self._ros_node.cancel_follow_waypoints(robot_id, callback=navigation_stopped)
         if self._ros_node.has_active_auxiliary(robot_id):
             self._ros_node.cancel_auxiliary(robot_id, callback=stopped_auxiliary)
         else:
@@ -609,23 +622,44 @@ class RosGateway:
         self._sync_dock_contact(robot_id)
         if not math.isfinite(linear_x) or not math.isfinite(angular_z):
             raise ValueError("속도 명령은 유한한 값이어야 합니다.")
-        if (robot_id in self._charging_docks or robot_id in self._departing_docks
-                or robot.state == RobotState.CHARGING or robot_id in self._unverified_docks):
-            if linear_x or angular_z:
-                raise ValueError("도킹 로봇은 검증된 경로 주행 또는 재도킹으로 출발하세요.")
-            self._ros_node.publish_cmd_vel(robot_id=robot_id, linear_x=0.0, angular_z=0.0)
-            return {"type": "cmd_vel_ack", "robot_id": robot_id, "source": "ros2"}
-        active = (
+        manual_recovery = (
+            robot.state == RobotState.PAUSED and robot_id in self._station_exit_manual_ready
+        )
+        execution_active = (
             robot_id in self._navigation._executing
             or robot_id in self._navigation._stopping
+            or robot_id in self._navigation._preparing
             or robot_id in self._navigation._arrivals
-            or robot.state in (RobotState.DOCKING, RobotState.TASK_ASSIGNED)
-            or (robot.order_id is not None and robot.state == RobotState.WAITING)
+            or robot_id in self._departing_docks
+            or robot_id in self._dock_attempts
+            or robot_id in self._waiting_omx
+            or self._ros_node.has_active_auxiliary(robot_id)
+        )
+        if manual_recovery and (linear_x or angular_z):
+            if execution_active:
+                raise ValueError(f"자동 동작 종료를 기다리고 있습니다: {robot_id}")
+            # 종료된 액션의 경로 의도만 정리한다. 점유가 미확정이면 기존 예약은 보존한다.
+            if (self.navigation_active(robot_id)
+                    or robot_id in self._navigation._traffic._pending):
+                self._navigation.cancel_after_stop(robot_id)
+            robot.goal_node = robot.route = robot.navigation_type = None
+        active = (
+            execution_active
+            or (not manual_recovery and (
+                self.navigation_active(robot_id)
+                or robot_id in self._navigation._cancelled
+                or robot_id in self._navigation._traffic._pending
+                or robot.state in (RobotState.DOCKING, RobotState.UNDOCKING, RobotState.TASK_ASSIGNED)
+                or robot.order_id is not None or robot.navigation_type is not None
+                or robot.goal_node is not None or robot.route is not None
+            ))
         )
         if active and (linear_x != 0.0 or angular_z != 0.0):
             raise ValueError(f"자동 동작 중입니다. 먼저 정지해야 합니다: {robot_id}")
-        can_update = not active
-        if robot_id in self._navigation._robots:
+        if robot_id in self._unverified_docks and (linear_x or angular_z) and not manual_recovery:
+            raise ValueError("도킹 또는 이탈 실패 후에는 충전소 복귀 명령으로 복구하세요.")
+        can_update = not active and robot_id not in self._unverified_docks and not manual_recovery
+        if robot_id in self._navigation._robots and not manual_recovery:
             can_update = (
                 self._navigation._traffic.validate_manual_velocity(robot_id, linear_x, angular_z) and can_update
             )
@@ -634,8 +668,13 @@ class RosGateway:
         if not can_update:
             pass
         elif linear_x == 0.0 and angular_z == 0.0:
-            robot.set_state(RobotState.IDLE)
+            # 수동으로 잠깐 움직였다고 자동 이탈을 완료한 것으로 간주하지 않는다.
+            # 접촉이 남아 있으면 CHARGING, 안정된 OFF이면 기존 동기화로 IDLE이 된다.
+            charging = robot_id in self._charging_docks or robot.state == RobotState.CHARGING
+            robot.set_state(RobotState.CHARGING if charging else RobotState.IDLE)
+            self._sync_dock_contact(robot_id)
         else:
+            # 접촉 문맥은 보존한다. 수동 조작 중 센서 ON이 MOVING을 덮어쓰지 않는다.
             robot.set_state(RobotState.MOVING)
 
         return {
@@ -891,6 +930,7 @@ class RosGateway:
         # 기존 이동 목적과 최종 도착 이후의 시퀀스는 Robot에 유지한다.
         try:
             if navigation_type == NavigationType.CHARGING and robot_id in self._unverified_docks:
+                self._station_exit_manual_ready.discard(robot_id)
                 self._charging_docks.pop(robot_id, None)
                 self._departing_docks.pop(robot_id, None)
                 self._unverified_docks.discard(robot_id)

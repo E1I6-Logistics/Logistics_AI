@@ -182,12 +182,13 @@ def test_workstation_aruco_does_not_require_charging_sensor(docking):
     assert robot.state == RobotState.IDLE
 
 
-def test_charging_zero_velocity_keeps_state_and_nonzero_is_rejected(docking):
+def test_charging_zero_velocity_keeps_state_and_manual_motion_is_allowed(docking):
     finish(docking)
     docking.gateway.cmd_vel("robot1", 0, 0)
     assert docking.fleet.get_robot("robot1").state == RobotState.CHARGING
-    with pytest.raises(ValueError):
-        docking.gateway.cmd_vel("robot1", 0.1, 0)
+    docking.gateway.cmd_vel("robot1", 0.1, 0)
+    assert docking.fleet.get_robot("robot1").state == RobotState.MOVING
+    docking.node.publish_cmd_vel.assert_called_with(robot_id="robot1", linear_x=0.1, angular_z=0)
 
 
 def test_already_docked_charging_command_does_not_redock(docking):
