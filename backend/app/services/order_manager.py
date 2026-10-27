@@ -468,7 +468,7 @@ class OrderManager:
             row = self.orders.get(order_id)
             robot = fleet_manager.get_robot(robot_id)
             if row and row["status"] == "CANCELLED" and row.get("recovery_status") == "BLOCKED" and robot and robot.connected:
-                if robot.occupied_node == CHARGING_STATION_NODES.get(robot_id) and robot.state == RobotState.CHARGING and not ros_gateway.navigation_active(robot_id):
+                if robot.occupied_node == CHARGING_STATION_NODES.get(robot_id) and robot.state == RobotState.IDLE and not ros_gateway.navigation_active(robot_id):
                     self.recovering.pop(robot_id, None)
                     row["recovery_status"] = "RETURNED"
                     robot.returning = False
@@ -481,7 +481,7 @@ class OrderManager:
             row = self.orders[order_id]
             if (
                 robot.occupied_node == station
-                and robot.state == RobotState.CHARGING
+                and robot.state == RobotState.IDLE
                 and not ros_gateway.navigation_active(robot_id)
             ):
                 self.returning.pop(robot_id, None)
@@ -498,7 +498,7 @@ class OrderManager:
                 self._return_started.add(robot_id)
                 self._route_tasks[key] = asyncio.create_task(self._return_real(robot_id, station, key))
 
-    # 실제 로봇의 충전소 복귀를 요청한다.
+    # 주문 후에는 앞 노드로만 복귀한다. 정밀 도킹은 명시적인 충전 명령 전용이다.
     async def _return_real(self, robot_id, station, key):
         order_id = self.returning.get(robot_id)
         if order_id is None:
@@ -513,8 +513,7 @@ class OrderManager:
             if row["status"] == "CANCELLED":
                 route_order = dict(row, operation_mode="algorithm", driving_mode="standard")
             await dispatch_order_route(
-                route_order, station, robot.occupied_node, valid=lambda: self.returning.get(robot_id) == order_id,
-                charging_return=True
+                route_order, station, robot.occupied_node, valid=lambda: self.returning.get(robot_id) == order_id
             )
         except Exception as exc:
             self.returning.pop(robot_id, None)

@@ -275,6 +275,8 @@ class MQTTManager:
             "trusted": trusted,
             "age_s": age,
             "stable": bool(trusted and contact_since is not None and now - contact_since >= DOCK_DEBOUNCE_S),
+            "released_stable": bool(trusted and sample.get("status") == 0
+                                    and now - sample.get("state_since", now) >= DOCK_DEBOUNCE_S),
             "freshness_policy": "expiry" if DOCK_SENSOR_MAX_AGE_S > 0 else "event",
         }
 

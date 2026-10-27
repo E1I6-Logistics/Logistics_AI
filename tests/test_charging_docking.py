@@ -281,17 +281,18 @@ def test_charging_contact_loss_never_starts_motion(docking, loss):
     docking.node.send_follow_waypoints_goal.assert_not_called()
 
 
-def test_verified_release_clears_departure_monitor(docking):
+def test_verified_release_alone_does_not_complete_station_exit(docking):
     finish(docking)
     docking.gateway._on_dock_navigation_requested("robot1")
     docking.gateway._on_dock_navigation_started("robot1")
     docking.fleet.get_robot("robot1").set_state(RobotState.NAVIGATING)
     docking.mqtt._on_message(None, None, message(status=0))
     docking.gateway._tick_charging_docks()
-    assert not docking.gateway._departing_docks
+    assert "robot1" in docking.gateway._departing_docks
+    docking.node.send_follow_waypoints_goal.assert_not_called()
 
 
-def test_return_is_not_completed_at_idle_station_or_before_contact(docking, monkeypatch):
+def test_order_return_completes_at_idle_front_node_without_docking(docking, monkeypatch):
     from backend.app.services import order_manager as order_module
     manager = order_module.OrderManager()
     monkeypatch.setattr(order_module, "fleet_manager", docking.fleet)
@@ -304,27 +305,24 @@ def test_return_is_not_completed_at_idle_station_or_before_contact(docking, monk
     robot = docking.fleet.get_robot("robot1")
     robot.set_state(RobotState.IDLE)
     asyncio.run(manager._tick_real_returns())
-    assert row["phase"] == "RETURNING"
-    robot.set_state(RobotState.NAVIGATING)
-    finish(docking)
-    asyncio.run(manager._tick_real_returns())
     assert row["phase"] == "COMPLETED"
     assert not manager.returning
+    docking.node.send_precision_dock.assert_not_called()
 
 
-def test_return_route_keeps_required_path_and_explicit_charging_purpose(docking, monkeypatch):
+def test_return_route_uses_normal_node_navigation(docking, monkeypatch):
     from backend.app.services import order_route_dispatcher as dispatcher
     from backend.app.services.fleet_manager import fleet_manager
     monkeypatch.setattr(dispatcher, "mode_manager", SimpleNamespace(mode="real"))
     monkeypatch.setattr(gateway_module, "ros_gateway", docking.gateway)
     monkeypatch.setattr(fleet_manager, "get_robot", docking.fleet.get_robot)
     monkeypatch.setattr(dispatcher, "load_route_graph", lambda: {})
-    # Algorithm 경로를 선택한 자동 복귀가 동일 주행 API에 충전 목적만 추가한다.
+    # 자동 복귀는 일반 노드 이동이며 충전 목적을 추가하지 않는다.
     navigate = Mock()
     monkeypatch.setattr(docking.gateway, "navigate_to_node", navigate)
     order = {"mode": "real", "robot_id": "robot1", "operation_mode": "algorithm", "driving_mode": "standard"}
-    asyncio.run(dispatcher.dispatch_order_route(order, "0", "0", charging_return=True))
-    navigate.assert_called_once_with("robot1", "0", _order_step=True, required_path=None, _charging_return=True)
+    asyncio.run(dispatcher.dispatch_order_route(order, "0", "0"))
+    navigate.assert_called_once_with("robot1", "0", _order_step=True, required_path=None)
 
 
 def test_order_retry_preference_cannot_override_idle_priority(docking, monkeypatch):
@@ -448,7 +446,7 @@ def test_restart_unknown_station_robot_cannot_start_order(docking, state):
     robot.goal_node = None
     robot.set_state(state)
     docking.gateway._tick_charging_docks()
-    assert robot.pause_reason_code == "dock_restart_unverified"
+    assert robot.pause_reason_code == "dock_startup_sensor_wait"
     with pytest.raises(ValueError):
         docking.gateway._validate_dock_departure("robot1")
     with pytest.raises(ValueError):
@@ -480,6 +478,9 @@ def real_executor(ctx, monkeypatch):
     from tests.test_fixed_route_reservation import graph
     robot = ctx.fleet.get_robot("robot1")
     robot.pose_received_at = ctx.clock[0]
+    if robot.state == RobotState.CHARGING:
+        robot.update_pose(-.2, 0., 0.)
+        robot.pose_received_at = ctx.clock[0]
     ctx.fleet._robots = {"robot1": robot}
     sent, cancels = [], []
     nav = real_navigation.RealNavigation(
@@ -536,13 +537,14 @@ def test_sensor_failure_during_departure_preserves_reservation_until_terminal(do
     docking.clock[0] += 1
     docking.fleet.get_robot("robot1").pose_received_at = docking.clock[0]
     nav.tick()
-    assert sent
+    assert not sent
+    docking.node.send_station_exit.assert_called_once()
     docking.gateway._on_dock_navigation_started("robot1")
     before = nav._traffic._reservations.snapshot()
     docking.mqtt._on_disconnect(None, None, 1)
     docking.gateway._tick_charging_docks()
     assert nav._traffic._reservations.snapshot() == before
-    assert "robot1" in nav._executing
+    assert "robot1" in nav._preparing
     assert cancels
     cancels[-1][1]()
     assert "robot1" not in nav._requests
@@ -578,12 +580,12 @@ def test_failed_departure_can_redock_only_after_stop_confirmation(docking, monke
     docking.gateway._tick_charging_docks()
     docking.gateway.navigate_to_charging_station("robot1")
     # New return replaces the after-stop callback, but cannot send before terminal.
-    assert len(sent) == 1
+    assert not sent
     cancels[-1][1]()
     assert nav._requests["robot1"][1] == NavigationType.CHARGING
 
 
-def test_mapf_return_preserves_charging_purpose(docking, monkeypatch):
+def test_mapf_order_return_does_not_request_docking(docking, monkeypatch):
     from backend.app.services.order_manager import order_manager
     from backend.app.services.mode_service import mode_manager
     robot = docking.fleet.get_robot("robot1")
@@ -600,12 +602,12 @@ def test_mapf_return_preserves_charging_purpose(docking, monkeypatch):
     monkeypatch.setattr("backend.app.services.real_navigation.load_route_graph", lambda: graph)
     response = nav.mapf.commit_routes(graph, {"robot1": {"node": "0"}}, {"robot1": ["3", "1", "0"]}, {"robot1": []}, ["robot1"], now=docking.clock[0])
     assert response
-    assert nav._requests["robot1"][1] == NavigationType.CHARGING
-    assert docking.fleet.get_robot("robot1").navigation_type == NavigationType.CHARGING
+    assert nav._requests["robot1"][1] == NavigationType.GOAL
+    assert docking.fleet.get_robot("robot1").navigation_type == NavigationType.GOAL
     assert not sent
 
 
-def test_short_departure_waits_for_release_before_aruco_or_omx(docking):
+def test_early_route_result_and_switch_release_cannot_skip_exit_action(docking):
     finish(docking)
     gateway = docking.gateway
     gateway._on_dock_navigation_requested("robot1")
@@ -615,14 +617,16 @@ def test_short_departure_waits_for_release_before_aruco_or_omx(docking):
     robot.navigation_type = NavigationType.GOAL
     gateway.on_navigation_result("robot1", GoalStatus.STATUS_SUCCEEDED)
     docking.node.send_aruco_align.assert_not_called()
-    assert robot.state == RobotState.DOCKING
+    assert robot.state == RobotState.PAUSED
     docking.clock[0] += 1
     docking.mqtt._on_message(None, None, message(status=0))
     gateway._tick_charging_docks()
-    docking.node.send_aruco_align.assert_called_once_with(robot_id="robot1", marker_id=24)
+    docking.node.send_aruco_align.assert_not_called()
+    assert robot.state == RobotState.PAUSED
+    assert "robot1" in gateway._unverified_docks
 
 
-def test_arrival_waiting_for_release_times_out_without_followup(docking, monkeypatch):
+def test_unexpected_navigation_result_during_exit_stops_without_followup(docking, monkeypatch):
     finish(docking)
     gateway = docking.gateway
     gateway._on_dock_navigation_requested("robot1")
@@ -630,11 +634,11 @@ def test_arrival_waiting_for_release_times_out_without_followup(docking, monkeyp
     robot = docking.fleet.get_robot("robot1")
     robot.goal_node = "5"
     robot.navigation_type = NavigationType.GOAL
-    gateway.on_navigation_result("robot1", GoalStatus.STATUS_SUCCEEDED)
     monkeypatch.setattr(gateway._navigation, "stop", Mock())
+    gateway.on_navigation_result("robot1", GoalStatus.STATUS_SUCCEEDED)
     docking.clock[0] += 11
     gateway._tick_charging_docks()
-    assert robot.pause_reason_code == "dock_release_timeout"
+    assert robot.pause_reason_code == "station_exit_failed"
     docking.node.send_aruco_align.assert_not_called()
     gateway._navigation.stop.assert_called_once()
 
@@ -656,7 +660,7 @@ def test_three_charging_robots_use_atomic_reservations_and_redock(docking, monke
                                       "properties": {"id": f"{a}-{b}", "startid": a, "endid": b, "weight": 6}})
     nodes = DistanceAStar(graph).nodes
     for i, robot in enumerate(docking.fleet.get_all_robots()):
-        robot.x, robot.y = nodes[str(i)]
+        robot.x, robot.y = nodes[str(i)][0] - .2, nodes[str(i)][1]
         robot.pose_received_at = docking.clock[0]
     sent = []
     nav = real_navigation.RealNavigation(
@@ -671,6 +675,7 @@ def test_three_charging_robots_use_atomic_reservations_and_redock(docking, monke
     )
     docking.gateway._navigation = nav
     monkeypatch.setattr(real_navigation, "load_route_graph", lambda: graph)
+    monkeypatch.setattr(gateway_module, "get_node", lambda n: {"id": n, "x": nodes[n][0], "y": nodes[n][1]})
     monkeypatch.setattr(mode_manager, "_mode", "real")
     pending = {f"robot{i+1}": {"node": str(i+3)} for i in range(3)}
     paths = {f"robot{i+1}": [str(i), str(i+3)] for i in range(3)}
@@ -680,14 +685,26 @@ def test_three_charging_robots_use_atomic_reservations_and_redock(docking, monke
     for robot in docking.fleet.get_all_robots():
         robot.pose_received_at = docking.clock[0]
     nav.tick()
-    assert {row["robot_id"] for row in sent} == set(pending)
+    assert not sent
+    assert docking.node.send_station_exit.call_count == 3
     for i in range(3):
         docking.gateway._on_dock_navigation_started(f"robot{i+1}")
     docking.clock[0] += .01
     for i in range(3):
         docking.mqtt._on_message(None, None, message(i+1, 0))
+    docking.clock[0] += .31
+    for i, robot in enumerate(docking.fleet.get_all_robots()):
+        robot.x, robot.y = nodes[str(i)]
+        robot.pose_received_at = docking.clock[0]
+        docking.gateway.on_station_exit_result(robot.robot_id, GoalStatus.STATUS_SUCCEEDED)
     docking.gateway._tick_charging_docks()
     assert not docking.gateway._departing_docks
+    nav.tick()
+    docking.clock[0] += 1
+    for robot in docking.fleet.get_all_robots():
+        robot.pose_received_at = docking.clock[0]
+    nav.tick()
+    assert {row["robot_id"] for row in sent} == set(pending)
     for i in range(3):
         rid = f"robot{i+1}"
         robot = docking.fleet.get_robot(rid)

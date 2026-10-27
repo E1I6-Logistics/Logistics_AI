@@ -99,6 +99,8 @@ export default function WarehouseMap({
     Math.min(size.width / viewWidth, size.height / viewHeight),
   )
   const px = (n: number) => n / scale
+  // 센서의 위치는 지도상의 고정 거리로 정한다. 글자·점 크기만 화면 픽셀을 유지한다.
+  const dockIndicatorOffset = 0.55 / mapResolution
   const adjustZoom = (factor: number) => setZoom(value => Math.max(0.75, Math.min(4, value * factor)))
   const reset = () => { setZoom(1); setPan({ x: 0, y: 0 }) }
   const robotsForMap = robotStates
@@ -166,7 +168,7 @@ export default function WarehouseMap({
             const contact = sensor?.broker_connected ? sensor.contact : 'UNKNOWN'
             const color = contact === 'CONTACT' ? '#16a34a' : contact === 'RELEASED' ? '#dc2626' : '#9ca3af'
             const label = contact === 'CONTACT' ? '접촉' : contact === 'RELEASED' ? '미접촉' : '확인 불가'
-            return <g key={`dock-${station}`} transform={`translate(${point.x - px(56)}, ${point.y})`}>
+            return <g key={`dock-${station}`} transform={`translate(${point.x - dockIndicatorOffset}, ${point.y})`}>
               <title>{`Station ${station} · ${label} · 도킹 ${sensor?.docking_complete ? '완료' : '미검증'}`}</title>
               <circle r={px(5)} fill={color} stroke="#fff" strokeWidth={px(1.5)} />
               <text x={-px(9)} y={px(3)} textAnchor="end" fontSize={px(9)} fill={color}

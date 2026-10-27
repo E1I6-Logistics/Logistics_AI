@@ -101,6 +101,8 @@ class RealNavigation:
         self._navigation_kind = navigation_kind or (lambda rid, goal, kind: kind)
         self._mapf_ready = mapf_ready
         self._executing = {}
+        self._preparing = set()  # 앞 노드 합류 Action이 종료되기 전에는 일반 주행을 전송하지 않는다.
+        self._station_pending = set()
         self._stopping = {}
         self._requests = {}
         self._cancelled = set()
@@ -129,7 +131,7 @@ class RealNavigation:
                 raise ValueError(f"실제 로봇 위치·점유를 확인할 수 없습니다: {self._sync_errors}")
             for rid, row in self._robots.items():
                 robot = self._fleet.get_robot(rid)
-                blocked = (rid in self._executing or rid in self._stopping
+                blocked = (rid in self._executing or rid in self._preparing or rid in self._stopping
                            or rid in self._arrivals or rid in self._cancelled)
                 try:
                     measured_distance(robot, (row["x"], row["y"]), self._clock())
@@ -137,7 +139,7 @@ class RealNavigation:
                 except ValueError:
                     fresh = False
                 row["connection_state"] = "ONLINE" if fresh and self._mapf_ready(rid) and rid not in self._sync_errors else "OFFLINE"
-                row["stop_requested"] = (rid in self._stopping or rid in self._cancelled
+                row["stop_requested"] = (rid in self._stopping or rid in self._preparing or rid in self._cancelled
                                          or robot.state in (RobotState.PAUSED, RobotState.EMERGENCY_STOP))
                 row["execution_blocked"] = blocked
                 row["command_epoch"] = (self._request_versions.get(rid, 0), robot.order_id,
@@ -190,6 +192,42 @@ class RealNavigation:
             self.validate_pending([robot_id])
             self.request(robot_id, node, NavigationType.GOAL, required_path=required_path)
             return self._command_response(robot_id, "goal-node", {"node_id": node})
+
+    def protect_station_exit(self, robot_id):
+        with self.lock:
+            self._station_pending.add(robot_id)
+            self._traffic.protect_resources(robot_id, {node_key(self._robots[robot_id]["occupied_node"])})
+
+    def clear_station_exit_protection(self, robot_id):
+        with self.lock:
+            self._station_pending.discard(robot_id)
+            self._traffic.clear_protected_resources(robot_id)
+
+    def begin_station_exit(self, robot_id):
+        """일반 경로의 시간 예약은 이탈 후 다시 잡고 현재 앞 노드는 계속 보호한다."""
+        with self.lock:
+            state = self._robots[robot_id]
+            if robot_id in self._executing or robot_id in self._stopping:
+                raise ValueError("다른 주행이 종료되지 않았습니다.")
+            self._preparing.add(robot_id)
+            if state["route"] is not None:
+                self._traffic.wait_for_reservation_after_stop(robot_id)
+                self._traffic._pending.pop(robot_id, None)
+            state["stop_requested"] = state["execution_blocked"] = True
+            self.protect_station_exit(robot_id)
+            self._fleet.get_robot(robot_id).set_state(RobotState.UNDOCKING)
+
+    def finish_station_exit(self, robot_id):
+        with self.lock:
+            self._preparing.discard(robot_id)
+            state = self._robots[robot_id]
+            state["stop_requested"] = state["execution_blocked"] = False
+            state["status"] = "WAITING"
+            if state["route"] is not None:
+                self._traffic.wait_for_reservation_after_stop(robot_id)
+            self.clear_station_exit_protection(robot_id)
+            self._fleet.get_robot(robot_id).set_state(RobotState.WAITING)
+            # 기존 required_path와 요청은 그대로 둔다. 다음 tick에서 현재 시각으로 재예약한다.
 
     def stop_robot(self, robot_id):
         self.stop(robot_id, lambda: self.cancel_after_stop(robot_id), reason="mapf_dispatch_failed")
@@ -699,7 +737,7 @@ class RealNavigation:
                     status=robot.state.value,
                 )
 
-            if not (
+            if rid not in self._station_pending and not (
                 robot.state == RobotState.PAUSED
                 and row["route"] is not None
                 and rid in self._traffic._protected_resources
@@ -808,6 +846,8 @@ class RealNavigation:
             def stopped():
                 with self.lock:
                     self._executing.pop(robot_id, None)
+                    self._preparing.discard(robot_id)
+                    self._station_pending.discard(robot_id)
                     self._arrival_observed.pop(robot_id, None)
                     self._feedback.pop(robot_id, None)
                     self._hold.pop(robot_id, None)
@@ -1001,6 +1041,9 @@ class RealNavigation:
                 if route and any(r.robot_id == rid and r.resource[0] == "edge" for r in rows)
                 else []
             )
+
+            if rid in self._preparing:
+                continue
 
             if rid not in self._requests and rid not in self._traffic._concession:
                 if rid in self._yielding:
@@ -1275,10 +1318,10 @@ class RealNavigation:
                     flush=True,
                 )
 
-                for rid in set(self._requests) | set(self._executing) | set(self._arrivals):
+                for rid in set(self._requests) | set(self._executing) | set(self._preparing) | set(self._arrivals):
                     self._pause(rid, "navigation_update_failed")
 
-                    if rid in self._executing and rid not in self._stopping:
+                    if (rid in self._executing or rid in self._preparing) and rid not in self._stopping:
                         self.stop(rid, reason="navigation_update_failed")
 
                     self._arrivals.pop(rid, None)
@@ -1317,7 +1360,7 @@ class RealNavigation:
             now = self._clock()
 
             if not self._sync(graph, planner, now):
-                for rid in list(self._executing):
+                for rid in set(self._executing) | self._preparing:
                     if rid not in self._stopping:
                         reason = self._sync_errors.get(rid, "state_sync_failed")
                         reason_code, _, detail = reason.partition(":")
@@ -1354,6 +1397,7 @@ class RealNavigation:
 
                 if (
                     rid in self._arrivals
+                    or rid in self._preparing
                     or rid in self._stopping
                     or (self._stopping and rid not in self._executing)
                 ):
@@ -1586,10 +1630,12 @@ class RealNavigation:
             self._yielding.add(rid)
 
         try:
-            self._before_send(rid)
+            if self._before_send(rid) is False:
+                return  # 명시적인 이동 요청에 포함된 앞 노드 합류가 아직 진행 중이다.
         except ValueError as exc:
-            self._pause(rid, "dock_sensor_unavailable", str(exc))
-            self.stop(rid, lambda: self.cancel_after_stop(rid), reason="dock_sensor_unavailable")
+            reason = getattr(exc, "reason_code", "dock_sensor_unavailable")
+            self._pause(rid, reason, str(exc))
+            self.stop(rid, lambda: self.cancel_after_stop(rid), reason=reason)
             return
 
         self._arrival_observed.pop(rid, None)

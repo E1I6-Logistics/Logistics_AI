@@ -58,6 +58,7 @@ function itemText(order: OrderDto): string {
 }
 
 function displayRobotStatus(robot: LiveRobot, orders: OrderDto[]): string {
+  if (robot.connected && robot.status === 'UNDOCKING') return '앞 노드 합류 중'
   if (!robot.connected || robot.status !== 'IDLE') return robot.status
   const activeOrder = orders.find(order =>
     order.robot_id === robot.backendId && order.status === 'IN_PROGRESS')

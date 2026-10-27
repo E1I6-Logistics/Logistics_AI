@@ -31,7 +31,7 @@
 - 정상 완료된 배차 client만 재사용한다. 시간 초과한 HTTP worker의 늦은 응답은 반영하지 않는다. HTTP 작업 취소는 ROS/MQTT 콜백 스레드에서도 asyncio 루프를 통해 전달한다.
 - 복귀 중이면 기존 `WAITING_RETURN_STOP` 절차로 정지 완료 후 새 주문을 실행한다.
 - 충전 중이면 기존 도킹 이력·센서 접촉 검사와 실제 출발/접촉 해제 감시를 유지한다. KEV 선택만으로 주행하거나 도킹 증명을 지우지 않는다.
-- **경로·MAPF·통행 예약·도킹 실행 코어는 수정하지 않았다:** `order_route_dispatcher.py`, `kev_mapf/kev_dispatcher.py`, `mapf_execution.py`, `real_navigation.py`, `traffic_manager.py`, `ros_gateway.py`는 기준 dev와 동일하다.
+- **배차 통합 커밋 `9c8c79a` 당시** 경로·MAPF·통행 예약·도킹 실행 코어는 기준 dev와 동일했다. 이후 사용자가 확정한 시작 대기·직진 이탈·주문 후 앞 노드 복귀 수정은 [station-departure-20261027.md](station-departure-20261027.md)에 별도로 기록한다. 현재 브랜치의 실행부까지 dev와 동일하다는 뜻은 아니다.
 - 거리 계산 불가/잘못된 거리는 해당 후보를 제외한다. 유효 거리 후보가 없으면 그 주문은 대기한다. heeyeon의 일부 예외 경로처럼 기존 알고리즘으로 거리 제한을 우회하지 않는다.
 
 ## 모드와 설정

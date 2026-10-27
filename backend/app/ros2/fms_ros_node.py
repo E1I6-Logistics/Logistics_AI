@@ -15,7 +15,7 @@ from geometry_msgs.msg import Quaternion
 from geometry_msgs.msg import TwistStamped
 from geometry_msgs.msg import PoseStamped
 from geometry_msgs.msg import PoseWithCovarianceStamped
-from nav2_msgs.action import NavigateThroughPoses
+from nav2_msgs.action import NavigateThroughPoses, DriveOnHeading
 
 from ..services.fleet_manager import fleet_manager
 
@@ -55,6 +55,7 @@ class FmsRosNode(Node):
 
         self._follow_waypoints_clients: dict[str, ActionClient] = {}
         self._precision_dock_clients: dict[str, ActionClient] = {}
+        self._station_exit_clients: dict[str, ActionClient] = {}
         self._aruco_align_clients: dict[str, ActionClient] = {}
 
         # 현재 실행 중인 NavigateThroughPoses Goal 관리
@@ -73,6 +74,8 @@ class FmsRosNode(Node):
         self.navigation_result_callback = None
         self.navigation_error_callback = None
         self.precision_dock_result_callback = None
+        self.station_exit_result_callback = None
+        self.station_exit_started_callback = None
         self.navigation_started_callback = None
         self.aruco_align_result_callback = None
 
@@ -112,6 +115,7 @@ class FmsRosNode(Node):
         self._battery_subscribers[robot_id] = subscription_battery
         self._follow_waypoints_clients[robot_id] = action_follow_waypoints_client
         self._precision_dock_clients[robot_id] = action_precision_dock_client
+        self._station_exit_clients[robot_id] = ActionClient(self, DriveOnHeading, f"/{robot_id}/drive_on_heading")
         self._aruco_align_clients[robot_id] = action_aruco_align_client
         print(
             f"[{strftime('%Y-%m-%d %H:%M:%S')}] [INFO] [ROS ACTION READY] robot={robot_id} "
@@ -479,6 +483,67 @@ class FmsRosNode(Node):
             callback()
         elif result_callback:
             result_callback(robot_id, status)
+
+    @_navigation_locked
+    def send_station_exit(self, robot_id, distance, speed, timeout):
+        """Nav2의 충돌 검사·로컬 위치 기반 직진을 사용한다. 일반 주행과 동시에 실행하지 않는다."""
+        if (robot_id in self._auxiliary_goals or robot_id in self._follow_waypoints_pending
+                or robot_id in self._follow_waypoints_goal_handles):
+            raise RuntimeError(f"이전 이동 Action이 종료되지 않았습니다: {robot_id}")
+        if any(not math.isfinite(v) or v <= 0 for v in (distance, speed, timeout)):
+            raise ValueError("직진 거리·속도·제한 시간은 유한한 양수여야 합니다.")
+        client = self._station_exit_clients.get(robot_id)
+        if client is None or not client.server_is_ready():
+            raise ValueError(f"DriveOnHeading Action Server를 확인할 수 없습니다: {robot_id}")
+        goal = DriveOnHeading.Goal()
+        goal.target.x, goal.speed = float(distance), float(speed)
+        goal.time_allowance.sec = int(timeout)
+        goal.time_allowance.nanosec = int((timeout - int(timeout)) * 1e9)
+        entry = {"kind": "StationExit", "handle": None, "cancel_callback": None, "cancel_sent": False}
+        self._auxiliary_goals[robot_id] = entry
+        try:
+            future = client.send_goal_async(goal)
+        except Exception:
+            self._auxiliary_goals.pop(robot_id, None)
+            raise
+        future.add_done_callback(lambda future: self._on_station_exit_goal_response(robot_id, entry, future))
+
+    @_navigation_locked
+    def _on_station_exit_goal_response(self, robot_id, entry, future):
+        if self._auxiliary_goals.get(robot_id) is not entry:
+            return
+        try:
+            handle = future.result()
+        except Exception:
+            self._finish_auxiliary(robot_id, entry, GoalStatus.STATUS_ABORTED, self.station_exit_result_callback)
+            return
+        if not handle.accepted:
+            self._finish_auxiliary(robot_id, entry, GoalStatus.STATUS_ABORTED, self.station_exit_result_callback)
+            return
+        entry["handle"] = handle
+        if self.station_exit_started_callback:
+            self.station_exit_started_callback(robot_id)
+        try:
+            result = handle.get_result_async()
+        except Exception:
+            # 수락된 Action의 종료를 모르면 entry를 지우거나 다음 이동을 시작하지 않는다.
+            return
+        result.add_done_callback(lambda future: self._on_station_exit_result(robot_id, entry, future))
+        if entry["cancel_callback"] is not None:
+            self._send_auxiliary_cancel(robot_id, entry)
+
+    @_navigation_locked
+    def _on_station_exit_result(self, robot_id, entry, future):
+        if self._auxiliary_goals.get(robot_id) is not entry:
+            return
+        try:
+            result = future.result()
+        except Exception:
+            return  # 종료 증거가 없으므로 취소 확인 전까지 실행 중으로 유지한다.
+        status = result.status
+        if status == GoalStatus.STATUS_SUCCEEDED and getattr(result.result, "error_code", None) != 0:
+            status = GoalStatus.STATUS_ABORTED
+        self._finish_auxiliary(robot_id, entry, status, self.station_exit_result_callback)
 
     # 정밀 도킹을 전송한다.
     @_navigation_locked

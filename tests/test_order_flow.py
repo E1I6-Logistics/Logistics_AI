@@ -452,12 +452,11 @@ def test_cancel_active_real_order_returns_after_stop(monkeypatch):
     monkeypatch.setattr(order_module.ros_gateway, "cancel_current_work", lambda _id, callback: callbacks.append(callback))
     monkeypatch.setattr(order_module.ros_gateway, "navigation_active", lambda _id: False)
 
-    async def route(row, target, start, valid=None, *, charging_return=False):
+    async def route(row, target, start, valid=None):
         assert valid()
-        assert charging_return
         routes.append((row["operation_mode"], target, start))
         robot.current_node = robot.occupied_node = target
-        robot.set_state(RobotState.CHARGING)
+        robot.set_state(RobotState.IDLE)
 
     monkeypatch.setattr(order_module, "dispatch_order_route", route)
     mode_manager.set_mode("real")
