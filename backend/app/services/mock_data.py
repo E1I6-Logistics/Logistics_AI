@@ -13,12 +13,13 @@ from .reservation import reservation_tables
 from .occupancy import locate_occupancy, occupied_resource
 from .traffic_manager import TrafficManager, safe_travel_distance
 from .mapf_execution import MapfExecution
+from ..config import REAL_NAVIGATION_SPEED_MPS, REAL_RESERVATION_MARGIN_S
 
 import math
 import os
 
-SIMULATION_SPEED_MPS = 0.2
-RESERVATION_MARGIN_S = 0.2
+SIMULATION_SPEED_MPS = REAL_NAVIGATION_SPEED_MPS
+RESERVATION_MARGIN_S = REAL_RESERVATION_MARGIN_S
 
 _MOCK_ROBOT_DEFINITIONS = {
     "robot1": {"node_id": "0", "status": "IDLE", "battery": 92.0, "battery_voltage": 12.0},
