@@ -221,6 +221,7 @@ export default function FmsControlApp() {
     managedRobots,
     mode: robotMode,
     operationMode,
+    featureEngines,
     modeSwitching,
     changeMode,
     error: fleetError,
@@ -614,7 +615,9 @@ export default function FmsControlApp() {
 
         <div className="fms-operation-strip" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '6px 16px', borderBottom: `1px solid ${C.line}`, flexWrap: 'wrap' }}>
           <span style={{ fontSize: 11, color: C.muted }}>
-            {operationMode === 'ai' ? 'AI 운영 · 경로 생성 AI / 배차·작업대 선택 알고리즘' : '알고리즘 운영 · 경로 생성·배차·작업대 선택 알고리즘'}
+            {operationMode === 'ai'
+              ? `AI 운영 · 경로 생성 AI / 배차 ${featureEngines.dispatch === 'ai' ? 'KEV' : '알고리즘'} / 작업대 선택 알고리즘`
+              : '알고리즘 운영 · 경로 생성·배차·작업대 선택 알고리즘'}
           </span>
           <button
             aria-expanded={ordersPanelOpen}

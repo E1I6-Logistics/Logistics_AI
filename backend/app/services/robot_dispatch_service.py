@@ -23,7 +23,7 @@ from .route_graph import load_route_graph
 from .route_service import plan_route
 from .mode_service import mode_manager
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("uvicorn.error")
 
 
 def robot_profile(robot_id, mode, returning):
