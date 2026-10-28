@@ -146,7 +146,7 @@ def test_consumed_on_cannot_recreate_charging_after_exit_or_normal_return(exit_c
     ctx.mqtt._on_message(None, None, message())
     ctx.clock[0] += .31
     ctx.gateway._tick_charging_docks()
-    assert robot.state == RobotState.CHARGING  # 새 OFF→ON 접촉은 다시 인식한다.
+    assert robot.state == RobotState.IDLE  # 새 OFF→ON도 도킹 액션 성공을 대신하지 않는다.
 
 
 @pytest.mark.parametrize("state", [RobotState.TASK_ASSIGNED, RobotState.WAITING,
@@ -273,16 +273,16 @@ def test_each_front_node_allows_normal_order_without_sensor_or_straight_heading(
     assert not ctx.gateway._departing_docks
 
 
-def test_live_contact_reconstructs_charging_without_docking_history(docking):
+def test_live_contact_alone_does_not_create_charging_without_docking_success(docking):
     robot = docking.fleet.get_robot("robot1")
     robot.navigation_type = robot.goal_node = None
     robot.set_state(RobotState.IDLE)
     docking.mqtt._on_message(None, None, message())
     docking.clock[0] += .31
     docking.gateway._tick_charging_docks()
-    assert robot.state == RobotState.CHARGING
-    assert docking.gateway.charging_dispatch_ready("robot1")
-    assert docking.gateway.docking_station_snapshots()[0]["docking_complete"]
+    assert robot.state == RobotState.IDLE
+    assert not docking.gateway.charging_dispatch_ready("robot1")
+    assert not docking.gateway.docking_station_snapshots()[0]["docking_complete"]
     docking.node.send_precision_dock.assert_not_called()
     docking.node.send_station_exit.assert_not_called()
 
@@ -366,11 +366,12 @@ def test_emergency_stop_waits_for_straight_action_terminal_before_releasing_stat
     assert not ctx.sent
 
 
-def test_contact_based_charging_exits_after_order_changes_state(docking, monkeypatch):
+def test_completed_docking_exits_after_order_changes_state(docking, monkeypatch):
     ctx = docking
+    finish(ctx)
+    ctx.node.send_precision_dock.reset_mock()
     robot = ctx.fleet.get_robot("robot1")
     robot.navigation_type = robot.goal_node = None
-    robot.set_state(RobotState.IDLE)
     robot.x, robot.y = -.2, 0.
     ctx.mqtt._on_message(None, None, message())
     ctx.clock[0] += .31

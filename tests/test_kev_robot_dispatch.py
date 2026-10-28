@@ -337,11 +337,12 @@ def test_real_charging_candidate_keeps_dock_safety_checks(context, docking, monk
             docking.mqtt._on_message(None, None, message(1, 0))
             await manager.tick()
     asyncio.run(run())
-    expected = "robot1" if invalidate is None else "robot2"
+    # 도킹 성공이 확인된 뒤 센서 유실은 배차 제외 조건이 아니다. 전압 조건은 유지한다.
+    expected = "robot2" if invalidate == "voltage_loss" else "robot1"
     assert manager.get_order(public["order_id"])["robot_id"] == expected
     if invalidate is None:
         # Selection does not start motion or bypass dock proof. Existing execution owns departure.
-        assert "robot1" in docking.gateway._charging_docks
+        assert docking.gateway._charging_docks["robot1"]["action_confirmed"]
         assert not docking.gateway.navigation_active("robot1")
 
 

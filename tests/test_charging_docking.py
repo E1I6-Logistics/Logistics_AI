@@ -283,7 +283,7 @@ def test_charging_contact_loss_never_starts_motion(docking, loss):
     docking.gateway._tick_charging_docks()
     assert docking.fleet.get_robot("robot1").state == (RobotState.IDLE if loss == "release" else RobotState.CHARGING)
     if loss == "mqtt_disconnect":
-        assert not docking.gateway.charging_dispatch_ready("robot1")
+        assert docking.gateway.charging_dispatch_ready("robot1")
     docking.node.send_follow_waypoints_goal.assert_not_called()
 
 
@@ -522,7 +522,7 @@ def test_charging_atomic_mapf_admission_validates_proof_and_reserves(docking, mo
     assert nav._robots["robot1"]["route"]["node_ids"] == ["0", "2", "3"]
 
 
-def test_charging_atomic_mapf_rejects_reconnected_sensor(docking, monkeypatch):
+def test_charging_atomic_mapf_does_not_recheck_sensor_after_dock_completion(docking, monkeypatch):
     from backend.app.services.mode_service import mode_manager
     finish(docking)
     nav, sent, cancels, graph = real_executor(docking, monkeypatch)
@@ -530,10 +530,10 @@ def test_charging_atomic_mapf_rejects_reconnected_sensor(docking, monkeypatch):
     nav.refresh()
     docking.mqtt._on_disconnect(None, None, 1)
     docking.mqtt._on_connect(Mock(), None, {}, 0)
-    with pytest.raises(ValueError):
-        nav.mapf.commit_routes(graph, {"robot1": {"node": "3"}}, {"robot1": ["0", "2", "3"]}, {"robot1": []}, ["robot1"], now=docking.clock[0])
+    response = nav.mapf.commit_routes(graph, {"robot1": {"node": "3"}}, {"robot1": ["0", "2", "3"]}, {"robot1": []}, ["robot1"], now=docking.clock[0])
+    assert response
     assert not sent
-    assert not nav._traffic._reservations.snapshot()
+    assert nav._traffic._reservations.snapshot()
 
 
 def test_sensor_failure_during_departure_does_not_cancel_exit_or_drop_reservation(docking, monkeypatch):

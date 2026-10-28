@@ -18,6 +18,7 @@ from .routers.orders import router as orders_router
 from .routers.omx import router as omx_router
 from .routers.scenarios import router as scenarios_router
 from .routers.dispatch_settings import router as dispatch_settings_router
+from .routers.docking_settings import router as docking_settings_router
 
 from .services.scenario_service import scenario_manager
 from .services.map_service import load_map_metadata
@@ -133,6 +134,7 @@ app.include_router(orders_router)
 app.include_router(omx_router)
 app.include_router(scenarios_router)
 app.include_router(dispatch_settings_router)
+app.include_router(docking_settings_router)
 
 
 # 서비스 기본 정보를 반환한다.

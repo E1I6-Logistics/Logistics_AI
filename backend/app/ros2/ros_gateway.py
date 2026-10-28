@@ -13,6 +13,7 @@ from time import monotonic, strftime
 
 
 from ..services.mqtt_manager import mqtt_manager
+from ..services.docking_settings import docking_settings
 from ..models.robot import RobotState, NavigationType
 from ..schemas.robot import normalize_robot_id, to_ui_robot_id
 from ..services.fleet_manager import fleet_manager
@@ -167,11 +168,8 @@ class RosGateway:
             return  # 출발을 승인한 뒤에는 MQTT 해제를 일반 주행의 통과 조건으로 쓰지 않는다.
         if robot_id not in self._charging_docks and robot.state != RobotState.CHARGING:
             return
-        if robot.state == RobotState.CHARGING:
-            contact = self._live_dock_contact(robot_id)
-            if contact is None:
-                raise ValueError(f"충전소 접촉 상태를 확인할 수 없습니다: {robot_id}")
-            self._charging_docks[robot_id] = contact
+        if robot.state == RobotState.CHARGING and not self._charging_docks.get(robot_id, {}).get("action_confirmed"):
+            raise ValueError(f"충전소 도킹 완료 상태를 확인할 수 없습니다: {robot_id}")
         if robot is None or not robot.connected or robot.state == RobotState.EMERGENCY_STOP:
             raise ValueError("도킹 로봇 연결 또는 비상정지 상태를 확인하세요.")
         if robot.battery is None or not math.isfinite(robot.battery) or not 0 < robot.battery <= 100:
@@ -215,9 +213,7 @@ class RosGateway:
                 "freshness_policy": sample["freshness_policy"],
                 "robot_id": robot_id,
                 "docking_complete": bool(robot and robot.connected and robot.state == RobotState.CHARGING
-                                         and robot_id in self._charging_docks and sample["stable"]
-                                         and sample.get("status") == 1
-                                         and sample["generation"] == self._charging_docks[robot_id]["generation"]),
+                                         and self._charging_docks.get(robot_id, {}).get("action_confirmed")),
             })
         return rows
 
@@ -225,6 +221,7 @@ class RosGateway:
     def _tick_charging_docks(self):
         # 기존 FMS 루프에서만 상태 전환한다. MQTT 수신 스레드는 센서만 저장한다.
         now = monotonic()
+        verify_contact = docking_settings.contact_verification_enabled
         for robot_id, attempt in list(self._dock_attempts.items()):
             robot = fleet_manager.get_robot(robot_id)
             if (robot is None or not robot.connected or robot.state != RobotState.DOCKING
@@ -236,19 +233,23 @@ class RosGateway:
                 continue
             sample = mqtt_manager.get_dock_snapshot(attempt["station"], now=now)
             reason = None
-            if not sample["broker_connected"] or sample["generation"] != attempt["generation"]:
+            if verify_contact and (not sample["broker_connected"] or sample["generation"] != attempt["generation"]):
                 reason = "dock_sensor_unavailable"
             elif attempt["succeeded_at"] is None:
                 if now - attempt["started_at"] >= DOCK_ACTION_TIMEOUT_S:
                     reason = "dock_action_timeout"
-            elif now - attempt["succeeded_at"] >= DOCK_CONTACT_TIMEOUT_S:
+            elif verify_contact and now - attempt["succeeded_at"] >= DOCK_CONTACT_TIMEOUT_S:
                 reason = "dock_contact_timeout"
-            elif mqtt_manager.dock_contact_valid(
+            elif not verify_contact or mqtt_manager.dock_contact_valid(
                 attempt["station"], started_at=attempt["started_at"], generation=attempt["generation"], now=now
             ):
                 contact = self._live_dock_contact(robot_id)
-                if contact is None:
+                if verify_contact and contact is None:
                     continue
+                if contact is None:
+                    contact = {"station": attempt["station"], "generation": attempt["generation"],
+                               "contact_since": None}
+                contact = dict(contact, action_confirmed=True)
                 robot.current_node = robot.goal_node
                 robot.navigation_type = None
                 robot.route = None
@@ -313,6 +314,8 @@ class RosGateway:
 
     def _sync_dock_contact(self, robot_id):
         """정지 중인 담당 로봇의 접촉을 동기화한다. 센서만으로 이동/작업/정지를 덮어쓰지 않는다."""
+        if not docking_settings.contact_verification_enabled:
+            return  # 접촉 검증 OFF에서는 MQTT 값을 표시용으로만 사용한다.
         robot = fleet_manager.get_robot(robot_id)
         if robot is None or not robot.connected:
             return
@@ -335,6 +338,9 @@ class RosGateway:
             if robot.state == RobotState.CHARGING:
                 robot.set_state(RobotState.IDLE)
             return
+        confirmed = self._charging_docks.get(robot_id)
+        if confirmed is None or not confirmed.get("action_confirmed"):
+            return  # 스위치 ON만으로 도킹 액션 성공을 만들어내지 않는다.
         contact = self._live_dock_contact(robot_id)
         if contact is None or robot.occupied_node != CHARGING_STATION_NODES.get(robot_id):
             return
@@ -347,7 +353,7 @@ class RosGateway:
                 return
         except (OSError, KeyError, ValueError):
             return
-        self._charging_docks[robot_id] = contact
+        self._charging_docks[robot_id] = dict(contact, action_confirmed=True)
         robot.docked_station = station
         if robot.state != RobotState.CHARGING:
             robot.set_state(RobotState.CHARGING)
@@ -673,6 +679,10 @@ class RosGateway:
             # 수동으로 잠깐 움직였다고 자동 이탈을 완료한 것으로 간주하지 않는다.
             # 접촉이 남아 있으면 CHARGING, 안정된 OFF이면 기존 동기화로 IDLE이 된다.
             charging = robot_id in self._charging_docks or robot.state == RobotState.CHARGING
+            if not docking_settings.contact_verification_enabled and robot.state == RobotState.MOVING:
+                self._charging_docks.pop(robot_id, None)
+                robot.docked_station = None
+                charging = False
             robot.set_state(RobotState.CHARGING if charging else RobotState.IDLE)
             self._sync_dock_contact(robot_id)
         else:
@@ -931,18 +941,14 @@ class RosGateway:
         # 경로/예약 정책은 시뮬레이션과 동일한 TrafficManager를 사용한다.
         # 기존 이동 목적과 최종 도착 이후의 시퀀스는 Robot에 유지한다.
         try:
-            if navigation_type == NavigationType.CHARGING and robot_id in self._unverified_docks:
+            if navigation_type == NavigationType.CHARGING:
                 self._station_exit_manual_ready.discard(robot_id)
                 self._charging_docks.pop(robot_id, None)
                 self._departing_docks.pop(robot_id, None)
                 self._unverified_docks.discard(robot_id)
                 robot = fleet_manager.get_robot(robot_id)
                 robot.docked_station = None
-                if robot.occupied_node == CHARGING_STATION_NODES.get(robot_id):
-                    contact = self._live_dock_contact(robot_id)
-                    # 실제 실패의 명시적 복구도 접촉 중이면 직진 이탈부터 수행한다.
-                    if contact is not None:
-                        self._charging_docks[robot_id] = contact
+                # 충전소로 들어가는 요청에 기존 접촉 기록으로 이탈을 다시 붙이지 않는다.
             self._navigation.request(robot_id, node_id, navigation_type, required_path=required_path)
         except (ValueError, RuntimeError):
             robot = fleet_manager.get_robot(robot_id)
@@ -1012,7 +1018,7 @@ class RosGateway:
                     robot.pause("dock_station_unverified")
                     return
                 sample = mqtt_manager.get_dock_snapshot(station)
-                if not sample["broker_connected"]:
+                if docking_settings.contact_verification_enabled and not sample["broker_connected"]:
                     robot.pause("dock_sensor_unavailable")
                     return
                 self._dock_attempts[robot_id] = {

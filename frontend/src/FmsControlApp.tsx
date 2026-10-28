@@ -4,6 +4,7 @@ import RobotOrderForm from './components/RobotOrderForm'
 import { cancelOrder, getOrders, retryOrder, type OrderDto, type WorkstationDto, type PickupDto } from './api/orderApi'
 import ScenarioControls from './components/ScenarioControls'
 import DispatchVoltageToggle from './components/DispatchVoltageToggle'
+import DockContactToggle from './components/DockContactToggle'
 import {
   sendGoalNode,
   previewLlmRoute,
@@ -623,6 +624,7 @@ export default function FmsControlApp() {
                 : '알고리즘 운영 · 경로 생성·배차·작업대 선택 알고리즘'}
             </span>
             {robotMode === 'real' && <DispatchVoltageToggle disabled={modeSwitching || scenarioActive} />}
+            {robotMode === 'real' && <DockContactToggle disabled={modeSwitching || scenarioActive} />}
           </div>
           <button
             aria-expanded={ordersPanelOpen}

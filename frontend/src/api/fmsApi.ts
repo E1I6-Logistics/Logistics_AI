@@ -70,6 +70,23 @@ export type DispatchSettingsDto = {
   voltage_window_s: number
 }
 
+export type DockingSettingsDto = {
+  mode: 'real'
+  contact_verification_enabled: boolean
+}
+
+export function getDockingSettings() {
+  return request<DockingSettingsDto>('/api/docking/settings')
+}
+
+export function setDockContactVerification(enabled: boolean) {
+  return request<DockingSettingsDto>('/api/docking/settings', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ contact_verification_enabled: enabled }),
+  })
+}
+
 export function getDispatchSettings() {
   return request<DispatchSettingsDto>('/api/dispatch/settings')
 }
