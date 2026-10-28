@@ -263,7 +263,8 @@ class OrderManager:
         # lock order as on_mqtt_result to avoid a ROS/MQTT callback deadlock.
         with (ros_gateway.navigation.lock if mode == "real" else nullcontext()), self.lock:
             busy = {
-                row["robot_id"] for row in self.orders.values() if row["status"] == "IN_PROGRESS" and row["robot_id"]
+                row["robot_id"] for row in self.orders.values()
+                if row["mode"] == mode and row["status"] == "IN_PROGRESS" and row["robot_id"]
             }
             busy.update(self.recovering)
             if mode == "simulation":
