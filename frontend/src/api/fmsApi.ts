@@ -63,6 +63,25 @@ export function getRobotMode() {
   return request<RobotModeDto>('/api/mode')
 }
 
+export type DispatchSettingsDto = {
+  mode: 'real'
+  battery_voltage_check_enabled: boolean
+  minimum_dispatch_voltage: number
+  voltage_window_s: number
+}
+
+export function getDispatchSettings() {
+  return request<DispatchSettingsDto>('/api/dispatch/settings')
+}
+
+export function setDispatchVoltageCheck(enabled: boolean) {
+  return request<DispatchSettingsDto>('/api/dispatch/settings', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ battery_voltage_check_enabled: enabled }),
+  })
+}
+
 export async function setRobotMode(mode: RobotMode, operation_mode: OperationMode) {
   const result = await request<RobotModeDto>('/api/mode', {
     method: 'PUT',

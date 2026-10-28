@@ -3,6 +3,7 @@ import WarehouseMap from './WarehouseMap'
 import RobotOrderForm from './components/RobotOrderForm'
 import { cancelOrder, getOrders, retryOrder, type OrderDto, type WorkstationDto, type PickupDto } from './api/orderApi'
 import ScenarioControls from './components/ScenarioControls'
+import DispatchVoltageToggle from './components/DispatchVoltageToggle'
 import {
   sendGoalNode,
   previewLlmRoute,
@@ -615,11 +616,14 @@ export default function FmsControlApp() {
         </header>
 
         <div className="fms-operation-strip" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '6px 16px', borderBottom: `1px solid ${C.line}`, flexWrap: 'wrap' }}>
-          <span style={{ fontSize: 11, color: C.muted }}>
-            {operationMode === 'ai'
-              ? `AI 운영 · 경로 생성 AI / 배차 ${featureEngines.dispatch === 'ai' ? 'KEV' : '알고리즘'} / 작업대 선택 알고리즘`
-              : '알고리즘 운영 · 경로 생성·배차·작업대 선택 알고리즘'}
-          </span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 11, color: C.muted }}>
+              {operationMode === 'ai'
+                ? `AI 운영 · 경로 생성 AI / 배차 ${featureEngines.dispatch === 'ai' ? 'KEV' : '알고리즘'} / 작업대 선택 알고리즘`
+                : '알고리즘 운영 · 경로 생성·배차·작업대 선택 알고리즘'}
+            </span>
+            {robotMode === 'real' && <DispatchVoltageToggle disabled={modeSwitching || scenarioActive} />}
+          </div>
           <button
             aria-expanded={ordersPanelOpen}
             onClick={() => setOrdersPanelOpen(open => !open)}

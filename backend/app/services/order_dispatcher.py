@@ -2,21 +2,13 @@
 
 from ..models.robot import RobotState
 from ..ros2.ros_gateway import CHARGING_STATION_NODES, ros_gateway
-from ..config import MIN_DISPATCH_BATTERY_VOLTAGE, REAL_POSE_TIMEOUT_S
+from ..config import REAL_POSE_TIMEOUT_S
+from .dispatch_settings import dispatch_settings
 from time import monotonic
-import math
 
 
-def battery_block_reason(voltage):
-    if MIN_DISPATCH_BATTERY_VOLTAGE <= 0:
-        return None
-    try:
-        voltage = float(voltage)
-    except (TypeError, ValueError):
-        return "battery_unknown"
-    if not math.isfinite(voltage) or voltage <= 0:
-        return "battery_unknown"
-    return "low_battery" if voltage < MIN_DISPATCH_BATTERY_VOLTAGE else None
+def battery_block_reason(voltage, *, mode="real"):
+    return dispatch_settings.battery_block_reason(voltage, mode=mode)
 
 
 # 현재 배차 가능한 로봇 목록을 반환한다.
@@ -34,7 +26,7 @@ def available_robots(mode, busy_ids, returning_ids=(), operation_mode="algorithm
             robot_id = row["robot_id"]
             if robot_id in busy_ids or row.get("connection_state") != "ONLINE":
                 continue
-            if battery_block_reason(row.get("battery_voltage")) is not None:
+            if battery_block_reason(row.get("battery_voltage"), mode="simulation") is not None:
                 continue
             if (
                 robot_id in returning_ids
@@ -74,7 +66,7 @@ def available_robots(mode, busy_ids, returning_ids=(), operation_mode="algorithm
             continue
         if not ros_gateway.dock_dispatch_allowed(robot.robot_id):
             continue
-        if battery_block_reason(robot.min_battery_voltage()) is not None:
+        if battery_block_reason(robot.min_battery_voltage(), mode="real") is not None:
             continue
         if (
             robot.robot_id in returning_ids

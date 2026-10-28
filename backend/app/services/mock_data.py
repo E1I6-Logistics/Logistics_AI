@@ -130,7 +130,7 @@ class MockFmsStore:
         from .order_dispatcher import battery_block_reason
 
         result = deepcopy(robot)
-        result["dispatch_battery_block_reason"] = battery_block_reason(result.get("battery_voltage"))
+        result["dispatch_battery_block_reason"] = battery_block_reason(result.get("battery_voltage"), mode="simulation")
         for key in ("battery", "battery_voltage"):
             if isinstance(result.get(key), float) and not math.isfinite(result[key]):
                 result[key] = None

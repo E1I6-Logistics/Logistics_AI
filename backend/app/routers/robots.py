@@ -38,7 +38,7 @@ async def fetch_robots():
                 "pause_reason": robot.pause_reason,
                 "battery": robot.battery,
                 "battery_voltage": robot.battery_voltage,
-                "dispatch_battery_block_reason": battery_block_reason(robot.min_battery_voltage()),
+                "dispatch_battery_block_reason": battery_block_reason(robot.min_battery_voltage(), mode="real"),
                 "x": robot.x,
                 "y": robot.y,
                 "yaw": robot.yaw,
