@@ -6,9 +6,9 @@ from functools import wraps
 from ..services.real_navigation import RealNavigation, measured_distance
 from ..config import (REAL_ARRIVAL_DISTANCE_M, ZENOH_MISSING_GRACE_S, DOCK_STATION_MAP,
                       DOCK_ACTION_TIMEOUT_S, DOCK_CONTACT_TIMEOUT_S, STATION_EXIT_SPEED_MPS,
-                      STATION_EXIT_TIMEOUT_S, STATION_EXIT_TOLERANCE_M, REAL_ARRIVAL_CONFIRM_TIMEOUT_S,
+                      STATION_EXIT_TIMEOUT_S, STATION_EXIT_DISTANCE_M, REAL_POSE_TIMEOUT_S,
                       REAL_DOCK_OCCUPANCY_TOLERANCE_M)
-from ..services.station_exit import forward_distance, StationExitError
+from ..services.station_exit import StationExitError
 from time import monotonic, strftime
 
 
@@ -277,7 +277,7 @@ class RosGateway:
                 continue
             invalid = (not robot.connected
                        or robot.state in (RobotState.PAUSED, RobotState.EMERGENCY_STOP))
-            if departure.get("sent_at") is not None:
+            if departure.get("sent_at") is not None and departure.get("action_done_at") is None:
                 invalid = invalid or now - departure["sent_at"] >= STATION_EXIT_TIMEOUT_S
                 try:
                     measured_distance(robot, departure["target"], now)
@@ -287,15 +287,19 @@ class RosGateway:
                 self._fail_station_exit(robot_id, "station_exit_failed")
                 continue
             if departure.get("action_done_at") is not None:
-                distance = measured_distance(robot, departure["target"], now)
-                if (distance <= STATION_EXIT_TOLERANCE_M
-                        and robot.pose_received_at >= departure["action_done_at"]):
+                try:
+                    measured_distance(robot, departure["target"], now)
+                    if robot.pose_received_at < departure["action_done_at"]:
+                        raise ValueError("직진 이탈 완료 후 새 위치를 기다리고 있습니다.")
+                    self._navigation.finish_station_exit(robot_id)
+                except (OSError, KeyError, ValueError) as exc:
+                    if now - departure["action_done_at"] >= REAL_POSE_TIMEOUT_S:
+                        self._fail_station_exit(robot_id, "station_exit_failed", str(exc))
+                else:
                     self._departing_docks.pop(robot_id, None)
                     robot.docked_station = None
-                    self._navigation.finish_station_exit(robot_id)
-                    print(f"[STATION EXIT] robot={robot_id} completed distance_to_node={distance:.3f}m", flush=True)
-                elif now - departure["action_done_at"] >= REAL_ARRIVAL_CONFIRM_TIMEOUT_S:
-                    self._fail_station_exit(robot_id, "station_exit_failed")
+                    print(f"[STATION EXIT] robot={robot_id} completed pose=({robot.x:.3f},{robot.y:.3f}) "
+                          f"occupied_node={robot.occupied_node} occupied_edge={robot.occupied_edge}", flush=True)
 
     def _live_dock_contact(self, robot_id):
         station = DOCK_STATION_MAP.get(robot_id)
@@ -394,19 +398,14 @@ class RosGateway:
         robot = fleet_manager.get_robot(robot_id)
         node = get_node(CHARGING_STATION_NODES[robot_id])
         target = (node["x"], node["y"])
-        distance = forward_distance(robot, target, monotonic())
-        if distance == 0:
-            self._departing_docks.pop(robot_id, None)
-            self._navigation.clear_station_exit_protection(robot_id)
-            return
-        if distance / STATION_EXIT_SPEED_MPS >= STATION_EXIT_TIMEOUT_S:
-            raise StationExitError("이탈 거리와 속도에 비해 제한 시간이 짧습니다.")
+        measured_distance(robot, target, monotonic())
+        distance = STATION_EXIT_DISTANCE_M
         departure.update(target=target, sent_at=monotonic(), action_done_at=None)
         self._navigation.begin_station_exit(robot_id)
         try:
             self._ros_node.send_station_exit(robot_id, distance, STATION_EXIT_SPEED_MPS, STATION_EXIT_TIMEOUT_S)
-        except (ValueError, RuntimeError):
-            self._fail_station_exit(robot_id, "station_exit_failed")
+        except (ValueError, RuntimeError) as exc:
+            self._fail_station_exit(robot_id, "station_exit_failed", str(exc))
         else:
             print(f"[STATION EXIT] robot={robot_id} target={target} distance={distance:.3f}m "
                   f"speed={STATION_EXIT_SPEED_MPS:.3f}m/s", flush=True)
@@ -423,20 +422,23 @@ class RosGateway:
         departure = self._departing_docks.get(robot_id)
         if departure is None or departure["stop_requested"] or departure.get("sent_at") is None:
             return
+        if monotonic() - departure["sent_at"] >= STATION_EXIT_TIMEOUT_S:
+            self._fail_station_exit(robot_id, "station_exit_failed", "직진 이탈 제한 시간을 초과했습니다.")
+            return
         if status != GoalStatus.STATUS_SUCCEEDED:
-            self._fail_station_exit(robot_id, "station_exit_failed")
+            self._fail_station_exit(robot_id, "station_exit_failed", f"DriveOnHeading status={status}")
             return
         departure["action_done_at"] = monotonic()
         self._tick_charging_docks()
 
-    def _fail_station_exit(self, robot_id, reason):
+    def _fail_station_exit(self, robot_id, reason, detail=None):
         self._station_exit_manual_ready.discard(robot_id)
         departure = self._departing_docks[robot_id]
         departure["stop_requested"] = True
         self._unverified_docks.add(robot_id)
         robot = fleet_manager.get_robot(robot_id)
         if robot.state != RobotState.EMERGENCY_STOP:
-            robot.pause(reason)
+            robot.pause(reason, detail)
         self._navigation.stop(robot_id, lambda: self._finish_dock_stop(robot_id), reason=reason)
 
     def _cancel_navigation_goal(self, robot_id, callback):

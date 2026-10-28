@@ -70,16 +70,14 @@ DOCK_CONTACT_TIMEOUT_S = float(os.getenv("FMS_DOCK_CONTACT_TIMEOUT_S", "10"))
 DOCK_ACTION_TIMEOUT_S = float(os.getenv("FMS_DOCK_ACTION_TIMEOUT_S", "60"))
 # 0: 이벤트 기반. 주기 발행이 확인됐을 때만 최대 수신 간격을 설정한다.
 DOCK_SENSOR_MAX_AGE_S = float(os.getenv("FMS_DOCK_SENSOR_MAX_AGE_S", "0"))
-# 앞 노드 합류/충전 이탈은 Nav2 DriveOnHeading으로 수행한다. 시간만으로 도착을 판정하지 않는다.
-STATION_EXIT_SPEED_MPS = float(os.getenv("FMS_STATION_EXIT_SPEED_MPS", "0.09"))
+# 충전소 이탈은 고정 거리를 Nav2 DriveOnHeading으로 전진한다.
+STATION_EXIT_DISTANCE_M = float(os.getenv("FMS_STATION_EXIT_DISTANCE_M", "0.10"))
+STATION_EXIT_SPEED_MPS = float(os.getenv("FMS_STATION_EXIT_SPEED_MPS", "0.05"))
 STATION_EXIT_TIMEOUT_S = float(os.getenv("FMS_STATION_EXIT_TIMEOUT_S", "20"))
-STATION_EXIT_TOLERANCE_M = float(os.getenv("FMS_STATION_EXIT_TOLERANCE_M", "0.03"))
-STATION_EXIT_MAX_DISTANCE_M = float(os.getenv("FMS_STATION_EXIT_MAX_DISTANCE_M", "0.25"))
 if any(not math.isfinite(value) or value <= 0 for value in (
-    STATION_EXIT_SPEED_MPS, STATION_EXIT_TIMEOUT_S, STATION_EXIT_TOLERANCE_M,
-    STATION_EXIT_MAX_DISTANCE_M,
-)) or STATION_EXIT_TOLERANCE_M >= STATION_EXIT_MAX_DISTANCE_M:
-    raise ValueError("Station exit limits must be finite, positive and geometrically valid")
+    STATION_EXIT_DISTANCE_M, STATION_EXIT_SPEED_MPS, STATION_EXIT_TIMEOUT_S,
+)) or STATION_EXIT_DISTANCE_M / STATION_EXIT_SPEED_MPS >= STATION_EXIT_TIMEOUT_S:
+    raise ValueError("Station exit distance, speed and timeout must be finite, positive and achievable")
 if any(not math.isfinite(value) or value < 0 for value in (DOCK_DEBOUNCE_S, DOCK_SENSOR_MAX_AGE_S)):
     raise ValueError("Dock debounce and sensor maximum age must be finite and nonnegative")
 if any(not math.isfinite(value) or value <= 0 for value in (DOCK_CONTACT_TIMEOUT_S, DOCK_ACTION_TIMEOUT_S)):

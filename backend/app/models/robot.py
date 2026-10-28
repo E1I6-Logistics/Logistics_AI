@@ -34,7 +34,7 @@ class NavigationType(str, Enum):
 
 
 PAUSE_REASON_MESSAGES = {
-    "station_exit_failed": "앞 노드 합류 또는 충전소 이탈을 확인하지 못했습니다.",
+    "station_exit_failed": "충전소 직진 이탈 또는 이탈 후 위치·점유를 확인하지 못했습니다.",
     "dock_startup_sensor_wait": "시작 위치의 도킹 스위치 상태를 기다리고 있습니다.",
     "dock_station_unverified": "물리 도킹 스테이션 대응이 확인되지 않았습니다.",
     "dock_contact_timeout": "정밀 도킹 성공 후 제한 시간 안에 안정된 접촉을 확인하지 못했습니다.",

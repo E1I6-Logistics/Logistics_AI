@@ -101,7 +101,7 @@ class RealNavigation:
         self._navigation_kind = navigation_kind or (lambda rid, goal, kind: kind)
         self._mapf_ready = mapf_ready
         self._executing = {}
-        self._preparing = set()  # 앞 노드 합류 Action이 종료되기 전에는 일반 주행을 전송하지 않는다.
+        self._preparing = set()  # 충전소 이탈 Action이 종료되기 전에는 일반 주행을 전송하지 않는다.
         self._station_pending = set()
         self._stopping = {}
         self._requests = {}
@@ -219,8 +219,14 @@ class RealNavigation:
 
     def finish_station_exit(self, robot_id):
         with self.lock:
-            self._preparing.discard(robot_id)
+            graph = load_route_graph()
+            self._sync(graph, DistanceAStar(graph), self._clock())
+            if robot_id in self._sync_errors:
+                raise ValueError(f"이탈 후 위치·점유 확인 실패: {self._sync_errors[robot_id]}")
             state = self._robots[robot_id]
+            if state.get("occupied_node") is None and state.get("occupied_edge") is None:
+                raise ValueError("이탈 후 노드·통로 점유를 확인할 수 없습니다.")
+            self._preparing.discard(robot_id)
             state["stop_requested"] = state["execution_blocked"] = False
             state["status"] = "WAITING"
             if state["route"] is not None:
@@ -1631,7 +1637,7 @@ class RealNavigation:
 
         try:
             if self._before_send(rid) is False:
-                return  # 명시적인 이동 요청에 포함된 앞 노드 합류가 아직 진행 중이다.
+                return  # 충전소 직진 이탈이 아직 진행 중이다.
         except ValueError as exc:
             reason = getattr(exc, "reason_code", "dock_sensor_unavailable")
             self._pause(rid, reason, str(exc))

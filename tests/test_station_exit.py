@@ -7,7 +7,6 @@ import pytest
 from action_msgs.msg import GoalStatus
 
 from backend.app.models.robot import RobotState, NavigationType
-from backend.app.services.station_exit import forward_distance
 from tests.test_charging_docking import docking, finish, real_executor
 from tests.test_dock_mqtt import message
 
@@ -28,7 +27,7 @@ def start_exit(ctx):
     ctx.clock[0] += 1
     ctx.fleet.get_robot("robot1").pose_received_at = ctx.clock[0]
     ctx.nav.tick()
-    ctx.node.send_station_exit.assert_called_once_with("robot1", pytest.approx(.2), .09, 20.)
+    ctx.node.send_station_exit.assert_called_once_with("robot1", pytest.approx(.1), .05, 20.)
     ctx.gateway._on_dock_navigation_started("robot1")
 
 
@@ -39,7 +38,7 @@ def release(ctx):
     ctx.fleet.get_robot("robot1").pose_received_at = ctx.clock[0]
 
 
-def test_charge_exit_waits_for_action_and_measured_front_node(exit_context):
+def test_charge_exit_waits_for_action_and_refreshes_actual_occupancy(exit_context):
     ctx = exit_context
     start_exit(ctx)
     robot = ctx.fleet.get_robot("robot1")
@@ -50,13 +49,16 @@ def test_charge_exit_waits_for_action_and_measured_front_node(exit_context):
     ctx.gateway._tick_charging_docks()
     assert not ctx.sent
     assert "robot1" in ctx.nav._preparing
+    ctx.clock[0] += .01
     ctx.gateway.on_station_exit_result("robot1", GoalStatus.STATUS_SUCCEEDED)
-    assert "robot1" in ctx.nav._preparing  # Action 성공만으로 좌표 도착을 가정하지 않는다.
-    robot.x = 0.
+    assert "robot1" in ctx.nav._preparing  # 완료 이후 새 위치를 받은 뒤 주행을 연결한다.
+    ctx.clock[0] += .1
+    robot.update_pose(-.1, .04, 0.)
     ctx.gateway._tick_charging_docks()
     assert not ctx.nav._preparing
     assert not ctx.gateway._departing_docks
     assert ctx.nav._traffic._required_paths["robot1"] == ("0", "2", "3")
+    assert (robot.x, robot.y) == (-.1, .04)  # 앞 노드 3cm 밖이어도 실제 좌표를 보존한다.
     ctx.nav.tick()
     ctx.clock[0] += 1
     robot.pose_received_at = ctx.clock[0]
@@ -103,6 +105,25 @@ def test_exit_requires_pose_received_after_action_result(exit_context):
     robot.update_pose(0., 0., 0.)
     ctx.gateway._tick_charging_docks()
     assert not ctx.nav._preparing
+
+
+def test_exit_resumes_from_measured_route_edge_without_returning_to_front_node(exit_context):
+    ctx = exit_context
+    start_exit(ctx)
+    robot = ctx.fleet.get_robot("robot1")
+    ctx.clock[0] += .1
+    robot.update_pose(0., .4, math.pi / 2)
+    ctx.gateway.on_station_exit_result("robot1", GoalStatus.STATUS_SUCCEEDED)
+    assert not ctx.nav._preparing
+    assert robot.occupied_node is None
+    assert robot.occupied_edge is not None
+    assert (robot.x, robot.y) == (0., .4)
+    ctx.nav.tick()
+    ctx.clock[0] += 1
+    robot.pose_received_at = ctx.clock[0]
+    ctx.nav.tick()
+    assert ctx.sent
+    assert ctx.sent[0]["waypoints"][0][:2] == (0, 1)
 
 
 def test_consumed_on_cannot_recreate_charging_after_exit_or_normal_return(exit_context):
@@ -155,6 +176,8 @@ def test_exit_failure_never_releases_robot_into_order_route(exit_context, case):
     release(ctx)
     if case != "wrong_position":
         robot.x = 0.
+    else:
+        robot.x, robot.y = 5., 5.  # 일반 위치·점유 판정 자체가 불가능한 위치
     if case == "offline":
         robot.set_connected(False)
     elif case == "stale_pose":
@@ -264,18 +287,18 @@ def test_live_contact_reconstructs_charging_without_docking_history(docking):
     docking.node.send_station_exit.assert_not_called()
 
 
-@pytest.mark.parametrize("x,y,yaw", [(0.2, 0, 0), (-.2, 0, math.pi), (-.5, 0, 0)])
-def test_wrong_start_geometry_does_not_start_straight_motion(exit_context, x, y, yaw):
-    robot = exit_context.fleet.get_robot("robot1")
-    robot.update_pose(x, y, yaw)
-    robot.pose_received_at = exit_context.clock[0]
-    with pytest.raises(ValueError):
-        forward_distance(robot, (0, 0), exit_context.clock[0])
-    exit_context.node.send_station_exit.assert_not_called()
+@pytest.mark.parametrize("x", [-.2, -.04, 0.])
+def test_fixed_exit_distance_does_not_depend_on_map_distance_to_front_node(exit_context, x):
+    ctx = exit_context
+    robot = ctx.fleet.get_robot("robot1")
+    robot.update_pose(x, 0., 0.)
+    start_exit(ctx)
+    assert robot.state == RobotState.UNDOCKING
+    assert not ctx.sent
 
 
 @pytest.mark.parametrize("pose", [(-.2, -.08, 0), (-.2, 0, math.radians(20))])
-def test_exit_does_not_reject_lateral_or_heading_thresholds(exit_context, pose):
+def test_exit_uses_normal_occupancy_instead_of_front_node_radius(exit_context, pose):
     ctx = exit_context
     robot = ctx.fleet.get_robot("robot1")
     robot.update_pose(*pose)
@@ -287,11 +310,16 @@ def test_exit_does_not_reject_lateral_or_heading_thresholds(exit_context, pose):
     assert not ctx.sent
     assert robot.state == RobotState.UNDOCKING
     ctx.gateway.on_station_exit_result("robot1", GoalStatus.STATUS_SUCCEEDED)
-    ctx.clock[0] += 1.01
-    robot.pose_received_at = ctx.clock[0]
+    ctx.clock[0] += .1
+    robot.update_pose(-.1, pose[1], pose[2])
     ctx.gateway._tick_charging_docks()
-    assert robot.state == RobotState.PAUSED  # 출발 문턱을 없애도 앞 노드 도착을 가정하지 않는다.
-    assert not ctx.sent
+    assert robot.state == RobotState.WAITING
+    assert not ctx.gateway._departing_docks
+    ctx.nav.tick()
+    ctx.clock[0] += 1
+    robot.pose_received_at = ctx.clock[0]
+    ctx.nav.tick()
+    assert ctx.sent
 
 
 def test_exit_action_cancel_is_held_until_terminal_and_ignores_stale_response():

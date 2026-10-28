@@ -165,12 +165,11 @@ def test_manual_recovery_waits_for_all_terminal_results_and_keeps_order_paused(e
     assert not manager._route_tasks
 
 
-def test_preflight_exit_failure_also_allows_manual_recovery_after_stop(exit_context):
-    import math
-
+def test_exit_send_failure_also_allows_manual_recovery_after_stop(exit_context):
     ctx = exit_context
     robot = ctx.fleet.get_robot("robot1")
-    robot.update_pose(-.2, 0, math.pi)
+    robot.update_pose(-.2, 0, 0.)
+    ctx.node.send_station_exit.side_effect = ValueError("DriveOnHeading server unavailable")
     callbacks = []
     ctx.nav._cancel_goal = ctx.gateway._cancel_navigation_goal
     ctx.node.cancel_follow_waypoints.side_effect = lambda rid, callback: callbacks.append(callback)
@@ -179,7 +178,7 @@ def test_preflight_exit_failure_also_allows_manual_recovery_after_stop(exit_cont
     robot.pose_received_at = ctx.clock[0]
     ctx.nav.tick()
     assert robot.pause_reason_code == "station_exit_failed"
-    ctx.node.send_station_exit.assert_not_called()
+    ctx.node.send_station_exit.assert_called_once_with("robot1", .1, .05, 20.)
     with pytest.raises(ValueError):
         ctx.gateway.cmd_vel("robot1", .2, 0)
     callbacks[-1]()
