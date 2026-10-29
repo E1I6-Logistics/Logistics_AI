@@ -1,0 +1,8 @@
+[submodule "omx_ws/Logistics_OMX"]
+	path = omx_ws/Logistics_OMX
+	url = https://github.com/E1I6-Logistics/Logistics_OMX.git
+	branch = main
+[submodule "robots_ws/Logistics_AMR"]
+	path = robots_ws/Logistics_AMR
+	url = https://github.com/E1I6-Logistics/Logistics_AMR.git
+	branch = dev
