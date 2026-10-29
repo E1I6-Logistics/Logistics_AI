@@ -12,13 +12,13 @@ import logging
 from time import monotonic
 
 from ..llm_route_preview import preview_llm_route
-from ..iterative_route_policy import MAJOR_TASK_NODES
 from ..route_selector.kev_selector import KevSelector
 from .kev_coordinator import _is_valid_suffix
 from .kev_graph import Graph
 from .kev_traffic import live_traffic
 
 logger = logging.getLogger(__name__)
+MAJOR_TASK_NODES = frozenset(range(7))
 
 RECOVERY_INSTRUCTIONS = (
     "You are the fleet recovery planner. Decide WHICH robot should move and "
@@ -91,7 +91,7 @@ class KevRecoveryPlanner:
                 virtual = Graph(graph).virtual_graph(forbidden, set())
                 result = (self._route_preview or preview_llm_route)(
                     virtual, robot["occupied_node"], robot["goal_node"],
-                    selector="kev", model=registered[rid]["order"]["model"], traffic=traffic,
+                    selector="kev", model=registered[rid]["order"]["model"],
                 )
                 path = [str(n) for n in result["path"]]
                 Graph(virtual).check_path(

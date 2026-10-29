@@ -167,8 +167,6 @@ class LiveKEV:
                 "selector": selector,
                 "model": self.model if model is None else model,
             }
-            if traffic is not None:
-                kwargs["traffic"] = traffic
             result = self.preview_llm_route(
                 graph_data,
                 str(start),

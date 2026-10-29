@@ -8,6 +8,7 @@ from typing import Any
 
 from ..llm_route_preview import preview_llm_route
 from ..route_service import plan_route
+from .kev_graph import Graph
 
 
 def generate_traffic_route(
@@ -22,14 +23,17 @@ def generate_traffic_route(
     blocked_edges: tuple | list = (),
 ) -> dict[str, Any]:
     """장애물 제약 조건을 주입하여 KEV AI 또는 최단 경로를 생성하고 결과를 표준 형식으로 반환한다."""
-    constraints = dict(blocked_nodes=blocked_nodes, blocked_edges=blocked_edges)
+    virtual_graph = Graph(graph).virtual_graph(
+        {int(node) for node in blocked_nodes},
+        {(int(start_node), int(end_node)) for start_node, end_node in blocked_edges},
+    )
     if source == "KEV":
         result = preview_llm_route(
-            graph, start, goal, selector=selector, model=model, **constraints
+            virtual_graph, start, goal, selector=selector, model=model
         )
     elif source == "EXISTING_SHORTEST_PATH":
         result = dict(
-            path=plan_route(start, goal, graph, **constraints)["node_ids"],
+            path=plan_route(str(start), str(goal), virtual_graph)["node_ids"],
             calls=0,
         )
     else:

@@ -164,11 +164,7 @@ class MapfIntegrationTests(unittest.TestCase):
         self.assertEqual(args[1:], ("5", "7"))
         self.assertEqual(
             kwargs,
-            {
-                "selector": "ollama",
-                "model": "chosen-model",
-                "traffic": {"occupied_nodes": {1: "a"}, "robot_paths": {"a": [1, 2, 3, 4]}},
-            },
+            {"selector": "ollama", "model": "chosen-model"},
         )
         self.assertNotIn(3, mapf.Graph(args[0]).nodes)
         self.assertEqual(result["required_paths"]["b"], ["5", "6", "7"])

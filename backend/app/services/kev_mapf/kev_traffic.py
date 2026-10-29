@@ -1,8 +1,11 @@
-"""[모듈: kev_traffic.py - KEV 경로 생성용 실시간/MAPF 로봇 점유 및 잔여 경로 수집]
+"""[모듈: kev_traffic.py - MAPF 우회·복구용 로봇 점유 및 잔여 경로 수집]
 - 역할:
-  1. 초기 AI 경로 생성 시 FMS 실시간 스냅샷에서 다른 로봇의 현재 점유 노드(하드 제외)와 Active 로봇의 남은 경로(소프트 정보)를 추출한다 (`live_traffic`).
-  2. KEV-MAPF 우회 경로(`_reroute`) 생성 시 KevMAPF가 보유한 다른 로봇의 위치와 경로를 동일한 `traffic` 구조로 변환한다 (`mapf_traffic`).
-  3. 시간 개념(ETA/속도) 없이 순수 위상 노드 정보만 생성하여 `preview_llm_route(..., traffic=...)`에 공급한다.
+  1. FMS 스냅샷에서 대상 로봇을 제외한 다른 로봇의 점유 노드·점유 간선 양 끝 노드와 주행·대기 중인 로봇의 남은 경로를 수집한다 (`live_traffic`).
+  2. KevMAPF가 보유한 다른 로봇의 위치·경로를 동일한 `traffic` 구조로 변환한다 (`mapf_traffic`).
+  3. MAPF 우회·복구에서는 수집한 점유 정보를 이용해 금지 노드를 제거한 그래프를 구성한다.
+     경로 모델에는 이 그래프를 전달하며, 점유·남은 경로 스냅샷을 다음 노드 context에
+     직접 추가하거나 `preview_llm_route(..., traffic=...)`로 전달하지 않는다.
+  4. ETA·속도·예약 시간 구간은 생성하지 않는다. 시간 기반 예약과 실행 허가는 하위 FMS가 담당한다.
 """
 
 from __future__ import annotations
