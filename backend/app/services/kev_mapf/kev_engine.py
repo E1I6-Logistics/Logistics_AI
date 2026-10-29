@@ -230,8 +230,12 @@ class KevMAPF:
         if error:
             return None, error
         curr, goal = robot["current_node"], robot["goal_node"]
-        virtual = self.graph.virtual_graph(forbid_nodes, forbid_edges)
         traffic = mapf_traffic(self.robots, robot["id"], occupied=self.occupied)
+        occupied_nodes = set(traffic["occupied_nodes"])
+        if curr in occupied_nodes or goal in occupied_nodes:
+            return None, "reroute start or goal is occupied by another robot"
+        forbid_nodes.update(occupied_nodes)
+        virtual = self.graph.virtual_graph(forbid_nodes, forbid_edges)
         try:
             try:
                 candidate = self.live.route(

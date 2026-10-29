@@ -7,7 +7,6 @@ positive-cost/coordinate fallback unless a caller requests strict weights.
 
 from __future__ import annotations
 
-import copy
 import heapq
 import json
 import math
@@ -16,24 +15,17 @@ from pathlib import Path
 from typing import Any
 
 ROUTE_GRAPH_PATH = Path(__file__).resolve().parents[3] / "routes" / os.getenv("FMS_ROUTE_GRAPH", "test.geojson")
-_GRAPH_CACHE: tuple[Path, int, dict[str, Any]] | None = None
 
 
 def load_route_graph() -> dict[str, Any]:
     """Load and validate the configured GeoJSON route graph."""
-    global _GRAPH_CACHE
     if not ROUTE_GRAPH_PATH.is_file():
         raise FileNotFoundError(f"Route Graph 파일 없음: {ROUTE_GRAPH_PATH}")
-    resolved = ROUTE_GRAPH_PATH.resolve()
-    mtime_ns = resolved.stat().st_mtime_ns
-    if _GRAPH_CACHE is not None and _GRAPH_CACHE[0] == resolved and _GRAPH_CACHE[1] == mtime_ns:
-        return copy.deepcopy(_GRAPH_CACHE[2])
     with ROUTE_GRAPH_PATH.open("r", encoding="utf-8") as file:
         graph = json.load(file)
     if graph.get("type") != "FeatureCollection":
         raise ValueError("Route Graph는 GeoJSON FeatureCollection 형식이어야 합니다.")
-    _GRAPH_CACHE = (resolved, mtime_ns, graph)
-    return copy.deepcopy(graph)
+    return graph
 
 
 def node_lookup(graph: dict[str, Any] | None = None) -> dict[str, dict[str, Any]]:
@@ -105,16 +97,8 @@ def build_route_inputs(
     return points, edges
 
 
-_MAJOR_NODE_IDS = frozenset(str(n) for n in range(7))
-
-
 def plan_route(
-    start_id: str,
-    goal_id: str,
-    graph: dict[str, Any] | None = None,
-    *,
-    require_stored_weight: bool = False,
-    avoid_major_nodes: bool | None = None,
+    start_id: str, goal_id: str, graph: dict[str, Any] | None = None, *, require_stored_weight: bool = False
 ) -> dict[str, Any]:
     """Calculate a directed shortest path with A* and resolved edge weights."""
     graph = graph if graph is not None else load_route_graph()
@@ -154,37 +138,21 @@ def plan_route(
     def heuristic(node_id: str) -> float:
         return heuristic_scale * math.dist(points[node_id], points[goal_id])
 
-    if avoid_major_nodes is None:
-        avoid_major_nodes = not require_stored_weight
-    forbidden = (
-        _MAJOR_NODE_IDS - {start_id, goal_id}
-        if avoid_major_nodes and _MAJOR_NODE_IDS.issubset(nodes)
-        else frozenset()
-    )
-
-    def _search(blocked_nodes: frozenset[str]) -> tuple[dict[str, float], dict[str, tuple[str, str]]]:
-        dists = {start_id: 0.0}
-        prev: dict[str, tuple[str, str]] = {}
-        queue = [(heuristic(start_id), 0.0, start_id)]
-        while queue:
-            _, distance, current = heapq.heappop(queue)
-            if distance > dists[current]:
-                continue
-            if current == goal_id:
-                break
-            for neighbor, weight, edge_id in adjacency[current]:
-                if neighbor in blocked_nodes:
-                    continue
-                candidate = distance + weight
-                if candidate < dists.get(neighbor, math.inf):
-                    dists[neighbor] = candidate
-                    prev[neighbor] = (current, edge_id)
-                    heapq.heappush(queue, (candidate + heuristic(neighbor), candidate, neighbor))
-        return dists, prev
-
-    distances, previous = _search(forbidden)
-    if goal_id not in distances and forbidden:
-        distances, previous = _search(frozenset())
+    distances = {start_id: 0.0}
+    previous: dict[str, tuple[str, str]] = {}
+    queue = [(heuristic(start_id), 0.0, start_id)]
+    while queue:
+        _, distance, current = heapq.heappop(queue)
+        if distance > distances[current]:
+            continue
+        if current == goal_id:
+            break
+        for neighbor, weight, edge_id in adjacency[current]:
+            candidate = distance + weight
+            if candidate < distances.get(neighbor, math.inf):
+                distances[neighbor] = candidate
+                previous[neighbor] = (current, edge_id)
+                heapq.heappush(queue, (candidate + heuristic(neighbor), candidate, neighbor))
 
     if goal_id not in distances:
         raise ValueError(f"노드 {start_id}에서 {goal_id}까지 연결된 경로가 없습니다.")
@@ -292,18 +260,11 @@ def get_available_edges(
         raise ValueError(f"현재 노드가 graph에 없습니다: {current_node}")
 
     visited = {int(node) for node in (visited_nodes or [])}
-    if graph.get("type") == "CompactAdjacencyGraph" and isinstance(graph.get("adjacency"), dict):
-        available = [
-            {"node": int(item["to"]), "weight": _model_weight(item["weight"])}
-            for item in graph["adjacency"].get(str(current_node), [])
-            if int(item["to"]) not in visited
-        ]
-    else:
-        available = [
-            {"node": int(edge["to"]), "weight": _model_weight(edge["weight"])}
-            for edge in compact_graph_edges(graph)
-            if int(edge["from"]) == current_node and int(edge["to"]) not in visited
-        ]
+    available = [
+        {"node": int(edge["to"]), "weight": _model_weight(edge["weight"])}
+        for edge in compact_graph_edges(graph)
+        if int(edge["from"]) == current_node and int(edge["to"]) not in visited
+    ]
     return sorted(available, key=lambda item: (item["node"], item["weight"]))
 
 

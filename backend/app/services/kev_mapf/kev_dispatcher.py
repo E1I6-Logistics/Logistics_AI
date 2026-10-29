@@ -19,7 +19,6 @@ from ..mode_service import feature_engine, mode_manager
 from ..route_graph import load_route_graph
 from .kev_coordinator import FmsMapfCoordinator, is_fms_reviewable_advisory
 from .kev_graph import Graph
-from .kev_traffic import live_traffic
 
 logger = logging.getLogger("uvicorn.error")
 _coordinators = {}
@@ -83,7 +82,6 @@ async def prepare_order_route(order: dict, node: Any, current_node: Any, valid: 
         raise ValueError("로봇이 경로 준비 가능한 정지 상태가 아닙니다.")
 
     graph = load_route_graph()
-    traffic = live_traffic(robot_id, graph=graph, snapshots=store.robot_snapshots(mode))
     try:
         result = await asyncio.to_thread(
             preview_llm_route,
@@ -92,7 +90,6 @@ async def prepare_order_route(order: dict, node: Any, current_node: Any, valid: 
             node,
             selector=order["selector"],
             model=order["model"],
-            traffic=traffic,
         )
     except (ValueError, RuntimeError) as exc:
         raise ValueError(f"AI 경로 생성 실패(N{current_node} → N{node}): {exc}") from exc
