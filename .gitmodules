@@ -6,3 +6,7 @@
 	path = robots_ws/Logistics_AMR
 	url = https://github.com/E1I6-Logistics/Logistics_AMR.git
 	branch = dev
+[submodule "robots_ws/shellscript"]
+	path = robots_ws/shellscript
+	url = https://github.com/E1I6-Logistics/shellscript.git
+	branch = main
