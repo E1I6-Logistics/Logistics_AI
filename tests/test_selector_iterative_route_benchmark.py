@@ -525,6 +525,89 @@ class SelectorIterativeRouteBenchmarkTest(unittest.TestCase):
         self.assertEqual(models[0]["options"], {"num_ctx": 2048, "num_predict": 512})
         self.assertEqual(models[0]["timeout_seconds"], 120)
 
+    def test_state_profiles_keep_candidates_and_preserve_actual_input_snapshot(self):
+        """입력만 달라지고 후보·지시문·경로 제약은 같으며 기록은 이력 갱신 후에도 변하지 않는다."""
+        from backend.app.services.iterative_route_policy import NEXT_NODE_INSTRUCTIONS
+        case = {"start": 0, "target": 2, "expected_path": [0, 1, 2], "expected_distance": 2.0}
+        observed = {}
+        for profile in ("legacy", "minimal", "minimal_distance", "legacy_compass_distance"):
+            selector = _OracleSelector()
+            result = _run_route(
+                selector, _fixture(), case, "neighbors", .15,
+                state_profile=profile, record_inputs=True,
+            )
+            self.assertTrue(result["distance_match"])
+            self.assertEqual(result["state_profile"], profile)
+            called, forced = result["steps"]
+            self.assertNotIn("model_input", forced)
+            recorded = called["model_input"]
+            self.assertEqual(recorded["questions"]["route_0_2_step_1"], {
+                "type": "choice", "instructions": NEXT_NODE_INSTRUCTIONS,
+                "criteria": {"node_1": "Node 1", "node_2": "Node 2"},
+            })
+            self.assertEqual(recorded["state"]["route_graph"], _fixture()["compact_graph"])
+            observed[profile] = recorded["state"]
+        required = {"route_graph", "current_node", "target_node", "available_edges"}
+        self.assertEqual(set(observed["minimal"]), required)
+        self.assertEqual(set(observed["minimal_distance"]), required)
+        geometric = observed["legacy_compass_distance"]
+        self.assertEqual(set(geometric), set(observed["legacy"]) | {"target_direction", "target_distance"})
+        self.assertEqual(geometric["target_direction"], "E")
+        self.assertEqual(geometric["target_distance"], 2.0)
+        self.assertEqual(geometric["available_edges"], [
+            {"node": 1, "weight": 1.0, "direction": "E", "dist_to_target": 1.0, "progress": 1.0},
+            {"node": 2, "weight": 3.0, "direction": "E", "dist_to_target": 0.0, "progress": 2.0},
+        ])
+        self.assertEqual(observed["legacy"]["visited_nodes"], [0])
+        self.assertEqual(observed["legacy"]["visit_counts"], {0: 1})
+        self.assertEqual(observed["minimal"]["available_edges"], [
+            {"node": 1, "weight": 1.0}, {"node": 2, "weight": 3.0},
+        ])
+        self.assertEqual(observed["minimal_distance"]["available_edges"], [
+            {"node": 1, "weight": 1.0, "dist_to_target": 1.0},
+            {"node": 2, "weight": 3.0, "dist_to_target": 0.0},
+        ])
+
+    def test_minimal_profiles_require_neighbor_context_before_selector_call(self):
+        for profile in ("minimal", "minimal_distance", "legacy_compass_distance", "invalid"):
+            selector = _OracleSelector()
+            with self.assertRaises(ValueError):
+                _run_route(selector, _fixture(), {"start": 0, "target": 2},
+                           "neighbors", .15, "full_graph_only", state_profile=profile)
+            self.assertEqual(selector.calls, 0)
+
+    def test_profile_override_is_resolved_in_config(self):
+        config = Path("backend/simulation/evaluation/selector_iterative_benchmark.json")
+        self.assertEqual(load_iterative_config(config)["settings"]["state_profile"], "legacy")
+        self.assertEqual(
+            load_iterative_config(config, state_profile="minimal_distance")["settings"]["state_profile"],
+            "minimal_distance",
+        )
+
+    def test_benchmark_writes_selected_profile_and_actual_input(self):
+        import backend.simulation.evaluation.selector_iterative_route_benchmark as benchmark
+        prepared = _fixture()
+        prepared.update(
+            graph_path=benchmark.ROOT / "routes/test_int.geojson", route_seed=None,
+            case_mode="all-pairs", docking_nodes=[0, 1, 2],
+            cases=[{"start": 0, "target": 2, "expected_path": [0, 1, 2], "expected_distance": 2.0}],
+        )
+        with tempfile.TemporaryDirectory() as directory, patch.object(benchmark, "_prepare", return_value=prepared):
+            output = Path(directory) / "run"
+            summary = run_benchmark(output, repeats=1, warmups=1, selector=_OracleSelector(),
+                                    state_profile="minimal_distance", progress=False)
+            manifest = json.loads((output / "manifest.json").read_text())
+            trial_lines = (output / "selector_iterative_route_trials.jsonl").read_text().splitlines()
+            self.assertEqual(len(trial_lines), 1)  # 워밍업은 측정에서 제외
+            trial = json.loads(trial_lines[0])
+            self.assertEqual(manifest["settings"]["state_profile"], "minimal_distance")
+            self.assertEqual(summary["settings"]["state_profile"], "minimal_distance")
+            self.assertEqual(trial["state_profile"], "minimal_distance")
+            actual = trial["steps"][0]["model_input"]["state"]
+            self.assertEqual(actual["available_edges"][0]["dist_to_target"], 1.0)
+            self.assertNotIn("visited_nodes", actual)
+
+
 
 if __name__ == "__main__":
     unittest.main()

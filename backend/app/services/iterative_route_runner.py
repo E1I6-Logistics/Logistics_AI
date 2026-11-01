@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import math
+from copy import deepcopy
 import time
 from typing import Any
 
-from .iterative_route_policy import MAX_VISITS_PER_NODE, NEXT_NODE_INSTRUCTIONS, next_node_options, next_node_state
+from .iterative_route_policy import MAX_VISITS_PER_NODE, NEXT_NODE_INSTRUCTIONS, next_node_options, next_node_state, validate_state_profile
 from .route_service import validate_and_calculate_path_distance
 
 
@@ -43,7 +44,9 @@ def run_selected_route(
     *,
     instructions: str = NEXT_NODE_INSTRUCTIONS,
     state_profile: str = "legacy",
+    record_inputs: bool = False,
 ) -> dict[str, Any]:
+    validate_state_profile(state_profile, context_mode)
     start, target = case["start"], case["target"]
     current = start
     path = [start]
@@ -161,6 +164,14 @@ def run_selected_route(
             points=prepared.get("points"),
             state_profile=state_profile,
         )
+        # 경로 이력은 뒤에서 갱신되므로 호출 전에 복사해 실제 전달 입력을 보존한다.
+        question_id = f"route_{start}_{target}_step_{step_index + 1}"
+        model_input = deepcopy({
+            "state": state,
+            "questions": {
+                question_id: {"type": "choice", "instructions": instructions, "criteria": candidates}
+            },
+        }) if record_inputs else None
         step_started = time.perf_counter()
         step_record: dict[str, Any] = {
             "step": step_index + 1,
@@ -179,10 +190,12 @@ def run_selected_route(
             "forced_step": False,
             "model_called": True,
         }
+        if record_inputs:
+            step_record["model_input"] = model_input
         try:
             api_call_count += 1
             result = selector.select_choice(
-                state, candidates, instructions, question_id=f"route_{start}_{target}_step_{step_index + 1}"
+                state, candidates, instructions, question_id=question_id
             )
             step_wall = time.perf_counter() - step_started
             choice = str(result.get("choice", ""))
@@ -268,6 +281,7 @@ def run_selected_route(
     )
     return {
         "path": path,
+        "state_profile": state_profile,
         "steps": steps,
         "api_call_count": api_call_count,
         "max_steps": step_limit,

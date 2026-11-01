@@ -22,7 +22,7 @@ sys.path.insert(0, str(ROOT))
 from backend.simulation.evaluation.device_metadata import git_metadata, selector_device_metadata
 from backend.simulation.evaluation.graph_path import resolve_graph_path
 from backend.simulation.route_selector import get_selector
-from backend.simulation.services.iterative_route_policy import MAX_VISITS_PER_NODE, NEXT_NODE_INSTRUCTIONS
+from backend.simulation.services.iterative_route_policy import MAX_VISITS_PER_NODE, NEXT_NODE_INSTRUCTIONS, STATE_PROFILES, validate_state_profile
 from backend.simulation.services.iterative_route_runner import run_selected_route as _run_route, _random_path_baseline
 from backend.simulation.services.route_service import (
     build_compact_adjacency_graph,
@@ -303,7 +303,9 @@ def _resolve_model_specs(config: dict[str, Any], selected_models: list[str] | No
     return resolved
 
 
-def load_iterative_config(config_path: Path, selected_models: list[str] | None = None) -> dict[str, Any]:
+def load_iterative_config(
+    config_path: Path, selected_models: list[str] | None = None, *, state_profile: str | None = None
+) -> dict[str, Any]:
     """Validate the JSON config without contacting Ollama."""
     config_path = config_path.resolve()
     config = json.loads(config_path.read_text(encoding="utf-8"))
@@ -347,6 +349,9 @@ def load_iterative_config(config_path: Path, selected_models: list[str] | None =
     if settings["context_mode"] not in {"full_graph_only", "neighbor_context"}:
         raise ValueError("settings.context_mode must be full_graph_only or neighbor_context")
 
+    settings = dict(settings)
+    settings["state_profile"] = state_profile if state_profile is not None else settings.get("state_profile", "legacy")
+    validate_state_profile(settings["state_profile"], settings["context_mode"])
     models = _resolve_model_specs(config, selected_models)
     return {
         "config_path": config_path,
@@ -422,9 +427,11 @@ def run_benchmark(
     context_mode: str = "neighbor_context",
     max_steps: int | None = None,
     deadline: float = 0.15,
+    state_profile: str = "legacy",
     selector: Any | None = None,
     progress: bool = True,
 ) -> dict[str, Any]:
+    validate_state_profile(state_profile, context_mode)
     if repeats < 1 or warmups < 0:
         raise ValueError("repeats must be positive and warmups must be non-negative")
     if case_count < 1:
@@ -482,6 +489,8 @@ def run_benchmark(
             "questions_per_api_request": 1,
             "candidate_scope": candidate_scope,
             "context_mode": context_mode,
+            "state_profile": state_profile,
+            "model_input_recording": "steps[].model_input before selector encoding; forced steps have no model input",
             "context_policy": (
                 "exact_current_node_adjacency_each_step" if context_mode == "neighbor_context" else "none"
             ),
@@ -516,7 +525,8 @@ def run_benchmark(
 
     for warmup in range(1, warmups + 1):
         _run_route(
-            selector, prepared, prepared["cases"][0], candidate_scope, deadline, context_mode, effective_max_steps
+            selector, prepared, prepared["cases"][0], candidate_scope, deadline, context_mode, effective_max_steps,
+            state_profile=state_profile,
         )
         if progress:
             print(f"warmup {warmup}/{warmups} complete")
@@ -525,7 +535,10 @@ def run_benchmark(
     last_result = None
     for case in prepared["cases"]:
         for repeat in range(1, repeats + 1):
-            result = _run_route(selector, prepared, case, candidate_scope, deadline, context_mode, effective_max_steps)
+            result = _run_route(
+                selector, prepared, case, candidate_scope, deadline, context_mode, effective_max_steps,
+                state_profile=state_profile, record_inputs=True,
+            )
             last_result = result
             row = {
                 "timestamp": _utc_now(),
@@ -584,6 +597,7 @@ def run_benchmark(
         "random_baseline_path_probability",
         "candidate_scope",
         "context_mode",
+        "state_profile",
         "failed_step",
         "invalid_edge_count",
         "revisit_count",
@@ -627,10 +641,11 @@ def run_benchmark(
 
 
 def run_configured_benchmarks(
-    config_path: Path, output: Path, *, selected_models: list[str] | None = None, progress: bool = True
+    config_path: Path, output: Path, *, selected_models: list[str] | None = None, progress: bool = True,
+    state_profile: str | None = None,
 ) -> dict[str, Any]:
     """Run the same iterative cases for selected Ollama models."""
-    resolved = load_iterative_config(config_path, selected_models)
+    resolved = load_iterative_config(config_path, selected_models, state_profile=state_profile)
     settings = resolved["settings"]
     output = output.resolve()
     output.mkdir(parents=True, exist_ok=True)
@@ -666,6 +681,7 @@ def run_configured_benchmarks(
                 case_mode=str(settings["case_mode"]),
                 candidate_scope=str(settings["candidate_scope"]),
                 context_mode=str(settings["context_mode"]),
+                state_profile=str(settings["state_profile"]),
                 max_steps=(int(settings["max_steps"]) if settings["max_steps"] is not None else None),
                 deadline=float(settings["deadline_seconds"]),
                 selector=selector,
@@ -731,13 +747,17 @@ def main() -> int:
     parser.add_argument("--candidate-scope", choices=("neighbors", "all"), default="neighbors")
     parser.add_argument("--context-mode", choices=("full_graph_only", "neighbor_context"), default="neighbor_context")
     parser.add_argument(
+        "--state-profile", choices=STATE_PROFILES, default=None,
+        help="legacy=기존 기본, minimal=필수만, minimal_distance=필수+직선거리, legacy_compass_distance=기존 기본+방위·거리·접근량. JSON 설정 재정의 가능",
+    )
+    parser.add_argument(
         "--max-steps", type=int, default=None, help="목적지 미도착 시 중단할 최대 이동 횟수 (기본: Node 수의 2배)"
     )
     parser.add_argument("--deadline", type=float, default=0.15)
     args = parser.parse_args()
 
     if args.config is not None:
-        resolved = load_iterative_config(args.config, args.model)
+        resolved = load_iterative_config(args.config, args.model, state_profile=args.state_profile)
         if args.check:
             printable = {
                 "status": "ok",
@@ -751,7 +771,9 @@ def main() -> int:
             print(json.dumps(printable, ensure_ascii=False, indent=2))
             return 0
         output = args.output or default_matrix_output_path()
-        summary = run_configured_benchmarks(args.config, output, selected_models=args.model)
+        summary = run_configured_benchmarks(
+            args.config, output, selected_models=args.model, state_profile=args.state_profile
+        )
         print(json.dumps(summary, ensure_ascii=False, indent=2))
         return 0
 
@@ -771,6 +793,7 @@ def main() -> int:
         case_mode=args.case_mode,
         candidate_scope=args.candidate_scope,
         context_mode=args.context_mode,
+        state_profile=args.state_profile or "legacy",
         max_steps=args.max_steps,
         deadline=args.deadline,
         selector=selector,

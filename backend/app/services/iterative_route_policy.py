@@ -29,6 +29,23 @@ NEXT_NODE_INSTRUCTIONS = (
 )
 
 MAX_VISITS_PER_NODE = 2
+STATE_PROFILES = ("legacy", "minimal", "minimal_distance", "legacy_compass_distance")
+
+
+def validate_state_profile(state_profile: str, context_mode: str) -> None:
+    """필수 입력 비교 조건은 현재 허용 후보 간선을 항상 포함한다."""
+    if state_profile not in STATE_PROFILES:
+        raise ValueError(f"Unsupported state_profile: {state_profile}")
+    if state_profile != "legacy" and context_mode != "neighbor_context":
+        raise ValueError(f"{state_profile} requires neighbor_context")
+
+
+def _compass(a: tuple[float, float], b: tuple[float, float]) -> str:
+    """지도 좌표 +x=E, +y=N 기준의 8방위를 계산한다."""
+    dx, dy = b[0] - a[0], b[1] - a[1]
+    if math.isclose(dx, 0.0, abs_tol=1e-12) and math.isclose(dy, 0.0, abs_tol=1e-12):
+        return "HERE"
+    return ("E", "NE", "N", "NW", "W", "SW", "S", "SE")[round(math.atan2(dy, dx) / (math.pi / 4)) % 8]
 
 
 # 다음 노드 후보를 만들고, 직전 노드로 되돌아갈 수 있는지 결정
@@ -107,9 +124,15 @@ def next_node_state(
     """
     if context_mode not in {"neighbor_context", "full_graph_only"}:
         raise ValueError(f"Unsupported context_mode: {context_mode}")
+    validate_state_profile(state_profile, context_mode)
+    if state_profile == "minimal":
+        return {
+            "route_graph": compact_graph,
+            "current_node": current,
+            "target_node": target,
+            "available_edges": [dict(edge) for edge in options["available_edges"]],
+        }
     if state_profile == "minimal_distance":
-        if context_mode != "neighbor_context":
-            raise ValueError("minimal_distance requires neighbor_context")
         required_nodes = {target} | {int(edge["node"]) for edge in options["available_edges"]}
         if points is None or any(points.get(node) is None for node in required_nodes):
             raise ValueError("minimal_distance requires coordinates for target and candidates")
@@ -123,7 +146,7 @@ def next_node_state(
                 for edge in options["available_edges"]
             ],
         }
-    if state_profile != "legacy":
+    if state_profile not in {"legacy", "legacy_compass_distance"}:
         raise ValueError(f"Unsupported state_profile: {state_profile}")
 
     state = {
@@ -141,4 +164,20 @@ def next_node_state(
 
     if context_mode == "neighbor_context":
         state["available_edges"] = options["available_edges"]
+    if state_profile == "legacy_compass_distance":
+        required_nodes = {current, target} | {int(edge["node"]) for edge in options["available_edges"]}
+        if points is None or any(points.get(node) is None for node in required_nodes):
+            raise ValueError("legacy_compass_distance requires coordinates for current, target and candidates")
+        current_distance = math.dist(points[current], points[target])
+        state["target_direction"] = _compass(points[current], points[target])
+        state["target_distance"] = round(current_distance, 4)
+        state["available_edges"] = [
+            {
+                **edge,
+                "direction": _compass(points[current], points[int(edge["node"])]),
+                "dist_to_target": round(math.dist(points[int(edge["node"])], points[target]), 4),
+                "progress": round(current_distance - math.dist(points[int(edge["node"])], points[target]), 4),
+            }
+            for edge in options["available_edges"]
+        ]
     return state
