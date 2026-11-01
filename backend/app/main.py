@@ -16,6 +16,7 @@ from .routers.robots import router as robots_router
 from .routers.websocket import router as websocket_router
 from .routers.orders import router as orders_router
 from .routers.omx import router as omx_router
+from .routers.system import router as system_router
 from .routers.scenarios import router as scenarios_router
 from .routers.dispatch_settings import router as dispatch_settings_router
 from .routers.docking_settings import router as docking_settings_router
@@ -132,6 +133,7 @@ app.include_router(connections_router)
 app.include_router(websocket_router)
 app.include_router(orders_router)
 app.include_router(omx_router)
+app.include_router(system_router)
 app.include_router(scenarios_router)
 app.include_router(dispatch_settings_router)
 app.include_router(docking_settings_router)

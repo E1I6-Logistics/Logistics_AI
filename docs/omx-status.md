@@ -76,3 +76,70 @@ SSH 작업이 최대 65초 걸릴 수 있으며, 실패하면 오류 내용을 �
 
 `tests/test_omx_status.py`는 모의 MQTT 메시지와 모의 SSH만 사용합니다. 실제 Pi·브로커에는 접속하지 않습니다.
 기존 도킹 MQTT·주문·모드 분리·충전 회귀 테스트와 함께 확인했습니다.
+
+
+## OMX1~4 SSH 간편 설정
+
+**FMS를 실행하는 리눅스 PC에서, FMS 실행 사용자 계정으로** 실행하세요. Windows 노트북이나 Pi에서 실행하는 명령이 아닙니다.
+
+```bash
+cd ~/AX_Logistics
+git pull --ff-only origin ugie-dev-merge
+bash scripts/setup_omx_ssh.sh
+```
+
+다음 순서로 접속합니다. 각 장비의 호스트키를 확인하고 로그인 비밀번호를 직접 입력하세요.
+
+| OMX | SSH 계정·주소 |
+| --- | --- |
+| OMX1 | `omx01@192.168.0.151` |
+| OMX2 | `omx02@192.168.0.152` |
+| OMX3 | `omx03@192.168.0.153` |
+| OMX4 | `omx4@192.168.0.154` |
+
+도우미는 기존 사용자 키를 덮어쓰지 않고 `~/.ssh/fms_omx_ed25519` 전용 키를 사용합니다.
+4대 접속과 사용자 서비스 환경을 확인한 다음 `.env`에 주소와 `FMS_OMX_SSH_IDENTITY` 키 경로만 저장합니다.
+비밀번호는 파일에 저장하지 않습니다. Pi의 모터·모델·실행 상태는 변경하지 않습니다.
+
+코드 업데이트를 처음 적용할 때는 터미널에서 한 번 재시작하세요.
+
+```bash
+./stop_fms.sh
+unset FMS_OMX_SSH_TARGETS FMS_OMX_SSH_IDENTITY
+./start_fms.sh
+```
+
+이후 OMX 아이콘 → **OMX 서비스 재시작**을 사용할 수 있습니다.
+Pi OS 재부팅이 아니라 해당 OMX 사용자 프로그램을 재시작합니다. OMX 단독 재시작은 기존처럼 작업 중 거절합니다.
+
+## 웹에서 전체 FMS 종료 후 자동 시작
+
+상단 **FMS 전체 재시작** → **전체 종료 후 재시작**을 누릅니다.
+
+- **작업 중이어도 차단하지 않습니다.** 실제 `stop_fms.sh` → `start_fms.sh` 순서로 전체 FMS를 다시 시작합니다.
+- 백엔드·프론트엔드·Zenoh 브리지·MQTT/Zenoh 컨테이너·Kev 등 기존 스크립트가 관리하는 대상이 모두 포함됩니다.
+- 메모리에 있는 주문·운영 상태는 기존 수동 stop/start처럼 초기화될 수 있습니다. Pi OS나 OMX 서비스를 직접 재부팅하는 명령은 아닙니다.
+- 자기 자신이 종료돼도 재시작 절차가 죽지 않도록 분리된 프로세스가 시작을 이어받습니다.
+- 중복 클릭은 거절하고, 종료 중 화면을 유지하며 새 백엔드 인스턴스와 전체 시작 완료를 확인한 뒤 자동 새로고침합니다.
+- 현재 `.env` 설정을 다시 읽습니다. 개발 서버가 스스로 종료돼도 복구 화면은 브라우저에 남고 수동 새로고침 때도 대기 상태를 이어받습니다.
+- 요청 가능한 환경은 기존 `start_fms.sh`로 시작된 FMS입니다. 버튼이 비활성이면 먼저 이 스크립트로 실행하세요.
+- 웹 실행에는 터미널 비밀번호 입력이 불가능합니다. FMS 사용자에게 기존 Docker·ROS·Node 실행 권한과 환경이 준비돼 있어야 합니다.
+
+실제 종료를 수행하는 API:
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/system/web/restart \
+  -H 'Content-Type: application/json' -d '{"confirm":true}'
+```
+
+실패하면 자동으로 무한 재시도하지 않고 기록을 남깁니다. FMS PC에서 확인하세요.
+
+```bash
+cd ~/AX_Logistics
+tail -n 100 logs/web_restart.log
+cat logs/web_restart.json
+# 원인을 해결한 뒤 수동 시작
+./start_fms.sh
+```
+
+개발 검증은 임시 가짜 stop/start 스크립트와 모의 SSH로 수행했습니다. 실제 서비스와 Pi는 종료하지 않았습니다.

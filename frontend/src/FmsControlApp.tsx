@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import WarehouseMap from './WarehouseMap'
 import RobotOrderForm from './components/RobotOrderForm'
 import OmxPanel from './components/OmxPanel'
+import FmsRestartButton from './components/FmsRestartButton'
 import { cancelOrder, getOrders, retryOrder, type OrderDto, type WorkstationDto, type PickupDto } from './api/orderApi'
 import ScenarioControls from './components/ScenarioControls'
 import DispatchVoltageToggle from './components/DispatchVoltageToggle'
@@ -593,6 +594,7 @@ export default function FmsControlApp() {
             <span style={{ color: C.muted, font: `11px ${MONO}` }}>{clock}</span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <FmsRestartButton />
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: fleetError ? C.danger : C.success, fontSize: 10.5, fontWeight: 700 }}>
               <span style={{ width: 7, height: 7, borderRadius: '50%', background: fleetError ? C.danger : C.success }} />
               {fleetError ? 'FMS 서버 오류' : `FMS 연결 · 로봇 ${connectedRobotCount}대 온라인`}

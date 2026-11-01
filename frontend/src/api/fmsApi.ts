@@ -421,3 +421,23 @@ export type DockingStationDto = {
 export function getDockingStations() {
   return request<DockingStationDto[]>('/api/robots/docking-stations', { signal: AbortSignal.timeout(3000) })
 }
+
+
+export type FmsWebStatus = {
+  instance_id: string
+  available: boolean
+  reason: string
+  restarting: boolean
+  restart: { phase?: string; token?: string; message?: string }
+}
+
+export function getFmsWebStatus() {
+  return request<FmsWebStatus>('/api/system/web', { signal: AbortSignal.timeout(3000), cache: 'no-store' })
+}
+
+export function restartFmsWeb() {
+  return request<{ accepted: boolean; token: string; previous_instance: string; message: string }>('/api/system/web/restart', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ confirm: true }), signal: AbortSignal.timeout(10000),
+  })
+}

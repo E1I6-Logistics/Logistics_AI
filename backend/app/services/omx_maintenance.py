@@ -2,6 +2,7 @@
 import json
 import logging
 import os
+from pathlib import Path
 import re
 import subprocess
 
@@ -44,6 +45,12 @@ def restart_service(manager, robot_id):
                    "-o", "ConnectTimeout=5", "-o", "ConnectionAttempts=1", "-o", "ServerAliveInterval=3",
                    "-o", "ServerAliveCountMax=1", target,
                    "systemctl", "--user", "restart", f"omx-manager@{robot_id}.service"]
+        identity = os.getenv("FMS_OMX_SSH_IDENTITY", "").strip()
+        if identity:
+            key = Path(identity).expanduser()
+            if not key.is_file():
+                raise HTTPException(503, "OMX SSH 키 파일이 없습니다. setup_omx_ssh.sh를 실행하세요")
+            command[1:1] = ["-i", str(key), "-o", "IdentitiesOnly=yes"]
         LOG.info("[OMX] 서비스 재시작 요청: %s", robot_id)
         result = subprocess.run(command, capture_output=True, text=True, timeout=65, check=False)
         if result.returncode:
