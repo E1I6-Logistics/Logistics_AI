@@ -1,3 +1,4 @@
+import { recordRobot, recordWs } from '../demo/observations'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   dashboardWsUrl,
@@ -113,6 +114,7 @@ export function useRobotFleet() {
   const refreshRobots = useCallback(async () => {
     try {
       const rows = await getRobots()
+      rows.forEach(row => recordRobot(row.robot_id, { x: row.x, y: row.y, yaw: row.yaw, mode: row.mode, sourceAt: row.updated_at }, row.map_pose_received))
       setRobotStates(Object.fromEntries(rows.map(row => [row.robot_id, row])))
     } catch (e) {
       console.warn('robot state refresh failed:', e)
@@ -123,8 +125,9 @@ export function useRobotFleet() {
     let cancelled = false
     const boot = async () => {
       setLoading(true)
-      await Promise.all([refreshMode(), refreshConnections(), refreshRobots()])
-      if (!cancelled) setLoading(false)
+      try { await Promise.all([refreshMode(), refreshConnections(), refreshRobots()]) }
+      catch (e) { if (!cancelled) setError(e instanceof Error ? e.message : String(e)) }
+      finally { if (!cancelled) setLoading(false) }
     }
     boot()
     const connectionTimer = window.setInterval(
@@ -151,7 +154,10 @@ export function useRobotFleet() {
     const connect = () => {
       socket = new WebSocket(dashboardWsUrl())
 
+      socket.onopen = () => { if (!closedByEffect) recordWs('연결됨') }
       socket.onmessage = event => {
+        if (closedByEffect) return
+        recordWs('연결됨', true)
         try {
           const message = JSON.parse(event.data)
           if (message?.type === 'system' && message.data?.mode) {
@@ -176,6 +182,7 @@ export function useRobotFleet() {
 
       socket.onclose = () => {
         if (closedByEffect) return
+        recordWs('연결 끊김 · 재접속 중')
         reconnectTimer.current = window.setTimeout(connect, 1500)
       }
 
@@ -245,7 +252,7 @@ export function useRobotFleet() {
         batteryVoltage: typeof state?.battery_voltage === 'number' ? state.battery_voltage : null,
         dispatchBatteryBlockReason: state?.dispatch_battery_block_reason,
         status: state?.status ?? (device?.connected ? 'ONLINE' : 'OFFLINE'),
-        occupiedNode: state?.occupied_node ?? null,
+        occupiedNode: state?.occupied_node !== undefined ? state.occupied_node : state?.current_node ?? null,
         occupiedEdge: state?.occupied_edge ?? null,
         pauseReason: state?.pause_reason ?? null,
         x: state?.x ?? 0,

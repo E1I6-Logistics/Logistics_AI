@@ -1,4 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import DemoPage from './pages/DemoPage'
+import type { ScenarioStatus, ScenarioItem } from './api/fmsApi'
 import WarehouseMap from './WarehouseMap'
 import RobotOrderForm from './components/RobotOrderForm'
 import OmxPanel from './components/OmxPanel'
@@ -190,7 +192,23 @@ function OrderStatus({ orders, workstations, pickups }: {
 
 export default function FmsControlApp() {
   const [time, setTime] = useState(new Date())
-  const [scenarioActive, setScenarioActive] = useState(false)
+  const [serverScenarioActive, setServerScenarioActive] = useState(false)
+  const [demoActive, setDemoActive] = useState(false)
+  const scenarioActive = serverScenarioActive || demoActive
+  const [page, setPage] = useState<'control' | 'demo'>(() => new URLSearchParams(window.location.search).get('tab') === 'demo' ? 'demo' : 'control')
+  const [scenarioSnapshot, setScenarioSnapshot] = useState<ScenarioStatus | null>(null)
+  const [scenarioError, setScenarioError] = useState('')
+  const [scenarioCases, setScenarioCases] = useState<ScenarioItem[]>([])
+  const onScenarioSnapshot = useCallback((status: ScenarioStatus | null, error: string) => { setScenarioSnapshot(status); setScenarioError(error) }, [])
+  const [ordersAt, setOrdersAt] = useState(0)
+  const [ordersError, setOrdersError] = useState('')
+  const [sideWidth, setSideWidth] = useState(390)
+  const sideDrag = useRef<{ x: number; width: number } | null>(null)
+  const resizeSide = (width: number) => setSideWidth(Math.round(Math.max(280, Math.min(window.innerWidth * .65, 720, width))))
+  const selectPage = (next: 'control' | 'demo') => {
+    setPage(next)
+    const url = new URL(window.location.href); url.searchParams.set('tab', next); window.history.replaceState(null, '', url)
+  }
   const [selectedRobot, setSelectedRobot] = useState<RobotId | null>(null)
   const [targetNode, setTargetNode] = useState<string | null>(null)
   const [ordersPanelOpen, setOrdersPanelOpen] = useState(true)
@@ -212,10 +230,11 @@ export default function FmsControlApp() {
 
   useEffect(() => {
     const refresh = () => { void getOrders().then(data => {
+      setOrdersAt(Date.now()); setOrdersError('')
       setOrders(data.orders)
       setWorkstations(data.workstations)
       setPickups(data.pickups ?? {})
-    }).catch(() => {}) }
+    }).catch(e => setOrdersError(e instanceof Error ? e.message : String(e))) }
     refresh()
     const timer = window.setInterval(refresh, 1000)
     return () => window.clearInterval(timer)
@@ -230,6 +249,7 @@ export default function FmsControlApp() {
     operationMode,
     featureEngines,
     modeSwitching,
+    loading: fleetLoading,
     changeMode,
     error: fleetError,
   } = useRobotFleet()
@@ -248,7 +268,7 @@ export default function FmsControlApp() {
     enabled: Boolean(
       selectedRobot &&
       connected &&
-      !emergencyStopped && !scenarioActive
+      !emergencyStopped && !scenarioActive && page === 'control'
     ),
   })
 
@@ -351,6 +371,7 @@ export default function FmsControlApp() {
   })
 
   const runCommand = async (id: string, action: () => Promise<unknown>) => {
+    if (['nodeMove', 'returnToRoute', 'charge'].includes(id) && !window.confirm(`${selectedRobot} · ${id === 'nodeMove' ? `목표 N${targetNode} 이동` : id === 'charge' ? '충전소 이동' : '가까운 노드로 복귀'} 명령을 실행할까요?`)) return
     try {
       setBusy(id)
       setCommandState({ tone: 'info', message: '명령을 전송하고 있습니다.' })
@@ -578,9 +599,13 @@ export default function FmsControlApp() {
           </div>
         </div>
         <nav style={{ flex: 1, paddingTop: 8 }} aria-label="주 메뉴">
-          <button aria-current="page" style={{ width: '100%', padding: '9px 16px', border: 0, borderLeft: '3px solid #1A6FD8', background: 'rgba(26,111,216,.16)', color: '#6DB8FF', fontSize: 12, fontWeight: 700, textAlign: 'left' }}>
+          <button onClick={() => selectPage('control')} aria-current={page === 'control' ? 'page' : undefined} style={{ width: '100%', padding: '9px 16px', border: 0, borderLeft: '3px solid #1A6FD8', background: page === 'control' ? 'rgba(26,111,216,.16)' : 'transparent', color: page === 'control' ? '#6DB8FF' : '#99A6B8', fontSize: 12, fontWeight: 700, textAlign: 'left' }}>
             <span style={{ display: 'inline-block', width: 5, height: 5, marginRight: 10, borderRadius: '50%', background: '#3FA3F5', boxShadow: '0 0 0 3px rgba(63,163,245,.2)' }} />
             통합 관제
+          </button>
+          <button onClick={() => selectPage('demo')} aria-current={page === 'demo' ? 'page' : undefined}
+            style={{ width: '100%', padding: '12px 16px', border: 0, borderLeft: page === 'demo' ? '3px solid #1A6FD8' : '3px solid transparent', background: page === 'demo' ? 'rgba(26,111,216,.16)' : 'transparent', color: page === 'demo' ? '#6DB8FF' : '#99A6B8', fontSize: 12, fontWeight: 700, textAlign: 'left', cursor: 'pointer' }}>
+            ◇　데모 {demoActive ? ' · 진행 중' : ''}
           </button>
         </nav>
         <div style={{ padding: '8px 16px', borderTop: '1px solid rgba(255,255,255,.05)', color: '#343B46', font: `8.5px ${MONO}` }}>v1.0.0-alpha</div>
@@ -595,6 +620,7 @@ export default function FmsControlApp() {
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <FmsRestartButton />
+            {page === 'demo' && <button disabled={busy === 'emergency'} onClick={emergencyStopAll} style={{ background: C.danger, color: '#fff', padding: '8px 12px', border: 0, borderRadius: 6, fontWeight: 800, cursor: 'pointer' }}>AMR 전체 비상정지</button>}
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: fleetError ? C.danger : C.success, fontSize: 10.5, fontWeight: 700 }}>
               <span style={{ width: 7, height: 7, borderRadius: '50%', background: fleetError ? C.danger : C.success }} />
               {fleetError ? 'FMS 서버 오류' : `FMS 연결 · 로봇 ${connectedRobotCount}대 온라인`}
@@ -634,6 +660,20 @@ export default function FmsControlApp() {
           </div>
         </header>
 
+        {commandState && <div style={{ position: 'relative', zIndex: 60 }}>
+          <CommandToast state={commandState} onClose={() => setCommandState(null)} />
+        </div>}
+        <div style={{ display: page === 'demo' ? 'flex' : 'none', flex: 1, minHeight: 0 }}>
+          <DemoPage mode={robotMode} operation={operationMode} switching={modeSwitching || fleetLoading} routeModel={selectedRouteModel}
+            robots={managedRobots} nodes={Object.keys(nodes)} omx={omxDevices} orders={orders} ordersAt={ordersAt} ordersError={ordersError}
+            fleetError={fleetError} omxError={omxQueryError} scenario={scenarioSnapshot} scenarioError={scenarioError} cases={scenarioCases}
+            docks={dockingStations} pickups={pickups} workstations={workstations} onActiveChange={setDemoActive}
+            routeModels={[...routeModels.ollama, ...routeModels.decision_model]} onModelChange={setSelectedRouteModel}
+            mapView={<WarehouseMap nodes={nodes} edges={edges} layers={allLayers} selectedRobot={selectedRobot} onSelect={selectRobot}
+              picking={false} onPick={() => {}} graphLoading={graphLoading} graphError={graphError} visibleRobotIds={mapRobotIds}
+              robotStates={managedRobots} omxDevices={omxDevices} dockingStations={dockingStations} />} />
+        </div>
+        <div style={{ display: page === 'control' ? 'flex' : 'none', flexDirection: 'column', flex: 1, minHeight: 0 }}>
         <div className="fms-operation-strip" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '6px 16px', borderBottom: `1px solid ${C.line}`, flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
             <span style={{ fontSize: 11, color: C.muted }}>
@@ -662,9 +702,6 @@ export default function FmsControlApp() {
             {ordersPanelOpen ? '접기 ▾' : '펼치기 ▴'}
           </button>
         </div>
-        {commandState && <div style={{ position: 'relative', zIndex: 60 }}>
-          <CommandToast state={commandState} onClose={() => setCommandState(null)} />
-        </div>}
         <div className="fms-control-workspace" style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
           <RobotRail
             robotIds={managedIds as RobotId[]}
@@ -677,7 +714,7 @@ export default function FmsControlApp() {
           />
 
           <section style={{ position: 'relative', display: 'flex', flex: 1, minWidth: 0, background: C.surface }} aria-label="FMS 실시간 지도">
-            <ScenarioControls modeSwitching={modeSwitching} onActiveChange={setScenarioActive} />
+            <ScenarioControls modeSwitching={modeSwitching || demoActive} onActiveChange={setServerScenarioActive} onSnapshot={onScenarioSnapshot} onCases={setScenarioCases} />
             <div style={{ position: 'absolute', top: 14, right: 14, zIndex: 20, width: 300, maxWidth: 'calc(100% - 28px)' }}>
               <RobotOrderForm operationMode={operationMode} disabled={scenarioActive || modeSwitching}
                 routeModels={routeModels} routeModelError={routeModelError} llmOrderReady={LLM_ORDER_READY} />
@@ -736,10 +773,19 @@ export default function FmsControlApp() {
             </button>
           </section>
 
-          {rightPanelOpen && selectedOmxDevice && <OmxPanel key={selectedOmxDevice.omx_id}
+          {rightPanelOpen && <>
+            <div className="fms-side-resize" role="separator" aria-label="오른쪽 제어 패널 너비 조절" aria-orientation="vertical" tabIndex={0}
+              aria-valuemin={280} aria-valuemax={Math.floor(Math.min(720, window.innerWidth * .65))} aria-valuenow={sideWidth}
+              onPointerDown={e => { if (e.button !== 0) return; sideDrag.current = { x: e.clientX, width: sideWidth }; e.currentTarget.setPointerCapture(e.pointerId); e.preventDefault() }}
+              onPointerMove={e => { if (sideDrag.current) resizeSide(sideDrag.current.width + sideDrag.current.x - e.clientX) }}
+              onPointerUp={e => { sideDrag.current = null; if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId) }}
+              onPointerCancel={() => { sideDrag.current = null }}
+              onKeyDown={e => { if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { e.preventDefault(); resizeSide(sideWidth + (e.key === 'ArrowLeft' ? 20 : -20)) } }}><span /></div>
+            <div className="fms-side-wrapper" style={{ width: sideWidth }}>
+          {selectedOmxDevice && <OmxPanel key={selectedOmxDevice.omx_id}
             device={selectedOmxDevice} queryError={omxQueryError} realMode={robotMode === 'real'}
             blocked={scenarioActive || modeSwitching} onClose={() => setSelectedOmx(null)} />}
-          {rightPanelOpen && !selectedOmxDevice && (
+          {!selectedOmxDevice && (
           <RobotPanel
             robotId={selectedRobot}
             orders={orders}
@@ -770,6 +816,8 @@ export default function FmsControlApp() {
             onRelease={releaseSelectedRobot}
           />
           )}
+            </div>
+          </>}
         </div>
         <div className="fms-order-resize" role="separator" aria-label="주문 현황 높이 조절"
           aria-orientation="horizontal" aria-valuemin={0}
@@ -786,6 +834,7 @@ export default function FmsControlApp() {
             padding: ordersPanelOpen ? '10px 14px' : 0,
             overflowY: ordersPanelOpen ? 'auto' : 'hidden' }}>
           {ordersPanelOpen && <OrderStatus orders={currentOrders} workstations={workstations} pickups={pickups} />}
+        </div>
         </div>
       </main>
     </div>

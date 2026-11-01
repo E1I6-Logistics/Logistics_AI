@@ -22,7 +22,7 @@ const INITIAL_ITEMS: OrderItems = {
 export default function RobotOrderForm({ operationMode, disabled = false, routeModels, routeModelError, llmOrderReady }: Props) {
   const [items, setItems] = useState<OrderItems>(INITIAL_ITEMS)
   const [orderName, setOrderName] = useState('')
-  const [expanded, setExpanded] = useState(true)
+  const [expanded, setExpanded] = useState(false)
   const drivingMode = operationMode === 'ai' ? 'llm' : 'standard'
   const [selectedModelKey, setSelectedModelKey] = useState('')
   const fieldsId = useId()
@@ -67,6 +67,7 @@ export default function RobotOrderForm({ operationMode, disabled = false, routeM
 
   const submit = async () => {
     if (!canSubmit || formDisabled) return
+    if (!window.confirm(`총 ${totalQuantity}개의 주문을 접수하고 자동 배차할까요? 현재 운영 모드에서 로봇이 움직입니다.`)) return
 
     try {
       setSubmitting(true)

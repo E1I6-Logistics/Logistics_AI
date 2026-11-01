@@ -58,8 +58,10 @@ export function useCmdVel({
   }, [robotId, computeTwist])
 
   const stop = useCallback(() => {
+    const hadKeys = pressedRef.current.size > 0
     pressedRef.current.clear()
     setActiveKeys(new Set())
+    if (!hadKeys) return
     const ws = wsRef.current
     if (!robotId || !ws || ws.readyState !== WebSocket.OPEN) return
     ws.send(JSON.stringify({ robot_id: robotId, linear_x: 0, angular_z: 0 }))
@@ -76,7 +78,7 @@ export function useCmdVel({
 
   const releaseKey = useCallback((key: string) => {
     const normalized = key.toLowerCase()
-    if (!CONTROL_KEYS.has(normalized)) return
+    if (!CONTROL_KEYS.has(normalized) || !pressedRef.current.has(normalized)) return
     pressedRef.current.delete(normalized)
     setActiveKeys(new Set(pressedRef.current))
     sendCurrent()
@@ -106,7 +108,7 @@ export function useCmdVel({
 
     return () => {
       try {
-        if (ws.readyState === WebSocket.OPEN && robotId) {
+        if (pressedRef.current.size > 0 && ws.readyState === WebSocket.OPEN && robotId) {
           ws.send(JSON.stringify({ robot_id: robotId, linear_x: 0, angular_z: 0 }))
         }
       } catch { /* ignore */ }

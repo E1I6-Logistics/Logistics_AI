@@ -1,3 +1,5 @@
+import { recordHttp, setServerInstance } from '../demo/observations'
+
 const DEFAULT_API_BASE = `${window.location.protocol}//${window.location.hostname}:8000`
 const API_BASE = (import.meta.env.VITE_FMS_API_BASE ?? DEFAULT_API_BASE).replace(/\/$/, '')
 
@@ -112,7 +114,12 @@ export async function setRobotMode(mode: RobotMode, operation_mode: OperationMod
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE}${path}`, init)
+  const started = performance.now()
+  let response: Response
+  try {
+    response = await fetch(`${API_BASE}${path}`, { ...init, signal: init?.signal ?? AbortSignal.timeout(init?.method && init.method !== 'GET' ? 180000 : 10000) })
+    recordHttp(path, started, response.ok)
+  } catch (e) { recordHttp(path, started, false); throw e }
   if (!response.ok) {
     const text = await response.text()
     let message = text
@@ -263,6 +270,9 @@ export type RobotStateDto = {
   robot_id: string
   ui_id?: string
   status: string
+  current_node?: string | null
+  connected?: boolean
+  blocked?: boolean
   occupied_node?: string | null
   occupied_edge?: string | null
   pause_reason?: string | null
@@ -431,8 +441,10 @@ export type FmsWebStatus = {
   restart: { phase?: string; token?: string; message?: string }
 }
 
-export function getFmsWebStatus() {
-  return request<FmsWebStatus>('/api/system/web', { signal: AbortSignal.timeout(3000), cache: 'no-store' })
+export async function getFmsWebStatus() {
+  const result = await request<FmsWebStatus>('/api/system/web', { signal: AbortSignal.timeout(3000), cache: 'no-store' })
+  setServerInstance(result.instance_id)
+  return result
 }
 
 export function restartFmsWeb() {

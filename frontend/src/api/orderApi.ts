@@ -1,3 +1,4 @@
+import { recordHttp } from '../demo/observations'
 import type { RouteModelDto } from './fmsApi'
 
 const DEFAULT_API_BASE = `${window.location.protocol}//${window.location.hostname}:8000`
@@ -56,7 +57,10 @@ export type PickupDto = {
 export type WorkstationDto = { status: 'FREE' | 'OCCUPIED' | 'ASSIGNED' | 'UNKNOWN'; order_id: string | null }
 
 export async function getOrders() {
-  const response = await fetch(`${API_BASE}/api/orders`)
+  const started = performance.now()
+  let response: Response
+  try { response = await fetch(`${API_BASE}/api/orders`, { signal: AbortSignal.timeout(5000) }); recordHttp('/api/orders', started, response.ok) }
+  catch (e) { recordHttp('/api/orders', started, false); throw e }
   if (!response.ok) throw new Error('주문 상태를 읽지 못했습니다.')
   return response.json() as Promise<{
     orders: OrderDto[]
@@ -75,7 +79,7 @@ export async function retryOrder(orderId: string) {
 }
 
 export async function cancelOrder(orderId: string) {
-  const response = await fetch(`${API_BASE}/api/orders/${encodeURIComponent(orderId)}`, { method: 'DELETE' })
+  const response = await fetch(`${API_BASE}/api/orders/${encodeURIComponent(orderId)}`, { method: 'DELETE', signal: AbortSignal.timeout(10000) })
   const data = await response.json()
   if (!response.ok) throw new Error(data.detail ?? '주문을 취소하지 못했습니다.')
   return data as OrderDto
@@ -84,6 +88,7 @@ export async function cancelOrder(orderId: string) {
 export async function createOrder(payload: CreateOrderPayload) {
   const response = await fetch(`${API_BASE}/api/orders`, {
     method: 'POST',
+    signal: AbortSignal.timeout(10000),
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   })

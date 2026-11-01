@@ -2,9 +2,11 @@ import { useEffect, useState } from 'react'
 import { getScenarios, getScenarioStatus, runScenario, stopScenario, resetScenario, downloadScenarioRecord, scenarioRecordUrl, type ScenarioItem, type ScenarioStatus } from '../api/fmsApi'
 import { C } from '../constants/theme'
 
-export default function ScenarioControls({ modeSwitching, onActiveChange }: {
+export default function ScenarioControls({ modeSwitching, onActiveChange, onSnapshot, onCases }: {
   modeSwitching: boolean
   onActiveChange: (active: boolean) => void
+  onSnapshot?: (status: ScenarioStatus | null, error: string) => void
+  onCases?: (items: ScenarioItem[]) => void
 }) {
   const [items, setItems] = useState<ScenarioItem[]>([])
   const [selected, setSelected] = useState('')
@@ -44,6 +46,9 @@ export default function ScenarioControls({ modeSwitching, onActiveChange }: {
   }, [])
   useEffect(() => { onActiveChange(active || submitting) }, [active, submitting, onActiveChange])
 
+  useEffect(() => { onSnapshot?.(status, connectionError) }, [status, connectionError, onSnapshot])
+  useEffect(() => { onCases?.(items) }, [items, onCases])
+
   const saveAndReset = async (next: ScenarioStatus) => {
     if (!next.run_id || !next.record_url || next.state === 'running' || next.state === 'stopping') return
     await downloadScenarioRecord(next.run_id)
@@ -61,6 +66,7 @@ export default function ScenarioControls({ modeSwitching, onActiveChange }: {
     finally { setSubmitting(false) }
   }
   const execute = async () => {
+    if (!window.confirm(`선택 시나리오를 현재 모드에서 실행할까요? 로봇들이 움직입니다. 실제 모드에서는 표시된 시작 위치를 준비하세요.`)) return
     setSubmitting(true)
     setError('')
     try { setStatus(await runScenario(selected)) }

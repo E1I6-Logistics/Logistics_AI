@@ -62,6 +62,15 @@ export default function FmsRestartButton() {
     return () => window.clearTimeout(timer)
   }, [pending])
 
+  useEffect(() => {
+    const open = () => {
+      if (!pending && status?.available && !status.restarting) setConfirming(true)
+      else if (!pending) { setFailed(true); setMessage(status?.reason || '재시작 가능 여부를 확인하지 못했습니다. FMS PC의 서버 상태를 확인하세요.') }
+    }
+    window.addEventListener('fms:request-restart', open)
+    return () => window.removeEventListener('fms:request-restart', open)
+  }, [pending, status])
+
   const restart = async () => {
     if (sending.current || pending || !status?.available) return
     setConfirming(false)
