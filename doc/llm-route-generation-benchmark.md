@@ -1209,3 +1209,117 @@ python -m backend.simulation.evaluation.selector_iterative_route_benchmark \
 `exact_path_match`, `distance_match`, `distance_ratio`, `step_excess`로 따로 판단한다.
 manifest에는 Graph 경로·SHA-256, 생성된 Start/Target, prompt 원문·SHA-256·버전,
 selector·model·device가 기록된다.
+
+## 운영 context 선택과 4조건 수동 비교
+
+운영 경로 생성과 비교 시험의 context 선택은 분리한다.
+운영의 KEV·Laya·Ollama는 모두 아래 JSON 설정으로 입력을 선택한다.
+
+파일: `backend/simulation/evaluation/selector_iterative_benchmark.json`
+
+```json
+"route_context": {
+  "kev": "minimal_distance",
+  "laya": "minimal_distance",
+  "ollama": "minimal_distance"
+}
+```
+
+`minimal_distance`는 전체 그래프·현재·목적지·허용 후보와 질문에 후보별
+`dist_to_target`을 추가한다. 이력 7개와 방위·접근량·다른 로봇 context는
+모델 입력에 넣지 않으며, 방문·간선 제약은 코드에서 유지한다.
+점유를 반영한 제한 그래프를 주는 MAPF 우회·복구의 실행 제약은 별도로 유지한다.
+이미 실행 중인 백엔드는 변경 코드가 로드되도록 다시 시작한다.
+그 후 운영 JSON의 context 선택은 새 preview 요청마다 읽는다.
+
+비교 시험은 `route_context`를 따르지 않고 네 조건을 명시적으로 선택한다.
+
+| 옵션 | 입력 |
+| --- | --- |
+| `legacy` | 필수 입력 + 이력 7개 |
+| `minimal` | 필수 입력만 |
+| `minimal_distance` | 필수 입력 + 후보→목적지 직선거리 |
+| `legacy_compass_distance` | 기존 기본 + 현재/후보 방위·거리·접근량 |
+
+### 실행 순서
+
+아래 스크립트는 JSON의 `graph`와 `settings`를 읽는다.
+현재 설정은 `test_int.geojson`, `all-pairs`, `repeats=5`, `warmups=1`이다.
+따라서 모델당 4조건 × 84쌍 × 5회 = 1,680건이다.
+임시 함수에 `--repeats 1`이 남아 있는 이전 명령 대신 아래 스크립트를 사용한다.
+
+1. WSL 시험 터미널에서 준비하고 호출 없는 명령 검사를 실행한다.
+
+```bash
+cd ~/Logistics_AI
+source ~/venv/robot/bin/activate
+export CONTEXT_OUT="backend/simulation/benchmark_results/context4-$(date +%Y%m%d-%H%M%S)"
+
+bash scripts/run_context_comparison.sh --check kev kev-08b "$CONTEXT_OUT"
+bash scripts/run_context_comparison.sh --check ollama gemma3:1b "$CONTEXT_OUT"
+```
+
+2. 별도 WSL 서버 터미널에서 KEV 0.8B를 실행한다.
+   이미 같은 checkpoint 서버가 준비되어 있으면 중복 실행하지 않는다.
+
+```bash
+source ~/venv/robot/bin/activate
+cd ~/kev
+KEV_BACKEND=torch KEV_DTYPE=bf16 KEV_PREFIX_CACHE=0 \
+KEV_CUDA_GRAPHS=0 KEV_FUSED=0 KEV_TRUNCATE_STATES=0 \
+python -m kev.serve --run jaredpalmer/kev-0.8b@v1.0 --host 127.0.0.1 --port 8011
+```
+
+3. 시험 터미널에서 KEV 네 조건을 실행한다.
+
+```bash
+export KEV_HOST=http://127.0.0.1:8011
+bash scripts/run_context_comparison.sh kev kev-08b "$CONTEXT_OUT"
+```
+
+4. KEV 완료 후 서버 터미널에서 Ctrl+C로 종료해 GPU 메모리를 비운다.
+   이후 시험 터미널에서 Laya를 하나씩 실행한다.
+
+```bash
+bash scripts/run_context_comparison.sh laya convaiinnovations/laya "$CONTEXT_OUT"
+bash scripts/run_context_comparison.sh laya convaiinnovations/laya-multilingual "$CONTEXT_OUT"
+```
+
+Laya는 GPU 실행과 입력 한도 8192를 사용한다. 모델을 불러올 때 시간이 필요할 수 있다.
+KEV-4B는 현재 RTX 4050 6GB에서 동일 bf16 전체 GPU 조건으로 실행하지 않는다.
+메모리가 충분한 별도 장비에서 4B checkpoint 서버를 준비한 뒤 모델 인자를
+`kev-4b`로 바꿔 같은 스크립트를 실행한다. 환경 변수만 바꿔도 서버 모델이 교체되는 것은 아니다.
+
+5. Ollama 설치 목록을 확인하고 네 활성 모델을 순차로 실행한다.
+
+```bash
+ollama list
+for model in gemma3:1b deepseek-coder:6.7b gemma3:12b phi4:14b; do
+  bash scripts/run_context_comparison.sh ollama "$model" "$CONTEXT_OUT" || break
+  ollama stop "$model"
+done
+```
+
+Ollama는 JSON의 공통·모델별 옵션과 `enabled` 검사를 사용한다.
+활성화하지 않은 모델은 설정의 `models`에서 등록/활성화해야 한다.
+
+### 결과 확인
+
+결과 루트는 위 `CONTEXT_OUT`이다. 모델·context별로 새 결과를 저장한다.
+Ollama는 다중 모델 실행기의 모델별 하위 폴더가 한 단계 더 생긴다.
+기존 결과를 덮어쓰거나 새 반복으로 재사용하지 않도록 매 실행에 새 루트를 사용한다.
+
+- `manifest.json`: 지도 SHA, 지시문 SHA, 실제 반복 수, `settings.state_profile`.
+- `selector_iterative_route_summary.json`: 도착·최단거리 일치·시간 집계.
+- `selector_iterative_route_trials.jsonl`: 경로별·단계별 선택과 실패.
+- `steps[].model_input`: 실제 selector에 전달한 state·지시문·후보.
+  단일 후보 자동 이동은 모델을 호출하지 않으므로 이 필드가 없다.
+- `selector_iterative_route_samples.csv`: 표로 확인할 경로 결과.
+
+```bash
+find "$CONTEXT_OUT" -name selector_iterative_route_summary.json
+```
+
+비교할 때는 조건별 도착·최단 일치의 건수와 비율, 결정 평균·p95,
+경로 생성 시간을 확인한다. 5회 반복을 서로 다른 420개 경로로 해석하지 않는다.
+서로 다른 출발·목적지 조합은 84쌍이며 각 조합을 반복 확인한 것이다.
