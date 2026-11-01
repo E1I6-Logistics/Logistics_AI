@@ -608,6 +608,65 @@ class SelectorIterativeRouteBenchmarkTest(unittest.TestCase):
             self.assertNotIn("visited_nodes", actual)
 
 
+    def test_runtime_preview_uses_json_context_for_each_selector(self):
+        """운영의 세 selector가 모두 JSON context를 실제 모델 입력에 적용한다."""
+        from backend.app.services.llm_route_preview import preview_llm_route
+        prepared = _fixture()
+        graph = {
+            "type": "FeatureCollection",
+            "features": [
+                {"type": "Feature", "geometry": {"type": "Point", "coordinates": list(point)},
+                 "properties": {"id": str(node)}}
+                for node, point in prepared["points"].items()
+            ] + [
+                {"type": "Feature", "geometry": {"type": "LineString", "coordinates": []},
+                 "properties": {"id": str(index + 10), "startid": str(start), "endid": str(end), "weight": weight}}
+                for index, (start, end, weight) in enumerate(prepared["edges"])
+            ],
+        }
+        selectors = (
+            ("kev", "kev-08b", "backend.app.services.route_selector.kev_selector.KevSelector"),
+            ("laya", "convaiinnovations/laya", "backend.app.services.route_selector.laya_selector.LayaSelector"),
+            ("ollama", "gemma3:1b", "backend.app.services.route_selector.ollama_selector.OllamaSelector"),
+        )
+        for selector_name, model, factory in selectors:
+            for profile in ("minimal_distance", "legacy"):
+                with self.subTest(selector=selector_name, profile=profile):
+                    selector = _OracleSelector()
+                    from backend.app.services import route_model_catalog as catalog
+                    config = json.loads(catalog.CONFIG_PATH.read_text())
+                    config["route_context"][selector_name] = profile
+                    # 시험 settings의 값으로 운영 입력을 바꾸지 않아야 한다.
+                    config["settings"]["state_profile"] = "minimal"
+                    with tempfile.TemporaryDirectory() as directory:
+                        path = Path(directory) / "config.json"
+                        path.write_text(json.dumps(config))
+                        with patch.object(catalog, "CONFIG_PATH", path), patch(factory, return_value=selector):
+                            result = preview_llm_route(graph, 0, 2, selector=selector_name, model=model, provider=object())
+                    self.assertEqual(result["path"], ["0", "1", "2"])
+                    state = selector.states[0]
+                    if profile == "minimal_distance":
+                        self.assertEqual(set(state), {"route_graph", "current_node", "target_node", "available_edges"})
+                        self.assertEqual(state["available_edges"], [
+                            {"node": 1, "weight": 1.0, "dist_to_target": 1.0},
+                            {"node": 2, "weight": 3.0, "dist_to_target": 0.0},
+                        ])
+                    else:
+                        self.assertIn("visited_nodes", state)
+                        self.assertNotIn("dist_to_target", state["available_edges"][0])
+
+    def test_runtime_context_is_validated_before_loading_model(self):
+        from backend.app.services import route_model_catalog as catalog
+        config = json.loads(catalog.CONFIG_PATH.read_text())
+        config["route_context"]["kev"] = "invalid"
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "config.json"
+            path.write_text(json.dumps(config))
+            with patch.object(catalog, "CONFIG_PATH", path):
+                with self.assertRaisesRegex(ValueError, "Unsupported state_profile"):
+                    catalog.enabled_model_configuration("kev", "kev-08b")
+
+
 
 if __name__ == "__main__":
     unittest.main()

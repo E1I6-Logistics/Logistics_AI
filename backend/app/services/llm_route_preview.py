@@ -52,7 +52,7 @@ def preview_llm_route(
     model: str | None = None,
     provider: Any | None = None,
 ) -> dict[str, Any]:
-    """시험과 같은 상태·후보 규칙으로 경로를 선택하고 유효성을 검사한다."""
+    """JSON의 운영 context로 다음 노드를 선택하고 완성 경로를 검증한다."""
     if model is None:
         raise ValueError("경로 모델을 선택하세요.")
     model_config = enabled_model_configuration(selector, model)
@@ -108,7 +108,7 @@ def preview_llm_route(
         context_mode="neighbor_context",
         deadline=float(model_config.get("timeout_seconds", 60)),
         max_steps=step_limit,
-        state_profile="minimal_distance" if selector == "kev" else "legacy",
+        state_profile=model_config["state_profile"],
     )
     if not result["valid_path"]:
         raise ValueError(result["error"] or "AI 경로 검증에 실패했습니다.")

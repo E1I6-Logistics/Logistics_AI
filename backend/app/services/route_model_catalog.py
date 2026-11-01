@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from .iterative_route_policy import validate_state_profile
+
 CONFIG_PATH = Path(__file__).resolve().parents[3] / "backend" / "simulation" / "evaluation" / "selector_iterative_benchmark.json"
 
 
@@ -43,6 +45,9 @@ def enabled_model_configuration(selector: str, model: str) -> dict:
         and (selector == "ollama" or item.get("selector") == selector)
         and item.get("enabled") is True
     )
+    # 운영 context는 비교 시험의 settings.state_profile과 별도로 선택한다.
+    state_profile = config.get("route_context", {}).get(selector, "minimal_distance")
+    validate_state_profile(state_profile, "neighbor_context")
     if selector == "ollama":
         defaults = config.get("ollama_defaults", {})
         return {
@@ -52,5 +57,9 @@ def enabled_model_configuration(selector: str, model: str) -> dict:
             "think": entry.get("think", defaults.get("think")),
             "options": {**defaults.get("options", {}), **entry.get("options", {})},
             "max_steps": config.get("settings", {}).get("max_steps"),
+            "state_profile": state_profile,
         }
-    return {"max_steps": config.get("settings", {}).get("max_steps")}
+    return {
+        "max_steps": config.get("settings", {}).get("max_steps"),
+        "state_profile": state_profile,
+    }

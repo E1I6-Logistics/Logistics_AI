@@ -15,6 +15,11 @@
       "num_predict": 512
     }
   },
+  "route_context": {
+    "kev": "minimal_distance",
+    "laya": "minimal_distance",
+    "ollama": "minimal_distance"
+  },
   "models": [
     {
       "name": "qwen3:0.6b",

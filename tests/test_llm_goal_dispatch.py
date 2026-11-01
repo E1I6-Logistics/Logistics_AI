@@ -111,7 +111,7 @@ class GoalDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["llm_preview"]["path"], ["0", "2", "3"])
         self.assertFalse(commands._llm_requests)
 
-    async def test_simulation_preview_supplies_traffic_and_registers_recovery_context(self):
+    async def test_simulation_preview_uses_shared_context_and_registers_recovery(self):
         traffic = {"occupied_nodes": {7: "robot2"}, "robot_paths": {"robot2": [7, 9]}}
         with patch(
             "backend.app.services.kev_mapf.kev_traffic.live_traffic", return_value=traffic
@@ -123,10 +123,27 @@ class GoalDispatchTests(unittest.IsolatedAsyncioTestCase):
             await commands.send_node_goal(
                 GoalNodeRequest(robot_id="robot1", node_id=3, driving_mode="llm", selector="kev", model="kev-08b")
             )
-        collect.assert_called_once_with("robot1", graph={"map": 1})
-        self.assertEqual(preview.call_args.kwargs["traffic"], traffic)
+        collect.assert_not_called()
+        self.assertNotIn("traffic", preview.call_args.kwargs)
         self.assertEqual(register.call_args.kwargs["order"]["selector"], "kev")
         self.assertEqual(register.call_args.kwargs["result"]["path"], ["0", "2", "3"])
+
+    async def test_route_preview_endpoint_uses_current_preview_signature(self):
+        from backend.app.schemas.command import LlmRoutePreviewRequest
+
+        def preview(graph, start, target, *, selector, model):
+            return {"path": [str(start), str(target)], "calls": 1}
+
+        with patch(
+            "backend.app.services.llm_route_preview.preview_llm_route", side_effect=preview
+        ) as model_preview, patch.object(commands, "navigate_to_node") as move:
+            response = await commands.llm_route_preview(
+                LlmRoutePreviewRequest(robot_id="robot1", node_id=3, selector="kev", model="kev-08b")
+            )
+        self.assertEqual(response["path"], ["0", "3"])
+        self.assertFalse(response["dispatched"])
+        self.assertNotIn("traffic", model_preview.call_args.kwargs)
+        move.assert_not_called()
 
     # HTTP 요청으로 시뮬레이션 로봇이 목적지까지 이동하는지 검증한다.
     async def test_http_request_drives_simulation_to_target(self):
