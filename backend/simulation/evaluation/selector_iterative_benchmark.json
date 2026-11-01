@@ -35,6 +35,10 @@
       "think": false
     },
     {
+      "name": "gemma3:1b",
+      "enabled": true
+    },
+    {
       "name": "gemma3:4b",
       "enabled": false
     },
@@ -66,8 +70,8 @@
     {"selector": "kev", "name": "kev-4b", "enabled": true}
   ],
   "settings": {
-    "case_mode": "random",
-    "case_count": 5,
+    "case_mode": "all-pairs",
+    "case_count": 84,
     "route_seed": 20260928,
     "candidate_scope": "neighbors",
     "context_mode": "neighbor_context",
