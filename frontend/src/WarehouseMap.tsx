@@ -30,6 +30,8 @@ type Props = {
   visibleRobotIds?: RobotId[]
   robotStates?: ManagedRobot[]
   omxDevices?: OmxDeviceDto[]
+  selectedOmx?: string | null
+  onSelectOmx?: (id: string) => void
   dockingStations?: DockingStationDto[]
 }
 
@@ -53,6 +55,8 @@ export default function WarehouseMap({
   visibleRobotIds = [],
   robotStates = [],
   omxDevices = [],
+  selectedOmx,
+  onSelectOmx,
   dockingStations,
 }: Props) {
   const host = useRef<HTMLDivElement>(null)
@@ -272,15 +276,31 @@ export default function WarehouseMap({
 
         {/* OMX 장치 */}
         {!raw && (
-          <g data-testid="omx-markers" pointerEvents="none">
+          <g data-testid="omx-markers">
             {omxDevices.map(omx => {
               const color = omx.connected ? '#2589F5' : '#9AA4B0'
 
               return (
                 <g
                   key={omx.omx_id}
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`${omx.omx_id.toUpperCase()} 상태 보기`}
+                  aria-pressed={selectedOmx === omx.omx_id}
+                  style={{ cursor: 'pointer' }}
+                  onPointerDown={event => event.stopPropagation()}
+                  onClick={() => onSelectOmx?.(omx.omx_id)}
+                  onKeyDown={event => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault()
+                      onSelectOmx?.(omx.omx_id)
+                    }
+                  }}
                   transform={`translate(${omx.pixel_x} ${omx.pixel_y})`}
                 >
+                  <title>{`${omx.omx_id.toUpperCase()} · ${omx.connected ? omx.state : '연결 끊김'}`}</title>
+                  {selectedOmx === omx.omx_id && <circle r={px(14)} fill="#2589F5" opacity={0.18} />}
+                  <circle r={px(13)} fill="transparent" />
                   <circle
                     cx={0}
                     cy={0}

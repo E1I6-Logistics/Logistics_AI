@@ -1,6 +1,8 @@
 import json
 import time
 
+from ..services.omx_stock import PalletObservation
+
 
 class OMX:
     # OMX의 초기 상태를 설정한다.
@@ -22,6 +24,10 @@ class OMX:
         # 작업 진행 상태
         self.state = "IDLE"
         self.message = ""
+        self.detail = ""
+        self.count_kind = None
+        self.physical_unloading_verified = None
+        self.pallet_observation = PalletObservation(omx_id)
 
     # =========================================================
     # Main -> OMX 명령
@@ -35,7 +41,11 @@ class OMX:
         self.current_count = 0
         self.total_count = sum(items.values())
 
+        self.count_kind = None
+        self.physical_unloading_verified = None
+        self.message = ""
         self.state = "COMMAND_SENT"
+        self.pallet_observation.clear()
 
         payload = {"job_id": job_id, "items": items}
 
@@ -49,11 +59,16 @@ class OMX:
 
     # 상태를 갱신한다.
     def update_status(self, data):
+        if not self.check_connection():
+            self.pallet_observation.clear()
         self.connected = True
         self.last_seen = time.time()
 
         if "state" in data:
             self.state = data["state"]
+            self.detail = str(data.get("detail", ""))[:300]
+            if self.state not in ("IDLE", "READY"):
+                self.pallet_observation.clear()
 
     # 응답을 갱신한다.
     def update_ack(self, data):
@@ -64,6 +79,7 @@ class OMX:
 
         if data.get("accepted", False):
             self.state = "WORKING"
+            self.pallet_observation.clear()
         else:
             self.state = "REJECTED"
 
@@ -78,6 +94,8 @@ class OMX:
         self.total_count = data.get("total", self.total_count)
 
         self.state = "WORKING"
+        self.pallet_observation.clear()
+        self.count_kind = data.get("count_kind", self.count_kind)
 
     # 결과를 갱신한다.
     def update_result(self, data):
@@ -88,7 +106,9 @@ class OMX:
 
         success = data.get("success", False)
 
-        self.message = data.get("message", "")
+        self.message = str(data.get("message", ""))[:1000]
+        self.count_kind = data.get("count_kind", self.count_kind)
+        self.physical_unloading_verified = data.get("physical_unloading_verified")
 
         if success:
             self.state = "SUCCESS"
@@ -105,8 +125,21 @@ class OMX:
 
         if elapsed > timeout:
             self.connected = False
+            self.pallet_observation.clear()
 
         return self.connected
+
+    def snapshot(self):
+        connected = self.check_connection()
+        return {
+            "omx_id": self.omx_id, "connected": connected,
+            "state": self.state if connected else "OFFLINE", "detail": self.detail,
+            "last_seen": self.last_seen, "job_id": self.job_id, "items": dict(self.items),
+            "current_count": self.current_count, "total_count": self.total_count,
+            "message": self.message, "count_kind": self.count_kind,
+            "physical_unloading_verified": self.physical_unloading_verified,
+            "stock": self.pallet_observation.snapshot(connected=connected, idle=self.state in ("IDLE", "READY")),
+        }
 
     # =========================================================
     # MQTT Publish

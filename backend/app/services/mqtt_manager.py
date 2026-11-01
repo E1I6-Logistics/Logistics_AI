@@ -25,6 +25,7 @@ class MQTTManager:
         # (OMX, 주문 ID)별 미완료 명령. 같은 Result로 다음 단계를 두 번 실행하지 않는다.
         self._pending_jobs = set()
         self._pending_lock = threading.Lock()
+        self._maintenance_devices = set()
         self._canceled_jobs = set()
         self._cancel_callbacks = {}
 
@@ -120,6 +121,7 @@ class MQTTManager:
         client.subscribe("+/ack")
         client.subscribe("+/progress")
         client.subscribe("+/result")
+        client.subscribe("+/stock")
         client.subscribe("dock/station/+/status")
 
         print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] [INFO] [MQTT] Waiting OMX robots...", flush=True)
@@ -140,6 +142,8 @@ class MQTTManager:
 
         omx_id = topic_parts[0]
         message_type = topic_parts[1]
+        if omx_id not in ("omx1", "omx2", "omx3", "omx4") or message_type not in ("status", "ack", "progress", "result", "stock"):
+            return
 
         try:
             data = json.loads(msg.payload.decode())
@@ -152,6 +156,28 @@ class MQTTManager:
                 flush=True,
             )
             return
+
+        if not isinstance(data, dict):
+            return
+        if message_type == "stock":
+            omx = self.omx_devices.get(omx_id)
+            if omx is not None and not getattr(msg, "retain", False):
+                if omx.check_connection() and omx.state in ("IDLE", "READY"):
+                    omx.pallet_observation.update(data)
+                else:
+                    omx.pallet_observation.clear()
+            return
+        if message_type == "status" and not isinstance(data.get("state"), str):
+            return
+        if message_type in ("ack", "progress", "result"):
+            if not isinstance(data.get("job_id"), str) or not data["job_id"] or len(data["job_id"]) > 200:
+                return
+            if message_type == "ack" and type(data.get("accepted")) is not bool:
+                return
+            if message_type == "result" and type(data.get("success")) is not bool:
+                return
+            if message_type == "progress" and any(type(data.get(k)) is not int or data[k] < 0 for k in ("current", "total")):
+                return
 
         # =============================================
         # 처음 보는 OMX
@@ -248,6 +274,9 @@ class MQTTManager:
 
     def _on_disconnect(self, client, userdata, rc):
         self._invalidate_dock_connection(False)
+        for omx in list(self.omx_devices.values()):
+            omx.connected = False
+            omx.pallet_observation.clear()
 
     def dock_generation(self):
         with self._dock_lock:
@@ -362,6 +391,8 @@ class MQTTManager:
 
         key = (omx_id, job_id)
         with self._pending_lock:
+            if omx_id in self._maintenance_devices:
+                raise RuntimeError(f"OMX 서비스 재시작 처리 중입니다: {omx_id}")
             if key in self._pending_jobs:
                 raise RuntimeError(f"OMX 작업 명령이 이미 진행 중입니다: {omx_id}/{job_id}")
             self._pending_jobs.add(key)
@@ -421,7 +452,7 @@ class MQTTManager:
     def _connection_loop(self):
         while self.running:
 
-            for omx in self.omx_devices.values():
+            for omx in list(self.omx_devices.values()):
 
                 was_connected = omx.connected
 

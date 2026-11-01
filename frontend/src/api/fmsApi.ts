@@ -285,6 +285,25 @@ export type RobotStateDto = {
 export type OmxDeviceDto = {
   omx_id: string
   connected: boolean
+  state: string
+  detail: string
+  last_seen: number
+  job_id: string | null
+  items: Record<string, number>
+  current_count: number
+  total_count: number
+  message: string
+  count_kind: string | null
+  physical_unloading_verified: boolean | null
+  stock: {
+    supported: boolean
+    fresh: boolean
+    observed_at: number | null
+    received_at: number | null
+    exact_item_count: null
+    palettes: Record<string, { state: 'PRESENT' | 'EMPTY' | 'UNKNOWN'; reason: string }>
+  }
+  restart_available: boolean
   x: number
   y: number
   pixel_x: number
@@ -303,8 +322,15 @@ export function dashboardWsUrl() {
   return `${WS_BASE}/ws/dashboard`
 }
 
-export function getOmxDevices() {
-  return request<OmxDeviceDto[]>('/api/omx')
+export function getOmxDevices(signal?: AbortSignal) {
+  return request<OmxDeviceDto[]>('/api/omx', { signal: signal ?? AbortSignal.timeout(3000) })
+}
+
+export function restartOmx(omxId: string) {
+  return request<{ accepted: boolean; message: string }>(`/api/omx/${encodeURIComponent(omxId)}/restart`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ confirm: true }), signal: AbortSignal.timeout(70000),
+  })
 }
 export type ScenarioItem = { name: string; description: string }
 export type ScenarioStatus = {

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import WarehouseMap from './WarehouseMap'
 import RobotOrderForm from './components/RobotOrderForm'
+import OmxPanel from './components/OmxPanel'
 import { cancelOrder, getOrders, retryOrder, type OrderDto, type WorkstationDto, type PickupDto } from './api/orderApi'
 import ScenarioControls from './components/ScenarioControls'
 import DispatchVoltageToggle from './components/DispatchVoltageToggle'
@@ -201,6 +202,8 @@ export default function FmsControlApp() {
   const [commandState, setCommandState] = useState<CommandState>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [omxDevices, setOmxDevices] = useState<OmxDeviceDto[]>([])
+  const [selectedOmx, setSelectedOmx] = useState<string | null>(null)
+  const [omxQueryError, setOmxQueryError] = useState<string | null>(null)
   const [rightPanelOpen, setRightPanelOpen] = useState(true)
   const [orders, setOrders] = useState<OrderDto[]>([])
   const [workstations, setWorkstations] = useState<Record<string, WorkstationDto>>({})
@@ -287,25 +290,37 @@ export default function FmsControlApp() {
   }, [])
 
   useEffect(() => {
+    let stopped = false
+    let timer: number | undefined
+    let controller: AbortController | undefined
     const refreshOmx = async () => {
+      controller = new AbortController()
+      const timeout = window.setTimeout(() => controller?.abort(), 3000)
       try {
-        const devices = await getOmxDevices()
-
-        console.log('OMX:', devices)
-
-        setOmxDevices(devices)
-      } catch (error) {
-        console.warn('OMX 상태 조회 실패:', error)
+        const devices = await getOmxDevices(controller.signal)
+        if (!stopped) { setOmxDevices(devices); setOmxQueryError(null) }
+      } catch {
+        if (!stopped) {
+          setOmxQueryError('OMX 상태를 불러오지 못했습니다.')
+          setOmxDevices(previous => previous.map(row => ({ ...row, connected: false })))
+        }
+      } finally {
+        window.clearTimeout(timeout)
+        if (!stopped) timer = window.setTimeout(refreshOmx, 1000)
       }
     }
-
     void refreshOmx()
-
-    const timer = window.setInterval(refreshOmx, 1000)
-
-    return () => window.clearInterval(timer)
+    return () => { stopped = true; window.clearTimeout(timer); controller?.abort() }
   }, [])
-  
+
+  const selectRobot = (id: RobotId) => { setSelectedOmx(null); setSelectedRobot(id) }
+  const selectOmx = (id: string) => {
+    remote.stop()
+    setSelectedRobot(null)
+    setSelectedOmx(id)
+    setRightPanelOpen(true)
+  }
+  const selectedOmxDevice = omxDevices.find(row => row.omx_id === selectedOmx)
 
   const nearestNode = useMemo(() => {
     if (!selectedLiveRobot?.hasPose) return null
@@ -470,7 +485,7 @@ export default function FmsControlApp() {
     if (!selectedRobot) return
 
     if (!window.confirm(`${selectedRobot} 로봇의 비상정지를 해제하시겠습니까?`)) return
-    
+
 
     void runCommand(
       'release',
@@ -486,7 +501,7 @@ export default function FmsControlApp() {
       return
     }
     if (!window.confirm(`연결된 로봇 ${robotIds.length}대를 모두 비상정지하시겠습니까?`)) return
-    
+
     remote.stop()
 
     void runCommand( 'emergency', () => stopAllRobots())
@@ -540,6 +555,7 @@ export default function FmsControlApp() {
   const handleModeChange = (mode: 'real' | 'simulation', nextOperation: 'algorithm' | 'ai') => {
     if ((mode === robotMode && nextOperation === operationMode) || modeSwitching || scenarioActive) return
     setSelectedRobot(null)
+    setSelectedOmx(null)
     setTargetNode(null)
     setCommandState({ tone: 'info', message: `${mode === 'real' ? '실제' : '시뮬레이션'} · ${nextOperation === 'ai' ? 'AI' : '알고리즘'} 모드로 전환하고 있습니다.` })
     void changeMode(mode, nextOperation)
@@ -655,7 +671,7 @@ export default function FmsControlApp() {
               const robot = managedRobots.find(row => row.id === id)
               return robot ? displayRobotStatus(robot, orders) : ROBOT_DATA[id].status
             }}
-            onSelect={setSelectedRobot}
+            onSelect={selectRobot}
           />
 
           <section style={{ position: 'relative', display: 'flex', flex: 1, minWidth: 0, background: C.surface }} aria-label="FMS 실시간 지도">
@@ -669,7 +685,7 @@ export default function FmsControlApp() {
               edges={edges}
               layers={allLayers}
               selectedRobot={selectedRobot}
-              onSelect={setSelectedRobot}
+              onSelect={selectRobot}
               picking={Boolean(selectedRobot)}
               targetNode={targetNode ?? undefined}
               onPick={setTargetNode}
@@ -678,6 +694,8 @@ export default function FmsControlApp() {
               visibleRobotIds={mapRobotIds as RobotId[]}
               robotStates={managedRobots}
               omxDevices={omxDevices}
+              selectedOmx={selectedOmx}
+              onSelectOmx={selectOmx}
               dockingStations={robotMode === 'real' ? dockingStations : undefined}
             />
             <button
@@ -716,7 +734,10 @@ export default function FmsControlApp() {
             </button>
           </section>
 
-          {rightPanelOpen && (
+          {rightPanelOpen && selectedOmxDevice && <OmxPanel key={selectedOmxDevice.omx_id}
+            device={selectedOmxDevice} queryError={omxQueryError} realMode={robotMode === 'real'}
+            blocked={scenarioActive || modeSwitching} onClose={() => setSelectedOmx(null)} />}
+          {rightPanelOpen && !selectedOmxDevice && (
           <RobotPanel
             robotId={selectedRobot}
             orders={orders}
@@ -992,8 +1013,8 @@ function RobotPanel({ scenarioActive, robotId, orders, liveRobot, targetNode, dr
           <div style={{ marginBottom: 9, color: targetNode ? C.primary : C.muted, fontSize: 10, fontWeight: 700 }}>
             {targetNode ? `선택 노드: N${targetNode}` : '맵에서 이동할 노드를 선택하세요.'}
           </div>
-          <button 
-            onClick={onMove} 
+          <button
+            onClick={onMove}
             disabled={!targetNode || !connected || emergencyStopped || busy !== null || scenarioActive || (drivingMode === 'llm' && (!llmMoveReady || !selectedRouteModel))}
             style={primaryButton(
               Boolean(targetNode && connected && !emergencyStopped && busy === null && !scenarioActive
