@@ -111,6 +111,7 @@ class RealNavigation:
         self._arrival_observed = {}
         self._arrivals = {}
         self._stop_deadlines = {}
+        self._stop_versions = {}
         self._sync_errors = {}
         self._feedback = {}
         self._hold = {}
@@ -806,6 +807,14 @@ class RealNavigation:
         """Nav2 종료 전에는 계획/예약을 해제하지 않는다. 마지막 요청만 실행한다."""
         with self.lock:
             already_stopping = robot_id in self._stopping
+            if reason == "long_disconnect_reset":
+                # 이전 비동기 경로 계산/출발 콜백은 재연결 뒤 재사용하지 않는다.
+                self._request_versions[robot_id] = self._request_versions.get(robot_id, 0) + 1
+                deferred = self._deferred_requests.pop(robot_id, None)
+                if deferred is not None:
+                    self._pause(deferred[0], "concession_interrupted")
+                # 재연결 전 취소 응답과 현재 연결의 종료 확인을 혼동하지 않는다.
+                already_stopping = False
             if already_stopping and robot_id not in self._stop_deadlines:
                 # 시간초과 후에도 Nav2 종료 증거가 없으면 새 Goal을 접수하지 않는다.
 
@@ -848,9 +857,14 @@ class RealNavigation:
             if already_stopping:
                 return
 
+            stop_version = self._stop_versions.get(robot_id, 0) + 1
+            self._stop_versions[robot_id] = stop_version
+
             # 로봇 정지 확인 결과를 처리한다.
             def stopped():
                 with self.lock:
+                    if self._stop_versions.get(robot_id) != stop_version:
+                        return  # 이전 연결에서 늦게 온 콜백은 새 정지 대기를 완료하지 못한다.
                     self._executing.pop(robot_id, None)
                     self._preparing.discard(robot_id)
                     self._station_pending.discard(robot_id)
@@ -884,6 +898,32 @@ class RealNavigation:
                     f"robot={robot_id} cancel_send_failed={exc!r}",
                     flush=True,
                 )
+
+    def reset_reconnected_robot(self, robot_id, reconnected_at):
+        """종료 확인 뒤 새 Pose의 점유만 남기고 해당 로봇의 계획을 폐기한다."""
+        with self.lock:
+            robot = self._fleet.get_robot(robot_id)
+            if (robot is None or not robot.connected or robot.pose_received_at is None
+                    or robot.pose_received_at <= reconnected_at
+                    or robot_id in self._stopping or robot_id in self._executing
+                    or robot_id in self._preparing):
+                return False
+            graph = load_route_graph()
+            self._sync(graph, DistanceAStar(graph), self._clock())
+            if robot_id in self._sync_errors or robot_id not in self._robots:
+                return False
+            # _sync가 다른 로봇 때문에 실패해도 해당 로봇의 새 점유가 유효하면 정리 가능.
+            self._traffic.cancel_navigation_after_stop(robot_id)
+            self._traffic.clear_protected_resources(robot_id)
+            self._requests.pop(robot_id, None)
+            self._cancelled.discard(robot_id)
+            self._yielding.discard(robot_id)
+            self._arrivals.pop(robot_id, None)
+            self._resume_pending.discard(robot_id)
+            robot.goal_node = robot.route = robot.navigation_type = robot.navigation_id = None
+            robot.next_node = robot.next_edge = None
+            self._publish()
+            return True
 
     # 이후 정지를 취소한다.
     def cancel_after_stop(self, robot_id):
@@ -950,6 +990,8 @@ class RealNavigation:
 
             if robot.state == RobotState.EMERGENCY_STOP:
                 raise ValueError(f"비상정지 상태입니다: {robot_id}")
+            if robot.reconnect_reset_pending:
+                raise ValueError("장시간 단절 복구 중에는 새 경로를 실행할 수 없습니다.")
 
             if not self._sync(graph, planner, self._clock()):
                 raise ValueError(
@@ -1703,6 +1745,8 @@ class RealNavigation:
 
             robot = self._fleet.get_robot(robot_id)
 
+            if robot.reconnect_reset_pending:
+                return  # 종료 콜백과 새 Pose 확인 전에는 이전 Result로 예약을 풀지 않는다.
             if not robot.connected:
                 # 통신 단절 중의 Result만으로 물리 정지와 점유 해제를 확정하지 않는다.
                 self._pause(robot_id, "navigation_result_offline", f"status={status}")

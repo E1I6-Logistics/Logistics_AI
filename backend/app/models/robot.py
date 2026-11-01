@@ -44,6 +44,7 @@ PAUSE_REASON_MESSAGES = {
     "dock_release_timeout": "출발 후 도킹 접촉 해제를 확인하지 못했습니다.",
     "dock_restart_unverified": "도킹 이력이 확인되지 않습니다. 운영자 확인 후 재도킹하세요.",
     "dock_recovery_required": "도킹 또는 이탈 실패 후 정지했습니다. 충전소 복귀 명령으로 복구하세요.",
+    "long_disconnect_reset": "10초 이상 단절 후 이전 작업을 정리하고 정지·새 위치·OMX 종료를 확인하고 있습니다.",
     "reconnected_with_active_work": "연결이 복구됐지만 이전 작업이 남아 있어 자동 재개하지 않았습니다.",
     "after_stop_failed": "정지 확인 후 다음 작업을 시작하지 못했습니다.",
     "cancel_send_failed": "Nav2 취소 요청을 전송하지 못했습니다.",
@@ -101,6 +102,8 @@ class Robot:
 
         # 연결 상태
         self.connected = False
+        # 장시간 단절 복구 중에는 이전 작업/수동 주행의 재진입을 막는다.
+        self.reconnect_reset_pending = False
 
         # 위치 상태
         self.x: float | None = None

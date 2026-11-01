@@ -8,6 +8,7 @@ from ..config import (REAL_ARRIVAL_DISTANCE_M, ZENOH_MISSING_GRACE_S, DOCK_STATI
                       DOCK_ACTION_TIMEOUT_S, DOCK_CONTACT_TIMEOUT_S, STATION_EXIT_SPEED_MPS,
                       STATION_EXIT_TIMEOUT_S, STATION_EXIT_DISTANCE_M, REAL_POSE_TIMEOUT_S,
                       REAL_DOCK_OCCUPANCY_TOLERANCE_M)
+from ..services.reconnect_recovery import ReconnectRecovery
 from ..services.station_exit import StationExitError
 from time import monotonic, strftime
 
@@ -108,6 +109,7 @@ class RosGateway:
         self._ros_node: FmsRosNode | None = None
         self._waiting_omx = {}
         self._missing_since = {}
+        self._reconnect_recovery = ReconnectRecovery(self)
         self._dock_attempts = {}
         self._charging_docks = {}  # 현재 충전 접촉/주문 배정 전 출발 문맥. 도킹 성공 이력이 아니다.
         self._departing_docks = {}
@@ -153,6 +155,7 @@ class RosGateway:
             self._ros_node.reconcile_navigation_results()
         self._tick_charging_docks()
         self._navigation.tick()
+        self._reconnect_recovery.tick()
         self._tick_charging_docks()
 
     def _validate_dock_departure(self, robot_id):
@@ -492,12 +495,16 @@ class RosGateway:
                 continue
 
             connected_robot_ids.append(robot_id)
-            self._missing_since.pop(robot_id, None)
+            missing_since = self._missing_since.pop(robot_id, None)
             # 처음 본 로봇은 등록하고, 이미 있던 로봇은 연결 상태를 갱신한다.
-            fleet_manager.register_robot(robot_id)
+            robot = fleet_manager.register_robot(robot_id)
 
             # 이 로봇의 ROS 통신 준비가 안 됐다면 준비한다.
             self._ros_node.register_robot(robot_id)
+            if missing_since is not None and (
+                monotonic() - missing_since >= 10.0 or robot.reconnect_reset_pending
+            ):
+                self._reconnect_recovery.begin(robot, monotonic() - missing_since)
 
         # 한 번 보이지 않았다는 이유로 바로 연결이 끊겼다고 판단하지 않는다.
         for robot in fleet_manager.get_all_robots():
@@ -541,6 +548,8 @@ class RosGateway:
             raise ValueError(f"Robot이 연결되어 있지 않습니다: {robot_id}")
         if robot.state == RobotState.EMERGENCY_STOP:
             raise ValueError(f"비상정지 상태입니다: {robot_id}")
+        if robot.reconnect_reset_pending:
+            raise ValueError("장시간 단절 복구 중입니다. 정지·위치·OMX 종료 확인을 기다리세요.")
         target = get_node(node_id)
         measured_distance(robot, (target["x"], target["y"]), monotonic())
 
@@ -627,6 +636,8 @@ class RosGateway:
         if not robot.connected:
             raise ValueError(f"Robot이 연결되어 있지 않습니다: {robot_id}")
 
+        if robot.reconnect_reset_pending and (linear_x or angular_z):
+            raise ValueError("장시간 단절 복구 중에는 수동 주행할 수 없습니다.")
         self._sync_dock_contact(robot_id)
         if not math.isfinite(linear_x) or not math.isfinite(angular_z):
             raise ValueError("속도 명령은 유한한 값이어야 합니다.")
@@ -797,6 +808,8 @@ class RosGateway:
         if robot.state != RobotState.EMERGENCY_STOP:
             raise ValueError(f"비상정지 상태가 아닙니다: {robot_id}")
 
+        if robot.reconnect_reset_pending:
+            raise ValueError("장시간 단절 복구 확인을 먼저 완료해야 합니다.")
         if robot_id in self._navigation._stopping:
             raise ValueError(f"주행 취소 종료를 기다리고 있습니다: {robot_id}")
         if self._ros_node.has_active_auxiliary(robot_id):

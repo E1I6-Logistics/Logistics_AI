@@ -252,6 +252,49 @@ class OrderManager:
         for order_id in ids:
             self.cancel_order(order_id, return_to_station=False)
 
+    def discard_disconnected_robot_work(self, robot_id):
+        """장시간 단절된 실제 로봇의 작업 의도만 폐기한다. 물리 정지는 Gateway가 확인한다."""
+        reason = "10초 이상 통신 단절 후 재연결되어 이전 작업을 초기화했습니다. 자동 재실행하지 않습니다."
+        with self.lock:
+            jobs = set()
+            real_return = self.returning.get(robot_id)
+            real_return = real_return if self.orders.get(real_return, {}).get("mode") == "real" else None
+            for mapping in (self.returning, self.recovering):
+                job = mapping.get(robot_id)
+                if self.orders.get(job, {}).get("mode") == "real":
+                    mapping.pop(robot_id, None)
+                    jobs.add(job)
+            if real_return or robot_id not in self.returning:
+                self._return_started.discard(robot_id)
+            for row in self.orders.values():
+                if row.get("robot_id") != robot_id or row.get("mode") != "real":
+                    continue
+                job = row["order_id"]
+                if row["status"] == "IN_PROGRESS":
+                    jobs.add(job)
+                    row["failed_phase"] = row["phase"]
+                    row["failed_at"] = datetime.now(timezone.utc).isoformat()
+                    row.setdefault("failures", []).append(dict(
+                        phase=row["phase"], reason=reason, robot_id=robot_id, time=row["failed_at"]))
+                    row["status"] = row["phase"] = "FAILED"
+                    row["error"] = reason
+                if job in jobs:
+                    row["recovery_status"] = "STOPPED"
+                    row["recovery_error"] = reason
+                    if row["status"] == "COMPLETED" and row["phase"] != "COMPLETED":
+                        row["return_error"] = reason
+                        row["phase"] = "RETURN_FAILED"
+                    self._robot_dispatcher.discard_order(job)
+                    workstation_manager.release(job)
+            # ROS 스레드에서 Task.cancel을 직접 호출하지 않는다.
+            tasks = []
+            for key, task in list(self._route_tasks.items()):
+                if key in jobs or (real_return and key == f"return:{robot_id}"):
+                    tasks.append(task)
+                    if not task.done():
+                        task.get_loop().call_soon_threadsafe(task.cancel)
+            return jobs, tasks
+
     # 대기 중인 작업을 한 주기 진행한다.
     async def tick(self):
         if scenario_manager.active and not scenario_manager.order_workload:
