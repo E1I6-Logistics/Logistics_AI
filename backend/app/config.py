@@ -56,11 +56,17 @@ MQTT_BROKER_IP = os.getenv("FMS_MQTT_BROKER_IP", "127.0.0.1")
 MQTT_BROKER_PORT = int(os.getenv("FMS_MQTT_BROKER_PORT", "1883"))
 
 # 사용자 확인 완료: robot1/2/3 ↔ 물리 Station 1/2/3. 충전 노드 번호와 별개다.
-DOCK_STATION_MAP = json.loads(os.getenv("FMS_DOCK_STATION_MAP", '{"robot1":1,"robot2":2,"robot3":3}'))
+DOCK_STATION_MAP = json.loads(
+    os.getenv("FMS_DOCK_STATION_MAP", '{"robot1":1,"robot2":2,"robot3":3}')
+)
 if (
     not isinstance(DOCK_STATION_MAP, dict)
-    or any(robot not in {"robot1", "robot2", "robot3"} or type(station) is not int or station not in (1, 2, 3)
-           for robot, station in DOCK_STATION_MAP.items())
+    or any(
+        robot not in {"robot1", "robot2", "robot3"}
+        or type(station) is not int
+        or station not in (1, 2, 3)
+        for robot, station in DOCK_STATION_MAP.items()
+    )
     or len(set(DOCK_STATION_MAP.values())) != len(DOCK_STATION_MAP)
 ):
     raise ValueError("FMS_DOCK_STATION_MAP must map robot1~3 to unique integer stations 1~3")
@@ -74,15 +80,27 @@ DOCK_SENSOR_MAX_AGE_S = float(os.getenv("FMS_DOCK_SENSOR_MAX_AGE_S", "0"))
 STATION_EXIT_DISTANCE_M = float(os.getenv("FMS_STATION_EXIT_DISTANCE_M", "0.10"))
 STATION_EXIT_SPEED_MPS = float(os.getenv("FMS_STATION_EXIT_SPEED_MPS", "0.05"))
 STATION_EXIT_TIMEOUT_S = float(os.getenv("FMS_STATION_EXIT_TIMEOUT_S", "20"))
-if any(not math.isfinite(value) or value <= 0 for value in (
-    STATION_EXIT_DISTANCE_M, STATION_EXIT_SPEED_MPS, STATION_EXIT_TIMEOUT_S,
-)) or STATION_EXIT_DISTANCE_M / STATION_EXIT_SPEED_MPS >= STATION_EXIT_TIMEOUT_S:
-    raise ValueError("Station exit distance, speed and timeout must be finite, positive and achievable")
+if (
+    any(
+        not math.isfinite(value) or value <= 0
+        for value in (
+            STATION_EXIT_DISTANCE_M,
+            STATION_EXIT_SPEED_MPS,
+            STATION_EXIT_TIMEOUT_S,
+        )
+    )
+    or STATION_EXIT_DISTANCE_M / STATION_EXIT_SPEED_MPS >= STATION_EXIT_TIMEOUT_S
+):
+    raise ValueError(
+        "Station exit distance, speed and timeout must be finite, positive and achievable"
+    )
 if any(not math.isfinite(value) or value < 0 for value in (DOCK_DEBOUNCE_S, DOCK_SENSOR_MAX_AGE_S)):
     raise ValueError("Dock debounce and sensor maximum age must be finite and nonnegative")
-if any(not math.isfinite(value) or value <= 0 for value in (DOCK_CONTACT_TIMEOUT_S, DOCK_ACTION_TIMEOUT_S)):
+if any(
+    not math.isfinite(value) or value <= 0
+    for value in (DOCK_CONTACT_TIMEOUT_S, DOCK_ACTION_TIMEOUT_S)
+):
     raise ValueError("Dock timeouts must be finite and positive")
-
 
 
 # ============================================================
@@ -103,7 +121,7 @@ if not math.isfinite(BATTERY_VOLTAGE_WINDOW_S) or BATTERY_VOLTAGE_WINDOW_S <= 0:
 # 실제 로봇이 움직일 것으로 예상하는 속도(m/s). 예약 시간을 계산할 때 쓴다.
 # 기본값은 0.10이며 Nav2 주행 속도를 직접 변경하지 않는다.
 # 실측 평균속도보다 낮추면 예약이 길어지고, 높이면 예약 충돌 위험이 커진다.
-REAL_NAVIGATION_SPEED_MPS = float(os.getenv("FMS_REAL_NAVIGATION_SPEED_MPS", "0.15"))
+REAL_NAVIGATION_SPEED_MPS = float(os.getenv("FMS_REAL_NAVIGATION_SPEED_MPS", "0.09"))
 
 # 지점과 통로의 예약 시간 앞뒤에 더하는 여유 시간(초).
 # 시간 오차가 크면 늘리되 다른 로봇의 대기 시간이 길어진다.
