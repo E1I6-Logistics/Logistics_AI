@@ -141,9 +141,10 @@ REAL_DOCK_OCCUPANCY_TOLERANCE_M = float(os.getenv("FMS_REAL_DOCK_OCCUPANCY_TOLER
 # 실제 첫 위치 정보가 더 늦게 올 때만 늘린다.
 REAL_INITIAL_POSE_TIMEOUT_S = float(os.getenv("FMS_REAL_INITIAL_POSE_TIMEOUT_S", "3.0"))
 
-# 마지막으로 받은 로봇 위치를 믿을 수 있는 시간(초).
-# 값을 늘리면 잠깐의 통신 지연은 견디지만 위치를 잃은 사실도 늦게 알게 된다.
-REAL_POSE_TIMEOUT_S = float(os.getenv("FMS_REAL_POSE_TIMEOUT_S", "2.0"))
+# 마지막으로 받은 로봇 위치를 믿을 수 있는 시간(초). 기본 5초로 짧은 지연을 허용한다.
+# 5초를 초과하면 기존 경로/점유를 보호하고 정지한다. 새 Pose를 만들어내지는 않는다.
+# 현장 조정: FMS_REAL_POSE_TIMEOUT_S. 환경변수에 값이 있으면 해당 값이 우선한다.
+REAL_POSE_TIMEOUT_S = float(os.getenv("FMS_REAL_POSE_TIMEOUT_S", "5.0"))
 
 # 예약과 주행 상태를 다시 확인하는 간격(초). 기본값 0.1초.
 # 늘리면 확인 횟수가 줄지만 짧은 통로에서의 정지 판단이 늦어질 수 있다.

@@ -610,6 +610,16 @@ class RosGateway:
         else:
             self._navigation.stop(robot_id, callback, reason=reason)
 
+    @_navigation_locked
+    def finish_completed_omx_wait(self, robot_id, completed_node, job_id):
+        """성공 Result 이후에도 물리 작업/취소가 남아 있으면 다음 경로 준비를 미룬다."""
+        if (self._ros_node is None or self._ros_node.has_active_auxiliary(robot_id)
+                or mqtt_manager.has_active_job(job_id)
+                or robot_id in self._waiting_omx or robot_id in self._dock_attempts
+                or robot_id in self._departing_docks):
+            return False
+        return self._navigation.finish_omx_wait(robot_id, completed_node)
+
     # 현재 작업을 취소한다.
     @_navigation_locked
     def cancel_current_work(self, robot_id, callback):

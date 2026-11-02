@@ -722,6 +722,7 @@ def test_invalid_ai_route_is_not_driven_and_failure_returns_robot(monkeypatch):
 # 실제 MQTT 작업에서 마지막 픽업 후 작업대를 선택하는지 검증한다.
 def test_real_mqtt_uses_same_workstation_selection_after_last_pickup(monkeypatch):
     _reset(monkeypatch)
+    monkeypatch.setattr(order_manager, "_finish_omx_transition", lambda row: True)
     from types import SimpleNamespace
     from backend.app.models.robot import Robot, RobotState
     from backend.app.services import order_manager as order_module

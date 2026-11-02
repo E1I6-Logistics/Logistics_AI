@@ -899,6 +899,37 @@ class RealNavigation:
                     flush=True,
                 )
 
+    def finish_omx_wait(self, robot_id, completed_node):
+        """OMX 성공을 받은 주문의 정지 대기를 종료한다. 전체 WAITING 허용은 하지 않는다."""
+        with self.lock:
+            robot = self._fleet.get_robot(robot_id)
+            node = str(completed_node)
+            if (robot is None or not robot.connected or robot.reconnect_reset_pending
+                    or robot.state != RobotState.WAITING
+                    or robot.navigation_type is not None or robot.route is not None
+                    or robot.goal_node not in (None, node)
+                    or self.is_active(robot_id) or robot_id in self._preparing
+                    or robot_id in self._arrivals or robot_id in self._cancelled
+                    or robot_id in self._station_pending or robot_id in self._deferred_requests):
+                return False
+            try:
+                graph = load_route_graph()
+                self._sync(graph, DistanceAStar(graph), self._clock())
+            except (OSError, ValueError, KeyError):
+                return False
+            row = self._robots.get(robot_id)
+            if (robot_id in self._sync_errors or row is None
+                    or row.get("occupied_node") != node or row.get("occupied_edge") is not None
+                    or row.get("route") is not None):
+                return False
+            self._traffic.cancel_navigation_after_stop(robot_id)
+            self._traffic.clear_protected_resources(robot_id)
+            robot.goal_node = robot.navigation_id = robot.next_node = robot.next_edge = None
+            robot.set_state(RobotState.IDLE)
+            self._publish()
+            print(f"[OMX COMPLETE] {robot_id}: N{node} 작업 완료·정지 확인. 다음 경로 준비 가능", flush=True)
+            return True
+
     def reset_reconnected_robot(self, robot_id, reconnected_at):
         """종료 확인 뒤 새 Pose의 점유만 남기고 해당 로봇의 계획을 폐기한다."""
         with self.lock:

@@ -185,6 +185,7 @@ class OrderManager:
                         robot = fleet_manager.get_robot(robot_id)
                         owns_robot = robot is not None and robot.occupied_node != CHARGING_STATION_NODES.get(robot_id)
             row["status"] = row["phase"] = "CANCELLED"
+            row.pop("_omx_completed_node", None)
             self._robot_dispatcher.discard_order(order_id)
             workstation_manager.release(order_id)
             if not owns_robot:
@@ -277,6 +278,7 @@ class OrderManager:
                     row.setdefault("failures", []).append(dict(
                         phase=row["phase"], reason=reason, robot_id=robot_id, time=row["failed_at"]))
                     row["status"] = row["phase"] = "FAILED"
+                    row.pop("_omx_completed_node", None)
                     row["error"] = reason
                 if job in jobs:
                     row["recovery_status"] = "STOPPED"
@@ -453,11 +455,26 @@ class OrderManager:
             robot.assign_order(order_id, row["items"], row["total_quantity"], row["pickup_nodes"], None)
             row["phase"] = "MOVING_TO_PICKUP"
 
+    def _finish_omx_transition(self, row):
+        # 유효한 OMX 성공 Result가 남긴 전환 표식만 소비한다. 교통 대기는 바꾸지 않는다.
+        with ros_gateway.navigation.lock, self.lock:
+            node = row.get("_omx_completed_node")
+            if node is None:
+                return True
+            if row["status"] not in ("IN_PROGRESS", "COMPLETED"):
+                return False
+            if not ros_gateway.finish_completed_omx_wait(row["robot_id"], node, row["order_id"]):
+                return False
+            row.pop("_omx_completed_node", None)
+            return True
+
     # 실제 로봇 주문의 현재 단계를 진행한다.
     async def _tick_real(self, row):
         order_id = row["order_id"]
         robot = fleet_manager.get_robot(row["robot_id"])
         if robot is None or not robot.connected or robot.state in (RobotState.PAUSED, RobotState.EMERGENCY_STOP):
+            return
+        if not self._finish_omx_transition(row):
             return
         phase = row["phase"]
         if phase == "WAITING_WORKSTATION":
@@ -525,6 +542,8 @@ class OrderManager:
                 continue
             order_id = self.returning[robot_id]
             row = self.orders[order_id]
+            if not self._finish_omx_transition(row):
+                continue
             if (
                 robot.occupied_node == station
                 and robot.state == RobotState.IDLE
@@ -585,6 +604,7 @@ class OrderManager:
                 {"phase": failed_phase, "reason": reason, "robot_id": row["robot_id"], "time": row["failed_at"]}
             )
             row["status"] = row["phase"] = "FAILED"
+            row.pop("_omx_completed_node", None)
             row["error"] = reason
             workstation_manager.release(order_id)
             if row["mode"] == "simulation":
@@ -643,6 +663,7 @@ class OrderManager:
             if not data.get("success", False):
                 self.fail(order_id, f"OMX 작업 실패: {omx.omx_id}")
                 return
+            row["_omx_completed_node"] = robot.current_node
             if row["phase"] in ("WORKING_AT_PICKUP", "MOVING_TO_PICKUP"):
                 row["pickup_index"] += 1
                 robot.order_pickup_index = row["pickup_index"]
