@@ -188,3 +188,28 @@ FMS 시나리오의 **무작위 주문 연속 배차**는 사람이 시작·중�
 지도 OMX 아이콘에서 장치 상태·담당 팔레트의 물건 유무를 확인합니다. 설정·검증·선택적 서비스 재시작 방법은 [OMX 상태 사용법](docs/omx-status.md)을 참고하세요.
 
 웹 상단 **FMS 전체 재시작**은 작업 여부와 관계없이 기존 stop/start 스크립트를 순서대로 실행합니다. [SSH 설정·웹 재시작 사용법](docs/omx-status.md#omx1~4-ssh-간편-설정)을 확인하세요.
+
+
+## PC 로컬 맵으로 RViz 열기
+
+로봇이 맵을 보내지 않아도 PC의 저장 맵으로 RViz를 열 수 있습니다.
+
+```bash
+cd ~/AX_Logistics
+./rviz_fms
+```
+
+기본 맵은 AMR 소스의 `map/logitle_map_fin.yaml`과 해당 PGM입니다.
+맵 서버가 자동 활성화되고 RViz는 전용 `/fms_view/map`을 구독합니다.
+`/robot1/2/3/logitle_pose`와 각 `plan` 표시는 유지되며, 로봇 연결 시 함께 보입니다.
+RViz 창을 닫거나 실행 터미널에서 Ctrl+C를 누르면 이 명령이 만든 맵 서버도 종료됩니다.
+일반 `rviz2` 명령만 실행하면 이 로컬 맵 서버는 시작되지 않습니다.
+
+다른 맵을 선택하려면:
+
+```bash
+./rviz_fms map:=/절대경로/맵.yaml
+```
+
+로봇과 지도가 겹치려면 로봇의 위치 기준 맵과 PC YAML의 맵·좌표 원점이 같아야 합니다.
+RViz Route Tool의 GeoJSON 경로 편집 파일은 기존처럼 별도로 불러옵니다.

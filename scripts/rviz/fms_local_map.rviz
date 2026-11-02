@@ -1,0 +1,251 @@
+Panels:
+  - Class: rviz_common/Displays
+    Help Height: 0
+    Name: Displays
+    Property Tree Widget:
+      Expanded:
+        - /Global Options1
+        - /PC Local Map1
+        - /Robots1
+        - /Paths1
+      Splitter Ratio: 0.55
+    Tree Height: 700
+  - Class: rviz_common/Views
+    Expanded:
+      - /Current View1
+    Name: Views
+    Splitter Ratio: 0.5
+  - Class: nav2_rviz_plugins/Route Tool
+    Name: Route Tool
+Visualization Manager:
+  Class: ""
+  Displays:
+    - Alpha: 1
+      Binary representation: false
+      Binary threshold: 100
+      Class: rviz_default_plugins/Map
+      Color Scheme: map
+      Draw Behind: true
+      Enabled: true
+      Name: PC Local Map
+      Topic:
+        Depth: 1
+        Durability Policy: Transient Local
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /fms_view/map
+      Update Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /fms_view/map_updates
+      Use Timestamp: false
+      Value: true
+    - Class: rviz_common/Group
+      Displays:
+        - Alpha: 1
+          Class: rviz_default_plugins/Pose
+          Color: 255; 0; 0
+          Enabled: true
+          Head Length: 0.1
+          Head Radius: 0.06
+          Name: Robot 1
+          Shaft Length: 0.18
+          Shaft Radius: 0.04
+          Shape: Arrow
+          Topic:
+            Depth: 10
+            Durability Policy: Volatile
+            Filter size: 10
+            History Policy: Keep Last
+            Reliability Policy: Reliable
+            Value: /robot1/logitle_pose
+          Value: true
+        - Alpha: 1
+          Class: rviz_default_plugins/Pose
+          Color: 255; 255; 0
+          Enabled: true
+          Head Length: 0.1
+          Head Radius: 0.06
+          Name: Robot 2
+          Shaft Length: 0.18
+          Shaft Radius: 0.04
+          Shape: Arrow
+          Topic:
+            Depth: 10
+            Durability Policy: Volatile
+            Filter size: 10
+            History Policy: Keep Last
+            Reliability Policy: Reliable
+            Value: /robot2/logitle_pose
+          Value: true
+        - Alpha: 1
+          Class: rviz_default_plugins/Pose
+          Color: 0; 255; 0
+          Enabled: true
+          Head Length: 0.1
+          Head Radius: 0.06
+          Name: Robot 3
+          Shaft Length: 0.18
+          Shaft Radius: 0.04
+          Shape: Arrow
+          Topic:
+            Depth: 10
+            Durability Policy: Volatile
+            Filter size: 10
+            History Policy: Keep Last
+            Reliability Policy: Reliable
+            Value: /robot3/logitle_pose
+          Value: true
+      Enabled: true
+      Name: Robots
+    - Class: rviz_common/Group
+      Displays:
+        - Alpha: 1
+          Buffer Length: 1
+          Class: rviz_default_plugins/Path
+          Color: 255; 0; 0
+          Enabled: true
+          Head Diameter: 0.08
+          Head Length: 0.1
+          Length: 0.1
+          Line Style: Billboards
+          Line Width: 0.025
+          Name: Robot 1 Path
+          Offset:
+            X: 0
+            Y: 0
+            Z: 0.05
+          Pose Color: 255; 0; 0
+          Pose Style: None
+          Radius: 0.03
+          Shaft Diameter: 0.04
+          Shaft Length: 0.1
+          Topic:
+            Depth: 5
+            Durability Policy: Volatile
+            Filter size: 10
+            History Policy: Keep Last
+            Reliability Policy: Reliable
+            Value: /robot1/plan
+          Value: true
+        - Alpha: 1
+          Buffer Length: 1
+          Class: rviz_default_plugins/Path
+          Color: 255; 255; 0
+          Enabled: true
+          Head Diameter: 0.08
+          Head Length: 0.1
+          Length: 0.1
+          Line Style: Billboards
+          Line Width: 0.025
+          Name: Robot 2 Path
+          Offset:
+            X: 0
+            Y: 0
+            Z: 0.05
+          Pose Color: 255; 255; 0
+          Pose Style: None
+          Radius: 0.03
+          Shaft Diameter: 0.04
+          Shaft Length: 0.1
+          Topic:
+            Depth: 5
+            Durability Policy: Volatile
+            Filter size: 10
+            History Policy: Keep Last
+            Reliability Policy: Reliable
+            Value: /robot2/plan
+          Value: true
+        - Alpha: 1
+          Buffer Length: 1
+          Class: rviz_default_plugins/Path
+          Color: 0; 255; 0
+          Enabled: true
+          Head Diameter: 0.08
+          Head Length: 0.1
+          Length: 0.1
+          Line Style: Billboards
+          Line Width: 0.025
+          Name: Robot 3 Path
+          Offset:
+            X: 0
+            Y: 0
+            Z: 0.05
+          Pose Color: 0; 255; 0
+          Pose Style: None
+          Radius: 0.03
+          Shaft Diameter: 0.04
+          Shaft Length: 0.1
+          Topic:
+            Depth: 5
+            Durability Policy: Volatile
+            Filter size: 10
+            History Policy: Keep Last
+            Reliability Policy: Reliable
+            Value: /robot3/plan
+          Value: true
+      Enabled: true
+      Name: Paths
+    - Class: rviz_common/Group
+      Displays:
+        - Class: rviz_default_plugins/MarkerArray
+          Enabled: true
+          Name: Route Tool (manual load)
+          Namespaces: {}
+          Topic:
+            Depth: 5
+            Durability Policy: Transient Local
+            Filter size: 10
+            History Policy: Keep Last
+            Reliability Policy: Reliable
+            Value: /route_graph
+          Value: true
+      Enabled: true
+      Name: Route Graph
+  Enabled: true
+  Global Options:
+    Background Color: 48; 48; 48
+    Fixed Frame: map
+    Frame Rate: 30
+  Name: root
+  Tools:
+    - Class: rviz_default_plugins/MoveCamera
+    - Class: rviz_default_plugins/Select
+    - Class: rviz_default_plugins/FocusCamera
+    - Class: rviz_default_plugins/Measure
+  Transformation:
+    Current:
+      Class: rviz_default_plugins/TF
+  Value: true
+  Views:
+    Current:
+      Angle: -1.5708
+      Class: rviz_default_plugins/TopDownOrtho
+      Enable Stereo Rendering:
+        Stereo Eye Separation: 0.06
+        Stereo Focal Distance: 1
+        Swap Stereo Eyes: false
+        Value: false
+      Invert Z Axis: false
+      Name: Current View
+      Near Clip Distance: 0.01
+      Scale: 120
+      Target Frame: <Fixed Frame>
+      Value: TopDownOrtho (rviz_default_plugins)
+      X: 0.4
+      Y: 0.16
+    Saved: ~
+Window Geometry:
+  Displays:
+    collapsed: false
+  Height: 900
+  Hide Left Dock: false
+  Hide Right Dock: false
+  Views:
+    collapsed: false
+  Width: 1400
+  X: 80
+  Y: 40
