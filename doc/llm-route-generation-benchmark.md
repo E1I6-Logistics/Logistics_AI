@@ -1323,3 +1323,142 @@ find "$CONTEXT_OUT" -name selector_iterative_route_summary.json
 비교할 때는 조건별 도착·최단 일치의 건수와 비율, 결정 평균·p95,
 경로 생성 시간을 확인한다. 5회 반복을 서로 다른 420개 경로로 해석하지 않는다.
 서로 다른 출발·목적지 조합은 84쌍이며 각 조합을 반복 확인한 것이다.
+
+
+## 필수 입력 + 방위·접근량 단독 시험
+
+추가 조건 이름은 `minimal_compass_progress`이다. 필수 입력을 고정하고 방위·접근량의
+효과를 확인한다. 기존 기본의 이력 7개와 직선거리 필드는 모델 입력에서 제외한다.
+기존 4조건과 같은 지도·후보 제한·지시문·측정 방식을 사용한다.
+`minimal_distance`와 비교하면 거리 힌트와 방위·접근량 묶음의 차이를 볼 수 있다.
+방위와 접근량 각각의 효과를 분리한 시험은 아니다.
+
+### 입력 필드와 계산
+
+| 위치 | 필드 | 자료형·의미 |
+| --- | --- | --- |
+| state | route_graph | 좌표 없는 전체 CompactAdjacencyGraph 객체 |
+| state | current_node | 현재 노드 정수 ID |
+| state | target_node | 목적지 노드 정수 ID |
+| state | available_edges | 현재 코드가 허용한 인접 후보 배열 |
+| state | target_direction | 현재→목적지의 8방위 문자열 |
+| 후보 | node | 후보 노드 정수 ID |
+| 후보 | weight | 현재→후보의 저장된 간선 가중치; 정수 값은 int, 소수 값은 float |
+| 후보 | direction | 현재→후보의 8방위 문자열 |
+| 후보 | progress | 현재→목적지 직선거리 − 후보→목적지 직선거리, 소수점 4자리 반올림 |
+
+8방위는 지도 좌표 +x=E, +y=N을 기준으로 `E, NE, N, NW, W, SW, S, SE`이며,
+좌표가 같으면 `HERE`이다. `progress`는 양수면 가까워지고 음수면 멀어진다.
+계산에 사용하는 좌표는 반올림하지 않고, 최종 차이만 `round(..., 4)`로 반올림한다.
+JSON 숫자이므로 `0.5000`처럼 고정 소수 자리수를 보장하지 않는다.
+직선거리로부터 계산한 접근량은 실제 통로의 남은 최단거리나 도달 가능성 판정이 아니다.
+
+`dist_to_target`, `target_distance`, 이력 7개, 다른 로봇의 점유·예약·잔여 경로,
+ETA·속도는 이 조건의 모델 state에 넣지 않는다. 좌표는 계산에만 사용한다.
+방문·간선 재사용·즉시 되돌아가기 제한은 코드에서 계속 적용한다.
+필요한 현재·후보·목적지 좌표가 없으면 오류로 처리한다.
+
+예: `test_int.geojson`에서 출발 10, 목적지 1인 첫 단계의 후보 부분.
+전체 `route_graph`와 공통 질문·지시문은 기존과 동일하게 함께 전달된다.
+
+```json
+{
+  "current_node": 10,
+  "target_node": 1,
+  "target_direction": "SW",
+  "available_edges": [
+    {"node": 0, "weight": 51, "direction": "W", "progress": 0.2555},
+    {"node": 8, "weight": 46, "direction": "E", "progress": -0.422},
+    {"node": 9, "weight": 38, "direction": "S", "progress": 0.1244}
+  ]
+}
+```
+
+### 이 조건만 실행하는 순서
+
+명령은 수정된 코드가 반영된 실험 PC의 체크아웃에서 실행한다.
+아래는 사용 중인 `~/E1I6/Logistics_AI` 경로의 예시다.
+GPU 모델을 여러 개 동시에 실행하지 말고, 각 단계 완료 후 다음으로 진행한다.
+JSON `settings`가 all-pairs·repeats=5이면 모델당 84쌍 × 5회 = 420건이다.
+운영 `route_context`나 JSON의 기존 실험 설정을 바꿀 필요는 없다.
+
+1. 시험 터미널 준비 및 호출 없는 검사.
+
+```bash
+cd ~/E1I6/Logistics_AI
+source ~/venv/robot/bin/activate
+export COMPASS_OUT="backend/simulation/benchmark_results/minimal-compass-progress-$(date +%Y%m%d-%H%M%S)"
+
+python -m backend.simulation.evaluation.selector_iterative_route_benchmark \
+  --config backend/simulation/evaluation/selector_iterative_benchmark.json \
+  --state-profile minimal_compass_progress --check
+```
+
+2. JSON `models`에서 enabled=true인 Ollama 모델을 모두 실행.
+   수동으로 모델명을 나열하지 않는다. `decision_models`의 KEV·Laya는 별도 실행한다.
+
+```bash
+ROUTE_SELECTOR=ollama \
+python -m backend.simulation.evaluation.selector_iterative_route_benchmark \
+  --config backend/simulation/evaluation/selector_iterative_benchmark.json \
+  --state-profile minimal_compass_progress \
+  --output "$COMPASS_OUT/ollama"
+```
+
+3. 사용한 Ollama 모델을 내린 뒤 Laya 두 모델을 순서대로 실행.
+
+```bash
+ollama ps
+# 위 목록에서 GPU를 사용 중인 모델은 ollama stop 모델명으로 종료한다.
+bash scripts/run_context_comparison.sh --state-profile minimal_compass_progress \
+  laya convaiinnovations/laya "$COMPASS_OUT"
+bash scripts/run_context_comparison.sh --state-profile minimal_compass_progress \
+  laya convaiinnovations/laya-multilingual "$COMPASS_OUT"
+```
+
+4. KEV는 별도 서버 터미널에서 checkpoint를 먼저 준비한 뒤 실행.
+   0.8B와 4B는 서버를 교체하고 한 모델씩 시험한다.
+
+서버 터미널 (0.8B):
+
+```bash
+source ~/venv/robot/bin/activate
+cd ~/kev
+KEV_BACKEND=torch KEV_DTYPE=bf16 KEV_PREFIX_CACHE=0 \
+KEV_CUDA_GRAPHS=0 KEV_FUSED=0 KEV_TRUNCATE_STATES=0 \
+python -m kev.serve --run jaredpalmer/kev-0.8b@v1.0 --host 127.0.0.1 --port 8011
+```
+
+시험 터미널:
+
+```bash
+export KEV_HOST=http://127.0.0.1:8011
+bash scripts/run_context_comparison.sh --state-profile minimal_compass_progress \
+  kev kev-08b "$COMPASS_OUT"
+```
+
+0.8B 시험 완료 후 서버를 Ctrl+C로 종료하고, 같은 서버 명령의 `--run`을
+`jaredpalmer/kev-4b@v1.0`으로 교체하여 다시 실행한다. 서버 준비 후 시험 터미널:
+
+```bash
+bash scripts/run_context_comparison.sh --state-profile minimal_compass_progress \
+  kev kev-4b "$COMPASS_OUT"
+```
+
+환경 변수만 바꿔서는 서버 checkpoint가 바뀌지 않는다.
+같은 bf16 GPU 조건을 유지할 수 있는 메모리가 필요하다.
+
+### 옵션·결과 확인
+
+- `--state-profile minimal_compass_progress`를 주면 새 조건 하나만 실행한다.
+- 옵션을 생략하면 기존 4조건만 실행한다. 기존 비교를 다시 돌릴 필요는 없다.
+- `--check`를 함께 주면 실행할 명령만 출력하고 모델을 호출하지 않는다.
+- 존재하는 결과 폴더는 덮어쓰지 않는다. 재실행할 때는 새로운 COMPASS_OUT을 만든다.
+- 실제 측정 입력은 trials JSONL의 `steps[].model_input`에 기록한다.
+  질문·후보·state가 기록되며, 모델별 토큰 인코딩 이전의 공통 입력이다.
+  후보가 하나인 강제 이동 단계에는 모델 호출과 model_input 기록이 없다.
+- 도착·최단거리 일치·추론 시간은 기존 summary·CSV와 동일한 형식으로 저장한다.
+
+```bash
+find "$COMPASS_OUT" -name selector_iterative_route_summary.json
+```

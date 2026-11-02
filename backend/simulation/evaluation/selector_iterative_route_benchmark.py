@@ -748,7 +748,7 @@ def main() -> int:
     parser.add_argument("--context-mode", choices=("full_graph_only", "neighbor_context"), default="neighbor_context")
     parser.add_argument(
         "--state-profile", choices=STATE_PROFILES, default=None,
-        help="legacy=기존 기본, minimal=필수만, minimal_distance=필수+직선거리, legacy_compass_distance=기존 기본+방위·거리·접근량. JSON 설정 재정의 가능",
+        help="legacy=기존 기본, minimal=필수만, minimal_distance=필수+직선거리, legacy_compass_distance=기존 기본+방위·거리·접근량, minimal_compass_progress=필수+방위·접근량. JSON 설정 재정의 가능",
     )
     parser.add_argument(
         "--max-steps", type=int, default=None, help="목적지 미도착 시 중단할 최대 이동 횟수 (기본: Node 수의 2배)"

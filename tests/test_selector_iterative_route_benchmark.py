@@ -530,7 +530,7 @@ class SelectorIterativeRouteBenchmarkTest(unittest.TestCase):
         from backend.app.services.iterative_route_policy import NEXT_NODE_INSTRUCTIONS
         case = {"start": 0, "target": 2, "expected_path": [0, 1, 2], "expected_distance": 2.0}
         observed = {}
-        for profile in ("legacy", "minimal", "minimal_distance", "legacy_compass_distance"):
+        for profile in ("legacy", "minimal", "minimal_distance", "legacy_compass_distance", "minimal_compass_progress"):
             selector = _OracleSelector()
             result = _run_route(
                 selector, _fixture(), case, "neighbors", .15,
@@ -558,6 +558,13 @@ class SelectorIterativeRouteBenchmarkTest(unittest.TestCase):
             {"node": 1, "weight": 1.0, "direction": "E", "dist_to_target": 1.0, "progress": 1.0},
             {"node": 2, "weight": 3.0, "direction": "E", "dist_to_target": 0.0, "progress": 2.0},
         ])
+        compass_progress = observed["minimal_compass_progress"]
+        self.assertEqual(set(compass_progress), required | {"target_direction"})
+        self.assertEqual(compass_progress["target_direction"], geometric["target_direction"])
+        self.assertEqual(compass_progress["available_edges"], [
+            {key: value for key, value in edge.items() if key != "dist_to_target"}
+            for edge in geometric["available_edges"]
+        ])
         self.assertEqual(observed["legacy"]["visited_nodes"], [0])
         self.assertEqual(observed["legacy"]["visit_counts"], {0: 1})
         self.assertEqual(observed["minimal"]["available_edges"], [
@@ -569,19 +576,39 @@ class SelectorIterativeRouteBenchmarkTest(unittest.TestCase):
         ])
 
     def test_minimal_profiles_require_neighbor_context_before_selector_call(self):
-        for profile in ("minimal", "minimal_distance", "legacy_compass_distance", "invalid"):
+        for profile in ("minimal", "minimal_distance", "legacy_compass_distance", "minimal_compass_progress", "invalid"):
             selector = _OracleSelector()
             with self.assertRaises(ValueError):
                 _run_route(selector, _fixture(), {"start": 0, "target": 2},
                            "neighbors", .15, "full_graph_only", state_profile=profile)
             self.assertEqual(selector.calls, 0)
 
+    def test_compass_progress_rounding_and_missing_coordinates(self):
+        """거리·이력 노출 없이 방위와 양수/음수 접근량을 계산하고 좌표 누락을 거부한다."""
+        from backend.app.services.iterative_route_policy import next_node_state
+        options = {"available_edges": [{"node": 1, "weight": 3}, {"node": 2, "weight": 4}]}
+        points = {0: (0., 0.), 1: (-1., -1.), 2: (1., 0.), 3: (2., 1.)}
+        def make_state(coordinates):
+            return next_node_state({}, 0, 3, [0], set(), {0: 1}, 0., options,
+                                   points=coordinates, state_profile="minimal_compass_progress")
+        state = make_state(points)
+        self.assertEqual(state["target_direction"], "NE")
+        self.assertEqual(state["available_edges"], [
+            {"node": 1, "weight": 3, "direction": "SW", "progress": -1.3695},
+            {"node": 2, "weight": 4, "direction": "E", "progress": 0.8219},
+        ])
+        self.assertEqual(options["available_edges"], [{"node": 1, "weight": 3}, {"node": 2, "weight": 4}])
+        for coordinates in [None] + [{key: value for key, value in points.items() if key != missing}
+                                     for missing in points]:
+            with self.subTest(coordinates=coordinates), self.assertRaisesRegex(ValueError, "requires coordinates"):
+                make_state(coordinates)
+
     def test_profile_override_is_resolved_in_config(self):
         config = Path("backend/simulation/evaluation/selector_iterative_benchmark.json")
         self.assertEqual(load_iterative_config(config)["settings"]["state_profile"], "legacy")
         self.assertEqual(
-            load_iterative_config(config, state_profile="minimal_distance")["settings"]["state_profile"],
-            "minimal_distance",
+            load_iterative_config(config, state_profile="minimal_compass_progress")["settings"]["state_profile"],
+            "minimal_compass_progress",
         )
 
     def test_benchmark_writes_selected_profile_and_actual_input(self):
@@ -592,20 +619,26 @@ class SelectorIterativeRouteBenchmarkTest(unittest.TestCase):
             case_mode="all-pairs", docking_nodes=[0, 1, 2],
             cases=[{"start": 0, "target": 2, "expected_path": [0, 1, 2], "expected_distance": 2.0}],
         )
-        with tempfile.TemporaryDirectory() as directory, patch.object(benchmark, "_prepare", return_value=prepared):
-            output = Path(directory) / "run"
-            summary = run_benchmark(output, repeats=1, warmups=1, selector=_OracleSelector(),
-                                    state_profile="minimal_distance", progress=False)
-            manifest = json.loads((output / "manifest.json").read_text())
-            trial_lines = (output / "selector_iterative_route_trials.jsonl").read_text().splitlines()
-            self.assertEqual(len(trial_lines), 1)  # 워밍업은 측정에서 제외
-            trial = json.loads(trial_lines[0])
-            self.assertEqual(manifest["settings"]["state_profile"], "minimal_distance")
-            self.assertEqual(summary["settings"]["state_profile"], "minimal_distance")
-            self.assertEqual(trial["state_profile"], "minimal_distance")
-            actual = trial["steps"][0]["model_input"]["state"]
-            self.assertEqual(actual["available_edges"][0]["dist_to_target"], 1.0)
-            self.assertNotIn("visited_nodes", actual)
+        for profile in ("minimal_distance", "minimal_compass_progress"):
+            with self.subTest(profile=profile), tempfile.TemporaryDirectory() as directory, patch.object(benchmark, "_prepare", return_value=prepared):
+                output = Path(directory) / "run"
+                summary = run_benchmark(output, repeats=1, warmups=1, selector=_OracleSelector(),
+                                        state_profile=profile, progress=False)
+                manifest = json.loads((output / "manifest.json").read_text())
+                trial_lines = (output / "selector_iterative_route_trials.jsonl").read_text().splitlines()
+                self.assertEqual(len(trial_lines), 1)  # 워밍업은 측정에서 제외
+                trial = json.loads(trial_lines[0])
+                self.assertEqual(manifest["settings"]["state_profile"], profile)
+                self.assertEqual(summary["settings"]["state_profile"], profile)
+                self.assertEqual(trial["state_profile"], profile)
+                actual = trial["steps"][0]["model_input"]["state"]
+                if profile == "minimal_distance":
+                    self.assertEqual(actual["available_edges"][0]["dist_to_target"], 1.0)
+                else:
+                    self.assertEqual(actual["available_edges"][0]["progress"], 1.0)
+                    self.assertNotIn("dist_to_target", actual["available_edges"][0])
+                    self.assertNotIn("target_distance", actual)
+                self.assertNotIn("visited_nodes", actual)
 
 
     def test_runtime_preview_uses_json_context_for_each_selector(self):
@@ -630,7 +663,7 @@ class SelectorIterativeRouteBenchmarkTest(unittest.TestCase):
             ("ollama", "gemma3:1b", "backend.app.services.route_selector.ollama_selector.OllamaSelector"),
         )
         for selector_name, model, factory in selectors:
-            for profile in ("minimal_distance", "legacy"):
+            for profile in ("minimal_distance", "legacy", "minimal_compass_progress"):
                 with self.subTest(selector=selector_name, profile=profile):
                     selector = _OracleSelector()
                     from backend.app.services import route_model_catalog as catalog
@@ -650,6 +683,12 @@ class SelectorIterativeRouteBenchmarkTest(unittest.TestCase):
                         self.assertEqual(state["available_edges"], [
                             {"node": 1, "weight": 1.0, "dist_to_target": 1.0},
                             {"node": 2, "weight": 3.0, "dist_to_target": 0.0},
+                        ])
+                    elif profile == "minimal_compass_progress":
+                        self.assertEqual(set(state), {"route_graph", "current_node", "target_node", "available_edges", "target_direction"})
+                        self.assertEqual(state["available_edges"], [
+                            {"node": 1, "weight": 1.0, "direction": "E", "progress": 1.0},
+                            {"node": 2, "weight": 3.0, "direction": "E", "progress": 2.0},
                         ])
                     else:
                         self.assertIn("visited_nodes", state)

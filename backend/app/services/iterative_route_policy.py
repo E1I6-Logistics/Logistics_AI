@@ -29,7 +29,7 @@ NEXT_NODE_INSTRUCTIONS = (
 )
 
 MAX_VISITS_PER_NODE = 2
-STATE_PROFILES = ("legacy", "minimal", "minimal_distance", "legacy_compass_distance")
+STATE_PROFILES = ("legacy", "minimal", "minimal_distance", "legacy_compass_distance", "minimal_compass_progress")
 
 
 def validate_state_profile(state_profile: str, context_mode: str) -> None:
@@ -145,6 +145,27 @@ def next_node_state(
                  "dist_to_target": round(math.dist(points[int(edge["node"])], points[target]), 4)}
                 for edge in options["available_edges"]
             ],
+        }
+    if state_profile == "minimal_compass_progress":
+        # 직선거리는 접근량 계산에만 쓰고 거리 필드와 이력은 입력하지 않는다.
+        required_nodes = {current, target} | {int(edge["node"]) for edge in options["available_edges"]}
+        if points is None or any(points.get(node) is None for node in required_nodes):
+            raise ValueError("minimal_compass_progress requires coordinates for current, target and candidates")
+        current_distance = math.dist(points[current], points[target])
+        return {
+            "route_graph": compact_graph,
+            "current_node": current,
+            "target_node": target,
+            "available_edges": [
+                {
+                    "node": edge["node"],
+                    "weight": edge["weight"],
+                    "direction": _compass(points[current], points[int(edge["node"])]),
+                    "progress": round(current_distance - math.dist(points[int(edge["node"])], points[target]), 4),
+                }
+                for edge in options["available_edges"]
+            ],
+            "target_direction": _compass(points[current], points[target]),
         }
     if state_profile not in {"legacy", "legacy_compass_distance"}:
         raise ValueError(f"Unsupported state_profile: {state_profile}")
