@@ -301,6 +301,7 @@ export default function FmsControlApp() {
       setSelectedRouteModel(previous => {
         const options = [...groups.ollama, ...groups.decision_model]
         return options.find(item => item.selector === previous?.selector && item.model === previous.model)
+          ?? options.find(item => item.selector === 'kev' && item.model === 'kev-08b')
           ?? options[0] ?? null
       })
     }).catch(error => {

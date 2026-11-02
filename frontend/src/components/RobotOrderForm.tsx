@@ -55,6 +55,14 @@ export default function RobotOrderForm({ operationMode, disabled = false, routeM
     setMessage(null)
   }, [])
 
+  useEffect(() => {
+    setSelectedModelKey(previous => {
+      if (availableModels.some(item => `${item.selector}:${item.model}` === previous)) return previous
+      const preferred = availableModels.find(item => item.selector === 'kev' && item.model === 'kev-08b')
+      return preferred ? `${preferred.selector}:${preferred.model}` : ''
+    })
+  }, [availableModels])
+
   const updateQuantity = (item: keyof OrderItems, rawValue: string) => {
     const parsed = Number(rawValue)
     const quantity = Number.isFinite(parsed)
