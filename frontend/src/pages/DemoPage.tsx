@@ -10,6 +10,7 @@ import { createOrder, cancelOrder, getOrders, type OrderDto, type OrderItems, ty
 import type { ManagedRobot } from '../hooks/useRobotFleet'
 import { DEMOS, MARKERS, CHARGERS, TRAFFIC, RUN_LABEL, isActive, activeOrder, eventRun, loadRuns, saveRuns, downloadReport, type DemoId, type DemoRun } from '../demo/model'
 import { observationSnapshot } from '../demo/observations'
+import CommunicationPanel from '../demo/CommunicationPanel'
 import '../demo/demo.css'
 
 type Props = {
@@ -32,11 +33,6 @@ const PHASE: Record<string, string> = { PENDING: '배차 대기', WAITING_PICKUP
 function uuid() { return Array.from(crypto.getRandomValues(new Uint32Array(3)), n => n.toString(16)).join('') }
 function Pill({ children, tone = '' }: { children: React.ReactNode; tone?: string }) { return <span className={`demo-pill ${tone}`}>{children}</span> }
 function Metric({ label, value, note }: { label: string; value: React.ReactNode; note?: string }) { return <div className="demo-metric"><span>{label}</span><strong>{value}</strong>{note && <small>{note}</small>}</div> }
-function Spark({ values }: { values: number[] }) {
-  const max = Math.max(1, ...values)
-  return <svg className="demo-spark" viewBox="0 0 360 65" role="img" aria-label="최근 API 응답 소요 시간 추이"><path d="M0 60 H360" stroke="#dde3ec" /><polyline fill="none" stroke="#1a6fd8" strokeWidth="2.5" points={values.map((v, i) => `${i * 360 / Math.max(1, values.length - 1)},${60 - 54 * v / max}`).join(' ')} /></svg>
-}
-
 export default function DemoPage(p: Props) {
   const [selected, setSelected] = useState<DemoId>('D01')
   const [tab, setTab] = useState('시험')
@@ -256,7 +252,7 @@ export default function DemoPage(p: Props) {
       </section></div>
       <details className="demo-card demo-map"><summary>현재 지도·경로·로봇 위치 보기</summary><div style={{ height: 440, position: 'relative', display: 'flex', marginTop: 14 }}>{p.mapView}</div></details>
     </>}
-    {tab === '통신·속도' && <><div className="demo-kpis"><Metric label="대시보드 WebSocket" value={stats.wsState} note="소켓 연결과 로봇 상태 신선도는 별도" /><Metric label="최근 API 응답" value={formatMs(stats.http[stats.http.length - 1]?.ms)} note="응답 헤더까지 · 왕복+서버 처리 포함" /><Metric label="최근 10초 WS 수신" value={`${stats.wsTimes.filter(at => stats.at - at < 10000).length / 10} msg/s`} note="브라우저 수신량 · ROS/MQTT 발행 주기 아님" /><Metric label="마지막 주문 수신" value={p.ordersAt ? `${Math.max(0, (stats.at - p.ordersAt) / 1000).toFixed(1)}초 전` : '미수신'} note={p.ordersError || '6초 이상 수신 없으면 실행 차단'} /></div><section className="demo-card"><h2>API 응답 소요 시간</h2><Spark values={stats.http.slice(-45).map(s => s.ms)} /><p className="demo-muted">기존 요청 최대 120건만 메모리에 보관합니다. 이 화면을 위해 카메라·ROS·MQTT 연결을 추가하지 않습니다.</p><div className="demo-table-wrap"><table><thead><tr><th>AMR</th><th>상태 수신</th><th>간격</th><th>추정 선속도</th><th>추정 각속도</th><th>원본 시각</th></tr></thead><tbody>{p.robots.map(r => { const o = stats.robots[r.backendId]; const fresh = o && stats.at - o.at < 6000; return <tr key={r.id}><td>{r.backendId}</td><td>{o ? `${((stats.at - o.at) / 1000).toFixed(1)}초 전` : '미수신'}</td><td>{fresh ? formatMs(o.periodMs) : '—'}</td><td>{fresh && o.speed != null ? `${o.speed.toFixed(2)} m/s` : '—'}</td><td>{fresh && o.angular != null ? `${o.angular.toFixed(2)} rad/s` : '—'}</td><td>{o?.sourceAt || 'API 미제공 · 수신 시각으로 추정'}</td></tr> })}</tbody></table></div></section><section className="demo-card"><h2>최근 요청</h2><div className="demo-table-wrap"><table><thead><tr><th>시각</th><th>기존 API</th><th>결과</th><th>소요</th></tr></thead><tbody>{stats.http.slice(-12).reverse().map((h, i) => <tr key={`${h.at}-${i}`}><td>{clock(h.at)}</td><td>{h.path}</td><td>{h.ok ? '응답 정상' : '실패'}</td><td>{formatMs(h.ms)}</td></tr>)}</tbody></table></div></section></>}
+    {tab === '통신·속도' && <CommunicationPanel stats={stats} mode={p.mode} robots={p.robots} omx={p.omx} docks={p.docks} omxError={p.omxError} />}
     {tab === '실행 기록' && <section className="demo-card"><h2>이 브라우저의 최근 시험</h2><p>최대 20건 · 각 160개 상태 변화. 주문/교통 시험은 서버 ID로 다시 조회하며, 개별 이동은 새로고침 시 확인을 요청합니다.</p>{runs.length === 0 && <div className="demo-empty">아직 실행한 시험이 없습니다. 시험 탭에서 대상을 선택하세요.</div>}{runs.map(r => <details className="demo-record" key={r.id} open={r.id === run?.id}><summary><strong>{r.demo} · {r.target}</strong><Pill>{RUN_LABEL[r.phase]}</Pill><span>{clock(r.started)}</span></summary><p>{r.message}</p><small>서버 ID {r.sourceId ?? '미제공'} · {r.mode} / {r.operation}</small>{r.demo === 'D02' && r.sourceId && <p><a href={scenarioRecordUrl(r.sourceId)} target="_blank" rel="noreferrer">기존 서버 시나리오 기록 열기 ↗</a></p>}<ol className="demo-timeline">{r.events.slice(-30).map((e, i) => <li key={i}><time>{clock(e.at)}</time>{e.text}</li>)}</ol></details>)}</section>}
     <p className="demo-footnote">정상 취소와 비상정지는 다릅니다. AMR 비상정지는 OMX 물리 정지를 대신하지 않습니다. 서버에 없는 검출 ID·정렬 오차·정확한 물품 수는 표시하지 않습니다.</p>
     {confirm && createPortal(<div className="demo-modal-backdrop" role="dialog" aria-modal="true" aria-label={confirm.title} onKeyDown={e => {

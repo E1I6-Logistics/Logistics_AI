@@ -45,3 +45,18 @@
 .fms-side-resize { width:12px; flex-shrink:0; cursor:ew-resize; touch-action:none; display:grid; place-items:center; background:#edf1f6; border-left:1px solid #dde3ec; }.fms-side-resize>span { width:3px; height:34px; border-radius:2px; background:#b0bdcd; }.fms-side-wrapper { flex-shrink:0; display:flex; min-width:0; overflow:hidden; }.fms-side-wrapper>.fms-robot-panel { width:100%!important; min-width:0!important; box-sizing:border-box; }
 @media(max-width:1100px) { .demo-page { padding:18px; }.demo-columns { grid-template-columns:1fr; }.demo-heading h1 { font-size:21px; }.demo-heading { align-items:flex-start; } }
 @media(max-width:650px) { .demo-catalog { grid-template-columns:repeat(2,minmax(0,1fr)); }.demo-heading,.demo-runbar { flex-direction:column; align-items:stretch; }.demo-runbar .demo-actions { max-width:none; }.demo-tab-note { display:none; }.demo-page { padding:12px; }.demo-kpis { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+.demo-protocols { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:14px; }
+.demo-comm-pair { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:9px 0; border-top:1px solid #edf1f6; font-size:12px; }
+.demo-comm-pair small { display:block; color:#677080; font-size:10px; margin-top:4px; }
+.demo-api { border-bottom:1px solid #e4eaf1; }
+.demo-api-summary { display:grid; grid-template-columns:minmax(240px,2fr) minmax(84px,.7fr) repeat(3,minmax(110px,1fr)); align-items:center; gap:14px; padding:14px 8px; font-size:12px; }
+summary.demo-api-summary { cursor:pointer; list-style:none; }
+summary.demo-api-summary::-webkit-details-marker { display:none; }
+summary.demo-api-summary:hover { background:#f6faff; }
+summary.demo-api-summary:focus-visible { outline:3px solid #7cb9fc; }
+.demo-api-header { background:#f4f7fa; color:#677080; font-size:11px; }
+.demo-api-name strong { display:block; }.demo-api-name strong:before { content:'▸ '; color:#1a6fd8; }.demo-api[open] .demo-api-name strong:before { content:'▾ '; }
+.demo-api-name code { display:block; font-size:10px; color:#677080; margin-top:6px; overflow-wrap:anywhere; }
+.demo-api-summary small { color:#677080; font-size:10px; }.demo-api-detail { padding:0 15px 15px; }.demo-api-detail .demo-table-wrap { max-height:260px; overflow:auto; }
+.demo-api-summary>.demo-pill { justify-self:start; }.demo-api-list { overflow-x:auto; }.demo-motion>summary { cursor:pointer; font-size:14px; font-weight:700; }
+@media(max-width:1100px) { .demo-protocols { grid-template-columns:1fr; gap:0; }.demo-api-summary { min-width:750px; } }

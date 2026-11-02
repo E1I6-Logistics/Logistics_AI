@@ -70,3 +70,38 @@ test('통신 관측 버퍼는 120건으로 제한하며 실패도 표시하고 �
   assert.equal(s.http[119].ok, false); assert.equal(s.robots.robot1.sourceAt, undefined)
   assert.equal(s.robots.robot1.speed, null)
 })
+test('API별 집계는 메서드를 구분하고 응답 간격·평균·실패를 보존한다', () => {
+  const samples = [
+    { at: 3000, path: '/api/orders', ms: 9, ok: false },
+    { at: 1000, path: '/api/orders', ms: 3, ok: true },
+  ]
+  const summary = o.summarizeHttp(samples)
+  assert.equal(summary.averageMs, 6); assert.equal(summary.periodMs, 2000)
+  assert.equal(summary.failures, 1); assert.equal(summary.last.at, 3000)
+  assert.equal(o.summarizeHttp(samples.slice(0, 1)).periodMs, null)
+  assert.equal(o.summarizeHttp([]).averageMs, null)
+  o.recordHttp('/api/orders', performance.now(), true, 'GET')
+  o.recordHttp('/api/orders', performance.now(), false, 'POST')
+  const s = o.observationSnapshot()
+  assert.ok(s.apis.some(a => a.key === 'GET /api/orders'))
+  assert.equal(s.apis.find(a => a.key === 'POST /api/orders').failures, 1)
+})
+test('한 API의 요청 폭증이 다른 API 이력을 밀어내지 않고 전체 크기도 제한한다', () => {
+  o.recordHttp('/api/rare', performance.now(), true)
+  for (let i = 0; i < 150; i++) o.recordHttp('/api/frequent', performance.now(), true)
+  let s = o.observationSnapshot()
+  assert.equal(s.apis.find(a => a.key === 'GET /api/rare').count, 1)
+  assert.equal(s.apis.find(a => a.key === 'GET /api/frequent').count, 40)
+  for (let i = 0; i < 90; i++) o.recordHttp('/api/bounded/' + i, performance.now(), true)
+  assert.equal(o.observationSnapshot().apis.length, 64)
+})
+test('Zenoh HTTP 200의 조회 불가도 연결 정상으로 표시하지 않고 마지막 성공을 보존한다', () => {
+  o.recordConnections([{ name: 'robot1', ip: '192.168.0.1', connected: true, blocked: false, state: 'CONNECTED' }], true)
+  const previous = o.observationSnapshot().connections
+  o.recordConnections(undefined, false, '조회 불가')
+  const next = o.observationSnapshot().connections
+  assert.equal(next.available, false); assert.equal(next.lastSuccessAt, previous.lastSuccessAt)
+  assert.equal(next.devices[0].name, 'robot1'); assert.equal(next.error, '조회 불가')
+  next.devices[0].connected = false
+  assert.equal(o.observationSnapshot().connections.devices[0].connected, true)
+})

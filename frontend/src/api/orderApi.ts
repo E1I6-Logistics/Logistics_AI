@@ -69,8 +69,17 @@ export async function getOrders() {
   }>
 }
 
+async function observedFetch(path: string, init: RequestInit) {
+  const started = performance.now()
+  try {
+    const response = await fetch(`${API_BASE}${path}`, init)
+    recordHttp(path, started, response.ok, init.method)
+    return response
+  } catch (e) { recordHttp(path, started, false, init.method); throw e }
+}
+
 export async function retryOrder(orderId: string) {
-  const response = await fetch(`${API_BASE}/api/orders/${encodeURIComponent(orderId)}/retry`, {
+  const response = await observedFetch(`/api/orders/${encodeURIComponent(orderId)}/retry`, {
     method: 'POST',
   })
   const data = await response.json()
@@ -79,14 +88,14 @@ export async function retryOrder(orderId: string) {
 }
 
 export async function cancelOrder(orderId: string) {
-  const response = await fetch(`${API_BASE}/api/orders/${encodeURIComponent(orderId)}`, { method: 'DELETE', signal: AbortSignal.timeout(10000) })
+  const response = await observedFetch(`/api/orders/${encodeURIComponent(orderId)}`, { method: 'DELETE', signal: AbortSignal.timeout(10000) })
   const data = await response.json()
   if (!response.ok) throw new Error(data.detail ?? '주문을 취소하지 못했습니다.')
   return data as OrderDto
 }
 
 export async function createOrder(payload: CreateOrderPayload) {
-  const response = await fetch(`${API_BASE}/api/orders`, {
+  const response = await observedFetch(`/api/orders`, {
     method: 'POST',
     signal: AbortSignal.timeout(10000),
     headers: { 'Content-Type': 'application/json' },

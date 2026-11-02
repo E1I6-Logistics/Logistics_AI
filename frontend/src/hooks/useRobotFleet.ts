@@ -1,4 +1,4 @@
-import { recordRobot, recordWs } from '../demo/observations'
+import { recordConnections, recordRobot, recordWs } from '../demo/observations'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   dashboardWsUrl,
@@ -98,14 +98,17 @@ export function useRobotFleet() {
     try {
       const result = await getConnections()
       if (result.status === 'unavailable') {
+        recordConnections(undefined, false, 'Zenoh 연결 조회 실패 · 마지막 상태 보존')
         setConnectionSnapshotAvailable(false)
         setError('Zenoh 연결 목록을 확인할 수 없습니다. 마지막 확인 상태를 표시합니다.')
       } else {
+        recordConnections(result.devices, true)
         setConnectionSnapshotAvailable(true)
         setDevices(result.devices)
         setError(null)
       }
     } catch (e) {
+      recordConnections(undefined, false, e instanceof Error ? e.message : String(e))
       setConnectionSnapshotAvailable(false)
       setError(e instanceof Error ? e.message : String(e))
     }

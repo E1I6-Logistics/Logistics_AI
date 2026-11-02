@@ -118,8 +118,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response
   try {
     response = await fetch(`${API_BASE}${path}`, { ...init, signal: init?.signal ?? AbortSignal.timeout(init?.method && init.method !== 'GET' ? 180000 : 10000) })
-    recordHttp(path, started, response.ok)
-  } catch (e) { recordHttp(path, started, false); throw e }
+    recordHttp(path, started, response.ok, init?.method)
+  } catch (e) { recordHttp(path, started, false, init?.method); throw e }
   if (!response.ok) {
     const text = await response.text()
     let message = text
