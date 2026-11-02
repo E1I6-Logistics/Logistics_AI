@@ -389,12 +389,16 @@ class TrafficManager:
         if not math.isfinite(value) or value < 0:
             raise ValueError("시각은 유한한 0 이상의 값이어야 합니다.")
 
-    def check_segment_permission(self, robot_id, *, now, expected_arrival_at, graph) -> SegmentPermission:
+    def check_segment_permission(
+        self, robot_id, *, now, expected_arrival_at, graph, allow_schedule_delay=False,
+    ) -> SegmentPermission:
         """예약·출발시각·실제 점유·예상 도착을 검사한다. 상태/예약을 변경하지 않는다.
 
         expected_arrival_at은 실행기가 계산한다. tick 기반 실행기는 해당 tick에서
         이동할 거리를 반영하고, 실제 실행기는 관측 기반 잔여 이동 시간을 반영한다.
         replan은 즉시 예약 해제를 뜻하지 않는다. 정지 확인 후 대기로 전환해야 한다.
+        실물 실행기는 allow_schedule_delay로 지연된 출발을 재검사한다. 이때 간선은
+        현재부터 도착까지, 목적 노드는 도착 예정부터 체류 종료까지 예약을 비교한다.
         """
         with self.lock:
             self._validate_time(now)
@@ -430,7 +434,7 @@ class TrafficManager:
 
             if self.is_resource_protected(robot_id, resource) or self.is_resource_protected(robot_id, target):
                 return SegmentPermission("replan", "offline_robot_route")
-            if (
+            if not allow_schedule_delay and (
                 expected_arrival_at + self.safety_margin > edge.end + 1e-6
                 or expected_arrival_at + self.safety_margin > destination.end + 1e-6
             ):
@@ -448,6 +452,26 @@ class TrafficManager:
                     or other["route"].get("departure_at") is None
                 ):
                     return SegmentPermission("replan", "occupied")
+
+            if allow_schedule_delay:
+                # 목적지의 현재 예약과 미래 도착을 혼동하지 않는다. 출발 지연으로
+                # 실제 사용 시간이 겹치면 정지한 출발점에서 다시 예약한다.
+                arrival_end = expected_arrival_at + self.safety_margin
+                windows = {
+                    resource: (now, arrival_end),
+                    target: (
+                        max(now, expected_arrival_at - self.safety_margin),
+                        max(arrival_end, destination.end),
+                    ),
+                }
+                if any(
+                    row.robot_id != robot_id
+                    and row.resource in windows
+                    and row.start < windows[row.resource][1]
+                    and row.end > windows[row.resource][0]
+                    for row in self._reservations.snapshot()
+                ):
+                    return SegmentPermission("replan", "reservation_window_conflict")
 
             if is_at_upstream_node:
                 self_goal = str(robot.get("goal_node")) if robot.get("goal_node") is not None else None

@@ -1,6 +1,7 @@
 """LLM이 고른 노드 순서의 예약·대기·재개를 실제 모델 없이 확인한다."""
 
 import unittest
+import math
 from copy import deepcopy
 from unittest.mock import patch
 from types import SimpleNamespace
@@ -174,7 +175,10 @@ class FixedReservationTests(unittest.TestCase):
             store._traffic._robots = store._robots
             result = store.navigate_to_node("robot1", "3", required_path=["0", "2", "3"])
             self.assertEqual(result["route"]["node_ids"], ["0", "2", "3"])
-            for i in range(1, 300):
+            # 현장 속도가 낮아져도 전체 경로를 실제로 완주할 시간까지 검증한다.
+            distance = math.dist(nodes["0"], nodes["2"]) + math.dist(nodes["2"], nodes["3"])
+            ticks = math.ceil((distance / store._traffic.speed_mps + 10) / 0.1)
+            for i in range(1, ticks):
                 store.advance_simulation(0.1, now=1 + i * 0.1)
                 if store._robots["robot1"]["goal_node"] is None:
                     break

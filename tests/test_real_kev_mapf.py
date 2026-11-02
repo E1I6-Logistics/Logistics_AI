@@ -9,7 +9,7 @@ from unittest.mock import patch
 from backend.app.models.robot import RobotState, NavigationType
 from backend.app.services.fleet_manager import FleetManager
 from backend.app.services.real_navigation import RealNavigation
-from backend.app.services.reservation import ReservationTable
+from backend.app.services.reservation import ReservationTable, Reservation, node_key, edge_key
 from backend.app.services.pathfinding import DistanceAStar
 from backend.app.services.mode_service import mode_manager
 from backend.app.services.kev_mapf.kev_adapter import plan_mapf_from_route_results
@@ -100,6 +100,71 @@ class RealKevTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(self.sent)
         self.advance()
         self.assertEqual(set(self.nav._executing), {"robot1", "robot2", "robot3"})
+
+    def test_current_target_reservation_does_not_cancel_future_arrival(self):
+        """다른 로봇이 먼저 node7을 예약해도 내 도착 슬롯이 뒤면 주행을 취소하지 않는다."""
+        self.nav.request("robot1", "3", NavigationType.GOAL, required_path=["0", "7", "3"])
+        table = self.nav._traffic._reservations
+        self.assertTrue(table.try_commit("robot2", "earlier-passage", [
+            Reservation(node_key("7"), "robot2", "earlier-passage", 0,
+                        self.now - 1, self.now + 10),
+        ]))
+        self.advance()
+        self.assertIn("robot1", self.nav._executing)
+        for _ in range(5):
+            self.advance()
+        self.assertFalse(self.cancels)
+        self.assertEqual(self.fleet.get_robot("robot1").state, RobotState.NAVIGATING)
+        self.finish_action("robot1")
+        self.assertEqual(self.nav._robots["robot1"]["route"]["segment_index"], 1)
+
+    def test_delayed_departure_requeues_conflicting_window_without_pausing(self):
+        """지연된 출발은 실행 전에 재예약하며 주문과 KEV 경로를 보존한다."""
+        self.nav.request("robot1", "3", NavigationType.GOAL, required_path=["0", "7", "3"])
+        table = self.nav._traffic._reservations
+        own = [r for r in table.snapshot() if r.resource == edge_key("0", "7")][0]
+        self.assertTrue(table.try_commit("robot2", "later-passage", [
+            Reservation(edge_key("0", "7"), "robot2", "later-passage", 0,
+                        own.end + 1, own.end + 10),
+        ]))
+        self.advance(20)
+        self.assertFalse(self.sent)
+        self.assertFalse(self.cancels)
+        self.assertEqual(self.fleet.get_robot("robot1").state, RobotState.WAITING)
+        self.assertIn("robot1", self.nav._requests)
+        self.assertIn("robot1", self.nav._traffic._required_paths)
+        for _ in range(600):
+            self.advance()
+            if self.sent:
+                break
+        self.assertTrue(self.sent)
+        self.assertNotEqual(self.fleet.get_robot("robot1").state, RobotState.PAUSED)
+
+    def test_expired_schedule_alone_does_not_block_safe_real_departure(self):
+        self.nav.request("robot1", "3", NavigationType.GOAL, required_path=["0", "7", "3"])
+        self.advance(90)
+        self.assertIn("robot1", self.nav._executing)
+        self.assertFalse(self.cancels)
+
+    def test_active_segment_keeps_priority_after_eta_expires(self):
+        """실제 Goal 종료 전에는 지난 예약 시각만으로 후속 로봇을 진입시키지 않는다."""
+        _, snapshot, advisory = self.stage()
+        self.assertTrue(self.coordinator.admission.apply(self.nav.mapf, self.graph, snapshot, advisory))
+        self.advance()
+        self.assertEqual(set(self.nav._executing), {"robot1"})
+        self.advance(150)
+        self.assertEqual(set(self.nav._executing), {"robot1"})
+        self.assertFalse(self.cancels)
+        self.assertNotEqual(self.fleet.get_robot("robot2").state, RobotState.PAUSED)
+
+    def test_measured_current_segment_conflict_still_stops_motion(self):
+        self.nav.request("robot1", "3", NavigationType.GOAL, required_path=["0", "7", "3"])
+        self.advance()
+        blocker = self.fleet.get_robot("robot2")
+        blocker.x, blocker.y = self.nodes["7"]
+        self.advance()
+        self.assertEqual(self.fleet.get_robot("robot1").state, RobotState.PAUSED)
+        self.assertEqual(self.cancels[-1][0], "robot1")
 
     def test_three_way_priority_is_enforced_before_each_ros_segment(self):
         _, snapshot, advisory = self.stage()

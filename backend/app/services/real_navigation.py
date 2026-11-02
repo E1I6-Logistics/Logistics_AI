@@ -1516,13 +1516,9 @@ class RealNavigation:
                         for other in self._robots.values()
                     )
 
-                    current_conflict = current_conflict or any(
-                        row.robot_id != rid
-                        and row.resource in current_resources
-                        and row.start <= now < row.end
-                        for row in self._traffic._reservations.snapshot()
-                    )
-
+                    # 이미 출발한 구간은 실측 점유와 보호 경로로 감시한다.
+                    # 목적 노드의 현재 예약만으로 유효한 미래 도착을 취소하지 않는다.
+                    # 예약 시간 충돌은 출발 전 허가 검사에서 대기·재예약한다.
                     current_conflict = current_conflict or any(
                         self._traffic.is_resource_protected(rid, resource)
                         for resource in current_resources
@@ -1536,14 +1532,6 @@ class RealNavigation:
                             and occupied_resource(other, graph) in current_resources
                         ]
 
-                        reserved_by = [
-                            row.robot_id
-                            for row in self._traffic._reservations.snapshot()
-                            if row.robot_id != rid
-                            and row.resource in current_resources
-                            and row.start <= now < row.end
-                        ]
-
                         protected_by = [
                             owner
                             for owner, resources in self._traffic._protected_resources.items()
@@ -1555,7 +1543,6 @@ class RealNavigation:
                             f"[REAL NAV CONFLICT] robot={rid} "
                             f"segment={route['node_ids'][route['segment_index']]}->{target} "
                             f"occupied_by={occupied_by} "
-                            f"reserved_by={reserved_by} "
                             f"protected_by={protected_by}",
                             flush=True,
                         )
@@ -1598,50 +1585,43 @@ class RealNavigation:
 
                     continue
 
+                # 시간표가 지났어도 Nav2 종료 전인 상대 구간은 계속 보호한다.
+                # 같은 통로나 같은 도착 노드에는 출발점에서 기다린 뒤 진입한다.
+                resource = edge_key(route["node_ids"][route["segment_index"]], target)
+                active_conflict = False
+                for other_id in self._executing:
+                    if other_id == rid:
+                        continue
+                    other_route = self._robots[other_id].get("route")
+                    if other_route is None:
+                        continue
+                    other_index = other_route["segment_index"]
+                    other_nodes = other_route["node_ids"]
+                    if other_index + 1 >= len(other_nodes):
+                        continue
+                    other_start, other_target = other_nodes[other_index:other_index + 2]
+                    if resource == edge_key(other_start, other_target) or target == other_target:
+                        active_conflict = True
+                        break
+                if active_conflict:
+                    continue
+
                 distance = math.dist((robot.x, robot.y), planner.nodes[target])
                 arrival = (
                     now + max(0.0, distance - self._arrival_distance) / self._traffic.speed_mps
                 )
                 permission = self._traffic.check_segment_permission(
-                    rid, now=now, expected_arrival_at=arrival, graph=graph
+                    rid, now=now, expected_arrival_at=arrival, graph=graph,
+                    allow_schedule_delay=True,
                 )
 
-                if permission.decision == "replan" and permission.reason == "schedule_overrun":
-                    # Real에서는 이미 지난 시간표만으로 재취소하지 않는다. 실제 점유는 위 검사에 남는다.
-                    rows = self._traffic._reservations.snapshot()
-
-                    own = {
-                        row.resource
-                        for row in rows
-                        if row.robot_id == rid
-                        and row.navigation_id == state["navigation_id"]
-                        and row.segment_index == route["segment_index"]
-                    }
-
-                    resources = (
-                        edge_key(route["node_ids"][route["segment_index"]], target),
-                        node_key(target),
-                    )
-
-                    if (
-                        all(resource in own for resource in resources)
-                        and not any(
-                            other["robot_id"] != rid
-                            and occupied_resource(other, graph) in resources
-                            for other in self._robots.values()
-                        )
-                        and not any(
-                            row.robot_id != rid
-                            and row.resource in resources
-                            and row.start <= arrival + self._traffic.safety_margin
-                            and row.end > now
-                            for row in rows
-                        )
-                    ):
-
-                        permission = type(permission)("allowed", "real_schedule_delay")
-
                 if permission.decision == "replan":
+                    print(
+                        f"[REAL NAV WAIT] robot={rid} "
+                        f"segment={route['node_ids'][route['segment_index']]}->{target} "
+                        f"reason={permission.reason} · 출발 전 예약 재조정, 주문 유지",
+                        flush=True,
+                    )
                     self._traffic.wait_for_reservation_after_stop(rid)
 
                 elif permission.decision == "allowed":
