@@ -32,11 +32,12 @@ def start(context):
         package='nav2_lifecycle_manager', executable='lifecycle_manager',
         namespace='fms_view', name='local_map_lifecycle', output='screen',
         parameters=[{'autostart': True, 'use_sim_time': False,
-                     'node_names': ['/fms_view/local_map_server']}],
+                     # 같은 namespace 안의 상대 이름이어야 map_server의 bond ID와 일치한다.
+                     'node_names': ['local_map_server']}],
     )
     rviz = Node(
         condition=IfCondition(LaunchConfiguration('use_rviz')),
-        package='rviz2', executable='rviz2', name='fms_local_rviz', output='screen',
+        package='rviz2', executable='rviz2', output='screen',
         arguments=['-d', str(Path(__file__).with_name('fms_local_map.rviz'))],
         parameters=[{'use_sim_time': False}],
     )

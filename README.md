@@ -213,3 +213,13 @@ RViz 창을 닫거나 실행 터미널에서 Ctrl+C를 누르면 이 명령이 �
 
 로봇과 지도가 겹치려면 로봇의 위치 기준 맵과 PC YAML의 맵·좌표 원점이 같아야 합니다.
 RViz Route Tool의 GeoJSON 경로 편집 파일은 기존처럼 별도로 불러옵니다.
+
+
+짧은 명령을 원하면 아래 alias를 터미널에 적용합니다. 같은 줄을 `~/.bashrc` 맨 아래에 넣으면 새 터미널에서도 사용할 수 있습니다.
+
+```bash
+alias logirviz='"$HOME/AX_Logistics/rviz_fms"'
+logirviz
+```
+
+RViz의 `-d` 설정은 표시할 토픽을 지정합니다. 맵 YAML/PGM을 읽어 발행하는 서버는 `logirviz`가 함께 시작합니다.
