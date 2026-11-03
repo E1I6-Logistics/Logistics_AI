@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 운영 route_context와 분리하여 네 context를 같은 JSON 시험 설정으로 비교한다.
+# 운영 route_context와 분리하여 여덟 context를 같은 JSON 시험 설정으로 비교한다.
 set -euo pipefail
 
 if [[ "${1:-}" == "--help" || $# -eq 0 ]]; then
@@ -12,8 +12,9 @@ if [[ "${1:-}" == "--help" || $# -eq 0 ]]; then
   bash scripts/run_context_comparison.sh ollama gemma3:1b
 
 --check: 모델을 호출하지 않고 해석된 실행 명령만 출력
---state-profile PROFILE: 해당 조건만 실행 (생략하면 기존 네 조건 실행)
-추가 조건: minimal_compass_progress = 필수 입력 + 방위·접근량
+--state-profile PROFILE: 해당 조건만 실행 (생략하면 여덟 조건 실행)
+조건: 이력·후보 직선거리·방위/접근량의 8조합 (target_distance 제외)
+전체 활성 모델 일괄 실행: python -m backend.simulation.evaluation.iterative_context_matrix
 시험 조건: selector_iterative_benchmark.json의 graph/settings를 읽음
 운영 context: route_context에서 선택하며 이 비교 시험에는 적용하지 않음
 HELP
@@ -52,7 +53,7 @@ repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 benchmark_python="${BENCH_PYTHON:-python}"
 config="backend/simulation/evaluation/selector_iterative_benchmark.json"
-output_root="${3:-backend/simulation/benchmark_results/context4-$(date +%Y%m%d-%H%M%S)}"
+output_root="${3:-backend/simulation/benchmark_results/context8-$(date +%Y%m%d-%H%M%S)}"
 model_tag="${model//\//--}"
 model_tag="${model_tag//:/-}"
 
@@ -63,7 +64,7 @@ from pathlib import Path
 from backend.simulation.evaluation.selector_iterative_route_benchmark import load_iterative_config
 config_path, selector, model, selected_profile = sys.argv[1:]
 resolved = load_iterative_config(Path(config_path), [model] if selector == "ollama" else None,
-                                 state_profile=selected_profile or None)
+                                 state_profile=selected_profile or None, allow_empty_models=selector != "ollama")
 settings = resolved["settings"]
 values = [
     ("--graph", resolved["graph_path"]),
@@ -97,7 +98,7 @@ case "$selector" in
   ollama) export OLLAMA_MODEL="$model" ;;
 esac
 
-profiles=(legacy minimal minimal_distance legacy_compass_distance)
+profiles=(minimal legacy minimal_distance minimal_compass_progress minimal_compass_distance legacy_distance legacy_compass_progress legacy_compass_distance)
 if [[ -n "$selected_profile" ]]; then
   profiles=("$selected_profile")
 fi

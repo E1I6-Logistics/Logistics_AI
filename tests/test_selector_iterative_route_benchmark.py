@@ -527,10 +527,10 @@ class SelectorIterativeRouteBenchmarkTest(unittest.TestCase):
 
     def test_state_profiles_keep_candidates_and_preserve_actual_input_snapshot(self):
         """입력만 달라지고 후보·지시문·경로 제약은 같으며 기록은 이력 갱신 후에도 변하지 않는다."""
-        from backend.app.services.iterative_route_policy import NEXT_NODE_INSTRUCTIONS
+        from backend.app.services.iterative_route_policy import NEXT_NODE_INSTRUCTIONS, STATE_PROFILES
         case = {"start": 0, "target": 2, "expected_path": [0, 1, 2], "expected_distance": 2.0}
         observed = {}
-        for profile in ("legacy", "minimal", "minimal_distance", "legacy_compass_distance", "minimal_compass_progress"):
+        for profile in STATE_PROFILES:
             selector = _OracleSelector()
             result = _run_route(
                 selector, _fixture(), case, "neighbors", .15,
@@ -538,6 +538,7 @@ class SelectorIterativeRouteBenchmarkTest(unittest.TestCase):
             )
             self.assertTrue(result["distance_match"])
             self.assertEqual(result["state_profile"], profile)
+            self.assertEqual(result["context_protocol"], "factorial8-v1")
             called, forced = result["steps"]
             self.assertNotIn("model_input", forced)
             recorded = called["model_input"]
@@ -551,9 +552,9 @@ class SelectorIterativeRouteBenchmarkTest(unittest.TestCase):
         self.assertEqual(set(observed["minimal"]), required)
         self.assertEqual(set(observed["minimal_distance"]), required)
         geometric = observed["legacy_compass_distance"]
-        self.assertEqual(set(geometric), set(observed["legacy"]) | {"target_direction", "target_distance"})
+        self.assertEqual(set(geometric), set(observed["legacy"]) | {"target_direction"})
         self.assertEqual(geometric["target_direction"], "E")
-        self.assertEqual(geometric["target_distance"], 2.0)
+        self.assertTrue(all("target_distance" not in state for state in observed.values()))
         self.assertEqual(geometric["available_edges"], [
             {"node": 1, "weight": 1.0, "direction": "E", "dist_to_target": 1.0, "progress": 1.0},
             {"node": 2, "weight": 3.0, "direction": "E", "dist_to_target": 0.0, "progress": 2.0},
@@ -575,8 +576,40 @@ class SelectorIterativeRouteBenchmarkTest(unittest.TestCase):
             {"node": 2, "weight": 3.0, "dist_to_target": 0.0},
         ])
 
+    def test_all_eight_combinations_have_exact_fields_and_no_hidden_distance(self):
+        from itertools import product
+        from backend.app.services.iterative_route_policy import STATE_PROFILE_FACTORS, next_node_state, next_node_options
+        prepared = _fixture()
+        factors = {tuple(spec[key] for key in ("history", "distance", "compass_progress"))
+                   for spec in STATE_PROFILE_FACTORS.values()}
+        self.assertEqual(len(STATE_PROFILE_FACTORS), 8)
+        self.assertEqual(factors, set(product((False, True), repeat=3)))
+        options = next_node_options(prepared["compact_graph"], prepared["nodes"], 0, [0], set(), {0: 1})
+        base_fields = {"route_graph", "current_node", "target_node", "available_edges"}
+        history_fields = {"previous_node", "visited_nodes", "visit_counts", "max_visits_per_node",
+                          "used_edges", "backtrack_allowed", "accumulated_distance"}
+        states = {}
+        for profile, factors in STATE_PROFILE_FACTORS.items():
+            with self.subTest(profile=profile):
+                state = next_node_state(prepared["compact_graph"], 0, 2, [0], set(), {0: 1}, 0, options,
+                                        points=prepared["points"], state_profile=profile)
+                expected = base_fields | (history_fields if factors["history"] else set())
+                expected |= {"target_direction"} if factors["compass_progress"] else set()
+                self.assertEqual(set(state), expected)
+                edge_fields = {"node", "weight"} | ({"dist_to_target"} if factors["distance"] else set())
+                edge_fields |= {"direction", "progress"} if factors["compass_progress"] else set()
+                for edge in state["available_edges"]:
+                    self.assertEqual(set(edge), edge_fields)
+                states[profile] = state
+        # 이력 토글만으로 공통 입력·거리·방위·접근량이 달라지면 안 된다.
+        for minimal, legacy in (("minimal", "legacy"), ("minimal_distance", "legacy_distance"),
+                                ("minimal_compass_progress", "legacy_compass_progress"),
+                                ("minimal_compass_distance", "legacy_compass_distance")):
+            self.assertEqual(states[minimal], {key: value for key, value in states[legacy].items() if key not in history_fields})
+
     def test_minimal_profiles_require_neighbor_context_before_selector_call(self):
-        for profile in ("minimal", "minimal_distance", "legacy_compass_distance", "minimal_compass_progress", "invalid"):
+        from backend.app.services.iterative_route_policy import STATE_PROFILES
+        for profile in (*[profile for profile in STATE_PROFILES if profile != "legacy"], "invalid"):
             selector = _OracleSelector()
             with self.assertRaises(ValueError):
                 _run_route(selector, _fixture(), {"start": 0, "target": 2},
@@ -631,6 +664,9 @@ class SelectorIterativeRouteBenchmarkTest(unittest.TestCase):
                 self.assertEqual(manifest["settings"]["state_profile"], profile)
                 self.assertEqual(summary["settings"]["state_profile"], profile)
                 self.assertEqual(trial["state_profile"], profile)
+                self.assertEqual(manifest["settings"]["context_protocol"], "factorial8-v1")
+                self.assertEqual(summary["settings"]["context_protocol"], "factorial8-v1")
+                self.assertEqual(trial["context_protocol"], "factorial8-v1")
                 actual = trial["steps"][0]["model_input"]["state"]
                 if profile == "minimal_distance":
                     self.assertEqual(actual["available_edges"][0]["dist_to_target"], 1.0)

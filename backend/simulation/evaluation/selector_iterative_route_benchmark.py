@@ -22,7 +22,7 @@ sys.path.insert(0, str(ROOT))
 from backend.simulation.evaluation.device_metadata import git_metadata, selector_device_metadata
 from backend.simulation.evaluation.graph_path import resolve_graph_path
 from backend.simulation.route_selector import get_selector
-from backend.simulation.services.iterative_route_policy import MAX_VISITS_PER_NODE, NEXT_NODE_INSTRUCTIONS, STATE_PROFILES, validate_state_profile
+from backend.simulation.services.iterative_route_policy import CONTEXT_PROTOCOL, STATE_PROFILE_FACTORS, MAX_VISITS_PER_NODE, NEXT_NODE_INSTRUCTIONS, STATE_PROFILES, validate_state_profile
 from backend.simulation.services.iterative_route_runner import run_selected_route as _run_route, _random_path_baseline
 from backend.simulation.services.route_service import (
     build_compact_adjacency_graph,
@@ -257,7 +257,7 @@ def default_matrix_output_path() -> Path:
     return DEFAULT_RESULTS_DIR / f"ollama-iterative-matrix-{timestamp}"
 
 
-def _resolve_model_specs(config: dict[str, Any], selected_models: list[str] | None = None) -> list[dict[str, Any]]:
+def _resolve_model_specs(config: dict[str, Any], selected_models: list[str] | None = None, *, allow_empty: bool = False) -> list[dict[str, Any]]:
     """Merge common Ollama defaults with each enabled model entry."""
     defaults = config.get("ollama_defaults", {})
     if not isinstance(defaults, dict):
@@ -298,13 +298,14 @@ def _resolve_model_specs(config: dict[str, Any], selected_models: list[str] | No
     disabled = requested - {spec["name"] for spec in resolved}
     if disabled:
         raise ValueError("requested models are disabled: " + ", ".join(sorted(disabled)))
-    if not resolved:
+    if not resolved and not allow_empty:
         raise ValueError("no enabled models selected")
     return resolved
 
 
 def load_iterative_config(
-    config_path: Path, selected_models: list[str] | None = None, *, state_profile: str | None = None
+    config_path: Path, selected_models: list[str] | None = None, *, state_profile: str | None = None,
+    allow_empty_models: bool = False,
 ) -> dict[str, Any]:
     """Validate the JSON config without contacting Ollama."""
     config_path = config_path.resolve()
@@ -352,7 +353,9 @@ def load_iterative_config(
     settings = dict(settings)
     settings["state_profile"] = state_profile if state_profile is not None else settings.get("state_profile", "legacy")
     validate_state_profile(settings["state_profile"], settings["context_mode"])
-    models = _resolve_model_specs(config, selected_models)
+    settings["context_protocol"] = CONTEXT_PROTOCOL
+    settings["context_factors"] = dict(STATE_PROFILE_FACTORS[settings["state_profile"]])
+    models = _resolve_model_specs(config, selected_models, allow_empty=allow_empty_models)
     return {
         "config_path": config_path,
         "config_sha256": hashlib.sha256(config_path.read_bytes()).hexdigest(),
@@ -490,6 +493,8 @@ def run_benchmark(
             "candidate_scope": candidate_scope,
             "context_mode": context_mode,
             "state_profile": state_profile,
+            "context_protocol": CONTEXT_PROTOCOL,
+            "context_factors": dict(STATE_PROFILE_FACTORS[state_profile]),
             "model_input_recording": "steps[].model_input before selector encoding; forced steps have no model input",
             "context_policy": (
                 "exact_current_node_adjacency_each_step" if context_mode == "neighbor_context" else "none"
@@ -748,7 +753,7 @@ def main() -> int:
     parser.add_argument("--context-mode", choices=("full_graph_only", "neighbor_context"), default="neighbor_context")
     parser.add_argument(
         "--state-profile", choices=STATE_PROFILES, default=None,
-        help="legacy=기존 기본, minimal=필수만, minimal_distance=필수+직선거리, legacy_compass_distance=기존 기본+방위·거리·접근량, minimal_compass_progress=필수+방위·접근량. JSON 설정 재정의 가능",
+        help="필수 입력 기준 이력·후보 직선거리·방위/접근량의 8조합. target_distance 제외. JSON 설정 재정의 가능",
     )
     parser.add_argument(
         "--max-steps", type=int, default=None, help="목적지 미도착 시 중단할 최대 이동 횟수 (기본: Node 수의 2배)"

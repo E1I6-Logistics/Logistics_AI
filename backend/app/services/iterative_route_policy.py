@@ -29,7 +29,19 @@ NEXT_NODE_INSTRUCTIONS = (
 )
 
 MAX_VISITS_PER_NODE = 2
-STATE_PROFILES = ("legacy", "minimal", "minimal_distance", "legacy_compass_distance", "minimal_compass_progress")
+# (경로 이력, 후보 직선거리, 방위·접근량)의 모든 2×2×2 조합.
+CONTEXT_PROTOCOL = "factorial8-v1"
+STATE_PROFILE_FACTORS = {
+    "minimal": {"history": False, "distance": False, "compass_progress": False},
+    "legacy": {"history": True, "distance": False, "compass_progress": False},
+    "minimal_distance": {"history": False, "distance": True, "compass_progress": False},
+    "minimal_compass_progress": {"history": False, "distance": False, "compass_progress": True},
+    "minimal_compass_distance": {"history": False, "distance": True, "compass_progress": True},
+    "legacy_distance": {"history": True, "distance": True, "compass_progress": False},
+    "legacy_compass_progress": {"history": True, "distance": False, "compass_progress": True},
+    "legacy_compass_distance": {"history": True, "distance": True, "compass_progress": True},
+}
+STATE_PROFILES = tuple(STATE_PROFILE_FACTORS)
 
 
 def validate_state_profile(state_profile: str, context_mode: str) -> None:
@@ -118,87 +130,51 @@ def next_node_state(
     points: dict[int, tuple[float, float]] | None = None,
     state_profile: str = "legacy",
 ) -> dict[str, Any]:
-    """
-    전체 그래프·현재/목표 노드·방문/사용 간선·누적 거리를 담고,
-    neighbor_context일 때만 현재 노드의 available_edges를 추가한다.
+    """필수 입력에 이력·후보 직선거리·방위/접근량을 독립적으로 추가한다.
+
+    target_distance는 어떤 조건에도 노출하지 않는다. 좌표는 내부 계산에만 쓴다.
+    방문·간선 제한은 입력에 이력이 없는 조건에서도 next_node_options가 적용한다.
     """
     if context_mode not in {"neighbor_context", "full_graph_only"}:
         raise ValueError(f"Unsupported context_mode: {context_mode}")
     validate_state_profile(state_profile, context_mode)
-    if state_profile == "minimal":
-        return {
-            "route_graph": compact_graph,
-            "current_node": current,
-            "target_node": target,
-            "available_edges": [dict(edge) for edge in options["available_edges"]],
-        }
-    if state_profile == "minimal_distance":
-        required_nodes = {target} | {int(edge["node"]) for edge in options["available_edges"]}
-        if points is None or any(points.get(node) is None for node in required_nodes):
-            raise ValueError("minimal_distance requires coordinates for target and candidates")
-        return {
-            "route_graph": compact_graph,
-            "current_node": current,
-            "target_node": target,
-            "available_edges": [
-                {"node": edge["node"], "weight": edge["weight"],
-                 "dist_to_target": round(math.dist(points[int(edge["node"])], points[target]), 4)}
-                for edge in options["available_edges"]
-            ],
-        }
-    if state_profile == "minimal_compass_progress":
-        # 직선거리는 접근량 계산에만 쓰고 거리 필드와 이력은 입력하지 않는다.
-        required_nodes = {current, target} | {int(edge["node"]) for edge in options["available_edges"]}
-        if points is None or any(points.get(node) is None for node in required_nodes):
-            raise ValueError("minimal_compass_progress requires coordinates for current, target and candidates")
-        current_distance = math.dist(points[current], points[target])
-        return {
-            "route_graph": compact_graph,
-            "current_node": current,
-            "target_node": target,
-            "available_edges": [
-                {
-                    "node": edge["node"],
-                    "weight": edge["weight"],
-                    "direction": _compass(points[current], points[int(edge["node"])]),
-                    "progress": round(current_distance - math.dist(points[int(edge["node"])], points[target]), 4),
-                }
-                for edge in options["available_edges"]
-            ],
-            "target_direction": _compass(points[current], points[target]),
-        }
-    if state_profile not in {"legacy", "legacy_compass_distance"}:
-        raise ValueError(f"Unsupported state_profile: {state_profile}")
-
+    factors = STATE_PROFILE_FACTORS[state_profile]
     state = {
         "route_graph": compact_graph,
         "current_node": current,
-        "previous_node": options["previous_node"],
         "target_node": target,
-        "visited_nodes": path,
-        "visit_counts": dict(sorted(visit_counts.items())),
-        "max_visits_per_node": max_visits_per_node,
-        "used_edges": [{"from": start, "to": end} for start, end in sorted(used_edges)],
-        "backtrack_allowed": options["backtrack_allowed"],
-        "accumulated_distance": accumulated_distance,
     }
-
-    if context_mode == "neighbor_context":
-        state["available_edges"] = options["available_edges"]
-    if state_profile == "legacy_compass_distance":
-        required_nodes = {current, target} | {int(edge["node"]) for edge in options["available_edges"]}
+    if factors["history"]:
+        state.update({
+            "previous_node": options["previous_node"],
+            "visited_nodes": path,
+            "visit_counts": dict(sorted(visit_counts.items())),
+            "max_visits_per_node": max_visits_per_node,
+            "used_edges": [{"from": start, "to": end} for start, end in sorted(used_edges)],
+            "backtrack_allowed": options["backtrack_allowed"],
+            "accumulated_distance": accumulated_distance,
+        })
+    distance, geometry = factors["distance"], factors["compass_progress"]
+    if distance or geometry:
+        required_nodes = {target} | {int(edge["node"]) for edge in options["available_edges"]}
+        if geometry:
+            required_nodes.add(current)
         if points is None or any(points.get(node) is None for node in required_nodes):
-            raise ValueError("legacy_compass_distance requires coordinates for current, target and candidates")
-        current_distance = math.dist(points[current], points[target])
+            raise ValueError(f"{state_profile} requires coordinates for target/candidates and current when using direction")
+    current_distance = math.dist(points[current], points[target]) if geometry else None
+    if context_mode == "neighbor_context":
+        available_edges = []
+        for edge in options["available_edges"]:
+            node = int(edge["node"])
+            candidate = {"node": node, "weight": edge["weight"]}
+            remaining = math.dist(points[node], points[target]) if distance or geometry else None
+            if distance:
+                candidate["dist_to_target"] = round(remaining, 4)
+            if geometry:
+                candidate["direction"] = _compass(points[current], points[node])
+                candidate["progress"] = round(current_distance - remaining, 4)
+            available_edges.append(candidate)
+        state["available_edges"] = available_edges
+    if geometry:
         state["target_direction"] = _compass(points[current], points[target])
-        state["target_distance"] = round(current_distance, 4)
-        state["available_edges"] = [
-            {
-                **edge,
-                "direction": _compass(points[current], points[int(edge["node"])]),
-                "dist_to_target": round(math.dist(points[int(edge["node"])], points[target]), 4),
-                "progress": round(current_distance - math.dist(points[int(edge["node"])], points[target]), 4),
-            }
-            for edge in options["available_edges"]
-        ]
     return state

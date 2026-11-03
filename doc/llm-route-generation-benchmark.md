@@ -1,5 +1,8 @@
 # 로컬 모델 경로 생성·선택 벤치마크
 
+> 최신 재수집 기준은 문서 마지막의 **8조건 전체 재수집 (factorial8-v1)** 절이다.
+> 이전 4·5조건 결과와 입력 계약은 과거 기록이며, 현재 스크립트 기본 실행은 8조건이다.
+
 코드가 저장된 Edge `weight`를 사용해 A*로 계산한 최단 경로와 로컬 모델의 결과를 비교한다.
 
 - **Ollama 경로 생성 시험**: 모델이 최단 경로를 직접 생성한다.
@@ -1210,7 +1213,7 @@ python -m backend.simulation.evaluation.selector_iterative_route_benchmark \
 manifest에는 Graph 경로·SHA-256, 생성된 Start/Target, prompt 원문·SHA-256·버전,
 selector·model·device가 기록된다.
 
-## 운영 context 선택과 4조건 수동 비교
+## 이전 프로토콜: 운영 context 선택과 4조건 수동 비교
 
 운영 경로 생성과 비교 시험의 context 선택은 분리한다.
 운영의 KEV·Laya·Ollama는 모두 아래 JSON 설정으로 입력을 선택한다.
@@ -1325,7 +1328,7 @@ find "$CONTEXT_OUT" -name selector_iterative_route_summary.json
 서로 다른 출발·목적지 조합은 84쌍이며 각 조합을 반복 확인한 것이다.
 
 
-## 필수 입력 + 방위·접근량 단독 시험
+## 이전 프로토콜: 필수 입력 + 방위·접근량 단독 시험
 
 추가 조건 이름은 `minimal_compass_progress`이다. 필수 입력을 고정하고 방위·접근량의
 효과를 확인한다. 기존 기본의 이력 7개와 직선거리 필드는 모델 입력에서 제외한다.
@@ -1462,3 +1465,153 @@ bash scripts/run_context_comparison.sh --state-profile minimal_compass_progress 
 ```bash
 find "$COMPASS_OUT" -name selector_iterative_route_summary.json
 ```
+
+
+## 8조건 전체 재수집 (factorial8-v1)
+
+### 설계 검증과 해석 범위
+
+필수 입력을 고정하고 H=경로 이력, D=후보 직선거리, G=방위·접근량 묶음의
+포함 여부를 모두 조합한다. 세 요소 각각이 포함/제외이므로 2³=8조건이다.
+이는 [NIST의 3요인·2수준 완전요인 설계](https://www.itl.nist.gov/div898/handbook/pri/section3/pri3331.htm)에
+해당한다. 다른 두 요소를 고정한 네 비교에서 각 요소의 효과를 확인할 수 있고,
+정보 조합에 따라 효과가 달라지는지도 확인할 수 있다.
+
+다만 독립적인 환경 정보 세 가지를 비교한다는 뜻은 아니다.
+접근량은 직선거리로부터 계산되고, 같은 현재 노드에서는 후보 거리와 반대 순서다.
+D+G에서는 dist_to_target+progress로 현재→목적지 거리도 대략 복원할 수 있다.
+따라서 이 시험은 **수치·방위·이력을 어떤 표현으로 주었을 때 모델의 선택이 달라지는가**를
+평가한다. 방위와 접근량 각각의 효과는 이 설계에서 분리하지 않는다.
+그 두 요소까지 따로 나누려면 4요인 16조건이 필요하며 이번 범위에는 포함하지 않는다.
+
+| 번호 | 조건 | profile | H | D | G |
+| --- | --- | --- | --- | --- | --- |
+| 1 | 필수 | minimal | 0 | 0 | 0 |
+| 2 | 기존(필수+이력) | legacy | 1 | 0 | 0 |
+| 3 | 필수+직선거리 | minimal_distance | 0 | 1 | 0 |
+| 4 | 필수+방위·접근량 | minimal_compass_progress | 0 | 0 | 1 |
+| 5 | 필수+직선거리+방위·접근량 | minimal_compass_distance | 0 | 1 | 1 |
+| 6 | 기존+직선거리 | legacy_distance | 1 | 1 | 0 |
+| 7 | 기존+방위·접근량 | legacy_compass_progress | 1 | 0 | 1 |
+| 8 | 기존+직선거리+방위·접근량 | legacy_compass_distance | 1 | 1 | 1 |
+
+### 최종 모델 입력 계약
+
+필수 state는 `route_graph`, `current_node`, `target_node`, `available_edges`다.
+모든 조건에서 choice 질문·선택지·공통 경로 지시문도 동일하게 제공한다.
+후보는 같은 방문·간선 제약을 적용해 구성한다. 단일 후보 단계는 모델 호출 없이 이동한다.
+
+- H=1: previous_node, visited_nodes, visit_counts, max_visits_per_node,
+  used_edges, backtrack_allowed, accumulated_distance의 7개를 추가한다.
+- D=1: 후보마다 `dist_to_target=round(math.dist(후보, 목적지), 4)`만 추가한다.
+- G=1: state의 `target_direction`, 후보의 `direction`, `progress`만 추가한다.
+  `progress=round(현재→목적지 직선거리-후보→목적지 직선거리, 4)`다.
+- 현재→목적지 거리 `target_distance`는 **8조건 모두에서 제외**한다.
+  G에서 필요한 현재 거리는 내부 계산에만 사용한다.
+- 방위는 +x=E, +y=N의 8방위이고 좌표가 같으면 HERE다.
+  좌표와 직선거리 차이는 내부에서 원래 정밀도로 계산하고 최종 값만 반올림한다.
+- 노드 ID는 정수다. adjacency의 키와 criteria의 node_N은 JSON 문자열이다.
+  간선 weight는 원본 저장값이며 정수 값은 int, 소수 값은 float를 유지한다.
+- 다른 로봇의 점유·예약·잔여 경로, 속도·ETA는 모든 조건에서 제외한다.
+- 전체 그래프는 좌표 없는 CompactAdjacencyGraph다. 좌표는 거리·방위 계산에만 쓴다.
+
+기존 `legacy_compass_distance`는 target_distance가 포함됐고 입력 키 배치도 달랐다.
+새 입력 계약은 단일 구성기를 사용하며 결과의 `context_protocol=factorial8-v1`과
+`context_factors`로 식별한다. 이전 실행의 일부 수치를 새 결과에 끼워 넣지 않고
+8조건을 새 결과 폴더에서 다시 수집한다. 운영 JSON의 `route_context` 선택값은 변경하지 않는다.
+
+### 활성 모델 전체를 한 번에 실행
+
+일괄 실행기는 다음을 자동 처리한다.
+
+1. JSON의 `models`와 `decision_models` 활성 항목을 읽는다.
+2. JSON의 지도 SHA·all-pairs·neighbors·neighbor_context·반복 수를 검증한다.
+3. 모델별 8조건을 순차 실행한다. 조건 순서는 고정 시드로 섞어 프로토콜에 기록한다.
+4. Laya는 CUDA와 입력 한도 8192를 사용한다.
+5. KEV 0.8B·4B는 `~/kev`에서 bf16 서버를 전용 8021 포트에 자동 실행한다.
+   준비된 서버의 실제 checkpoint와 CUDA 실행을 확인한 뒤 시험한다.
+   모델 완료 또는 실패·중단 시 실행기가 시작한 서버만 종료하고 다음 모델로 전환한다.
+6. Ollama는 JSON의 공통·모델별 옵션을 사용하고 모델 시험 후 해당 모델을 해제한다.
+7. 실패 모델은 failed로 기록하고 다음 모델을 시도한다. 실패가 하나라도 있으면 종료 코드는 1이다.
+
+하드웨어를 6GB로 가정해 KEV-4B를 건너뛰던 이전 동작과 강제 repeats=1을 제거했다.
+활성화된 KEV-4B도 실제 실행을 시도한다. bf16 CUDA 메모리 부족은 실패로 남기며
+CPU·양자화로 자동 변경하지 않는다. 처음 사용하는 모델은 다운로드 시간이 필요할 수 있다.
+Ollama 모델은 미리 설치하고 Ollama 서비스가 실행되어 있어야 한다.
+KEV 소스와 모델 의존성은 활성 가상환경에 준비되어 있어야 한다.
+다른 GPU 작업과 기존 수동 KEV 서버는 종료한 상태에서 실행한다.
+사용 중인 8021 포트의 서버는 재사용하거나 강제 종료하지 않고 해당 KEV 시험을 실패로 기록한다.
+
+실험 PC의 수정 코드가 반영된 저장소에서 실행한다.
+
+```bash
+cd ~/E1I6/Logistics_AI
+source ~/venv/robot/bin/activate
+
+# 모델 호출·다운로드·결과 폴더 생성 없이 계획만 확인
+python -m backend.simulation.evaluation.iterative_context_matrix --check
+
+# 실제 수집: 활성 모델 전체 × 8조건. KEV 서버 전환도 자동 처리
+python -u -m backend.simulation.evaluation.iterative_context_matrix
+```
+
+현재 JSON은 8개 활성 모델, 지도 84쌍, repeats=5, warmups=1이다.
+따라서 모델당 8×84×5=3,360건, 전체 26,880건이며 워밍업은 측정 건수에서 제외한다.
+각 모델의 내부 추론·정밀도·양자화가 서로 같다는 뜻은 아니므로 실행 메타데이터를 함께 비교한다.
+
+KEV 소스 위치가 다르면 다음처럼 지정한다.
+
+```bash
+python -u -m backend.simulation.evaluation.iterative_context_matrix --kev-repo /실제/kev/경로
+```
+
+일부 모델만 실행해도 8조건은 모두 적용한다. 지정한 모델은 JSON에서 활성 상태여야 한다.
+
+```bash
+python -u -m backend.simulation.evaluation.iterative_context_matrix --selector ollama
+python -u -m backend.simulation.evaluation.iterative_context_matrix --model kev-4b
+```
+
+모델 하나의 수동 실행은 기존 스크립트를 사용할 수 있다.
+이 스크립트의 기본 조건도 이제 8개다. KEV 서버는 이 수동 방식에서는 별도로 준비한다.
+`--state-profile`을 지정하면 해당 조건만 실행한다.
+
+```bash
+bash scripts/run_context_comparison.sh ollama gemma3:1b
+bash scripts/run_context_comparison.sh --state-profile legacy_distance ollama gemma3:1b
+```
+
+### 결과·진행률·시간의 의미
+
+일괄 실행은 `backend/simulation/benchmark_results/context8-날짜-시각-마이크로초`에
+새 폴더를 자동 생성한다. 경로는 시작 시 콘솔에 표시된다.
+`--output 경로`로 지정할 수도 있지만 기존 결과가 있는 폴더는 거부한다.
+이어 실행이나 기존 4·5조건 데이터 재사용 기능은 제공하지 않는다.
+
+| 파일 | 내용 |
+| --- | --- |
+| protocol.json | 버전·8조건·요인·실행 순서·84쌍·반복 수·소스/지도/지시문 SHA·장비 |
+| config_snapshot.json | 시작 시 고정한 JSON 설정 |
+| progress.json | 모델·조건별 상태·완료 경로 수·실패 이유 |
+| comparison.csv | 도착·최단 일치 건수/비율, 호출 횟수, 호출당·경로 평균/p95, 성공 경로 평균, 장치 |
+| report.md | 전체 비교표와 해석 범위·실패 내역 |
+| all_routes_side_by_side.csv | 출발·목적지·반복 번호별 모든 모델/조건의 도착·최단·시간·호출·경로를 옆으로 비교 |
+| 모델/조건/selector_iterative_route_trials.jsonl | 단계별 선택과 실제 selector 입력 steps[].model_input |
+| 모델/조건/manifest.json | 해당 조건의 실제 설정·프로토콜·실행 상태 |
+| 모델/worker.log | 해당 모델의 상세 진행 로그 |
+| KEV 모델/server.log | 자동 실행한 KEV 서버의 시작·다운로드·오류 로그 |
+
+도착·최단 일치율의 분모에는 경로 실패도 포함한다. 서버 오류·메모리 부족·보고된
+입력 잘림으로 중단한 조건은 실패 상태로 구분하고 정상 완료 수치와 섞지 않는다.
+Laya의 잘림 보고는 검사하지만, 미보고 값을 잘리지 않았다는 뜻으로 해석하지 않는다.
+
+호출당 경과 시간은 selector 호출과 응답 처리이며 순수 GPU 연산 시간이 아니다.
+전체 경로 시간은 후보 제한·거리/방위/context 계산·입력 기록용 복사·반복 모델 호출·
+경로 조립·최종 검증을 포함한다. 지도 로딩·전체 그래프 변환·모델 준비/서버 시작·
+결과 파일 저장은 제외한다. 모델당 워밍업 후 같은 경로 생성 타이머로 비교한다.
+comparison.csv의 route_mean_s는 실패까지 포함하고 successful_route_mean_s는 성공 경로만 포함한다.
+
+5회 반복은 같은 84쌍의 반복이며 420개의 서로 다른 지도 사례가 아니다.
+temperature=0인 모델에서 같은 선택이 반복되어도 통계적으로 독립적인 추론 사례가 추가됐다고
+가정하지 않는다. 전체 경로 생성 결과이므로 모델의 이전 선택에 따라 이후 후보가 달라질 수 있다.
+조건 순서를 섞어 기록하더라도 GPU 온도·캐시·시간에 따른 실행 순서 효과는 완전히 제거되지 않는다.

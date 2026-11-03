@@ -7,7 +7,7 @@ from copy import deepcopy
 import time
 from typing import Any
 
-from .iterative_route_policy import MAX_VISITS_PER_NODE, NEXT_NODE_INSTRUCTIONS, next_node_options, next_node_state, validate_state_profile
+from .iterative_route_policy import CONTEXT_PROTOCOL, STATE_PROFILE_FACTORS, MAX_VISITS_PER_NODE, NEXT_NODE_INSTRUCTIONS, next_node_options, next_node_state, validate_state_profile
 from .route_service import validate_and_calculate_path_distance
 
 
@@ -282,6 +282,8 @@ def run_selected_route(
     return {
         "path": path,
         "state_profile": state_profile,
+        "context_protocol": CONTEXT_PROTOCOL,
+        "context_factors": dict(STATE_PROFILE_FACTORS[state_profile]),
         "steps": steps,
         "api_call_count": api_call_count,
         "max_steps": step_limit,
