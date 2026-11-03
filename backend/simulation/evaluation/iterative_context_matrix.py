@@ -19,6 +19,7 @@ import subprocess
 import sys
 import time
 import traceback
+import urllib.error
 import urllib.request
 from datetime import datetime
 from pathlib import Path
@@ -354,7 +355,13 @@ def kev_server(spec, protocol, directory):
                     raise RuntimeError(f"KEV 서버 시작 실패(exit={process.returncode}); {directory / 'server.log'} 확인")
                 try:
                     runtime = selector._ensure_runtime()
-                except (OSError, TimeoutError) as exc:
+                except (OSError, TimeoutError, RuntimeError) as exc:
+                    # 연결 실패를 감싼 RuntimeError만 재시도하고 모델·CUDA 검증 오류는 즉시 알린다.
+                    if isinstance(exc, RuntimeError) and (
+                        not isinstance(exc.__cause__, urllib.error.URLError)
+                        or isinstance(exc.__cause__, urllib.error.HTTPError)
+                    ):
+                        raise
                     if time.monotonic() >= deadline:
                         raise RuntimeError("KEV 서버 준비 시간 초과; server.log 확인") from exc
                     time.sleep(1)
