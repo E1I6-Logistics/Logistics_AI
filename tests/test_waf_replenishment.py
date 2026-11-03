@@ -15,7 +15,7 @@ from backend.app.routers import replenishment as api
 def rig(tmp_path):
     service = PalletReplenishment(tmp_path/'job.json', clock=lambda:100.)
     sent, result, cancel = Future(), Future(), Future()
-    client = Mock(server_is_ready=lambda:True)
+    client = Mock(server_is_ready=lambda:True, action_name="/pallet_replace")
     client.send_goal_async.return_value = sent
     handle = Mock(accepted=True)
     handle.get_result_async.return_value = result

@@ -455,14 +455,25 @@ export function restartFmsWeb() {
 }
 
 
+export type WafRobotDto = {
+  robot_id: 'robot4'; role: 'replenishment'; seen: boolean; ip: string
+  connected: boolean; connection_state: string; last_seen: number | null
+  battery: number | null; battery_voltage: number | null; battery_fresh: boolean
+  battery_received_at: number | null; pose_fresh: boolean; pose_received_at: number | null
+  pose: null | { x: number; y: number; yaw: number; frame_id: string; source: string }
+  pixel_x: number | null; pixel_y: number | null; activity: string; external_active: boolean
+  feedback: null | { stage: string; source: string; received_at: number }
+}
 export type ReplenishmentDto = {
+  robot: WafRobotDto | null
+  action_name: string
   can_cancel: boolean
   available: boolean
   busy: boolean
   reason: string
   destinations: Record<string, number>
   job: null | {
-    request_id: string; item: string | null; destination?: number; state: string
+    request_id: string; item: string | null; destination?: number; action_name?: string; state: string
     stage?: string; message: string; cancel_requested?: boolean; started_at?: number; updated_at?: number
   }
 }

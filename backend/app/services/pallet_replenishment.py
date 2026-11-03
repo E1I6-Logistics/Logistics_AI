@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 from threading import RLock
 from time import time
+from .waf_telemetry import waf_telemetry
 
 LOG = logging.getLogger(__name__)
 DESTINATIONS = {"A": 1, "B": 2, "C": 3, "D": 4}
@@ -19,8 +20,9 @@ class ReplenishmentError(Exception):
 
 
 class PalletReplenishment:
-    def __init__(self, state_path=None, clock=time):
+    def __init__(self, state_path=None, clock=time, telemetry=None):
         self.lock = RLock()
+        self.telemetry = telemetry
         self.client = None
         self.goal_factory = None
         self.goal_handle = None
@@ -74,9 +76,32 @@ class PalletReplenishment:
     def snapshot(self):
         with self.lock:
             ready = self._ready()
-            return dict(available=ready, can_cancel=bool(self.goal_handle is not None or self.pending_goal), busy=bool(self.job and self.job["state"] in ACTIVE),
-                        reason=self.interface_error or ("" if ready else "WAF /pallet_replace 서버 연결 대기"),
-                        destinations=dict(DESTINATIONS), job=deepcopy(self.job))
+            robot = self.telemetry.snapshot() if self.telemetry is not None else None
+            own_active = bool(self.job and self.job["state"] in ACTIVE)
+            if robot is not None:
+                if self.job and self.job["state"] in ACTIVE:
+                    robot["activity"] = self.job["state"]
+                elif robot["external_active"]:
+                    robot["activity"] = "RUNNING"
+                else:
+                    robot["activity"] = "READY" if ready else "UNKNOWN"
+                robot["pixel_x"] = robot["pixel_y"] = None
+                if robot["pose"] is not None:
+                    from .map_service import world_to_pixel
+                    try:
+                        robot["pixel_x"], robot["pixel_y"] = world_to_pixel(robot["pose"]["x"], robot["pose"]["y"])
+                    except (OSError, ValueError, KeyError):
+                        # 지도 파일 문제로 배터리·피드백 수신 화면까지 막지 않는다.
+                        pass
+            return dict(
+                robot=robot,
+                action_name=getattr(self.client, "action_name", "/pallet_replace"),
+                available=ready,
+                can_cancel=own_active and bool(self.goal_handle is not None or self.pending_goal),
+                busy=bool(own_active or (robot and robot["external_active"])),
+                reason=self.interface_error or ("" if ready else "WAF /pallet_replace 서버 연결 대기"),
+                destinations=dict(DESTINATIONS), job=deepcopy(self.job),
+            )
 
     def _update(self, request_id, **changes):
         if not self.job or self.job.get("request_id") != request_id:
@@ -97,11 +122,14 @@ class PalletReplenishment:
                 return self.snapshot()
             if self.job and self.job["state"] in ACTIVE:
                 raise ReplenishmentError(409, "WAF 보충 작업이 진행 중이거나 종료 확인이 필요합니다")
+            if self.telemetry is not None and self.telemetry.external_active():
+                raise ReplenishmentError(409, "WAF에서 이미 액션을 수행 중입니다. 종료 결과를 기다리세요")
             if item not in DESTINATIONS:
                 raise ReplenishmentError(400, "지원하지 않는 품목입니다")
             if not self._ready():
                 raise ReplenishmentError(503, self.snapshot()["reason"])
             self.job = dict(request_id=request_id, item=item, destination=DESTINATIONS[item],
+                            action_name=getattr(self.client, "action_name", "/pallet_replace"),
                             state="SENDING", stage="", message="WAF 접수 확인 중", cancel_requested=False,
                             started_at=self.clock(), updated_at=self.clock())
             self.goal_handle = None
@@ -210,5 +238,5 @@ class PalletReplenishment:
 
 
 replenishment = PalletReplenishment(
-    Path(os.environ.get("FMS_LOG_DIR", Path(__file__).resolve().parents[3] / "logs")) / "waf_replenishment.json"
+    Path(os.environ.get("FMS_LOG_DIR", Path(__file__).resolve().parents[3] / "logs")) / "waf_replenishment.json", telemetry=waf_telemetry
 )

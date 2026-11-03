@@ -241,3 +241,16 @@ def test_real_reconnect_does_not_cancel_simulation_return_with_same_robot_id(ctx
     assert 'robot1' in order_manager._return_started
     assert order_manager.orders['sim']['status'] == 'IN_PROGRESS'
     task.get_loop.assert_not_called()
+
+
+
+def test_waf_robot4_never_registers_for_amr_navigation_or_dispatch(ctx):
+    ctx.node.register_robot.reset_mock()
+    ctx.gateway.sync_connected_robots([dict(name='robot1',connected=True), dict(name='robot2',connected=True),
+                                       dict(name='robot4',connected=True)])
+    assert ctx.fleet.get_robot('robot4') is None
+    assert 'robot4' not in ctx.nav._robots
+    assert all(c.args != ('robot4',) for c in ctx.node.register_robot.call_args_list)
+    for alias in ('robot4','R-04'):
+        with pytest.raises(ValueError,match='재고 보충 전용'):
+            ctx.gateway._resolve_robot_id(alias)

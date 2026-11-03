@@ -6,6 +6,7 @@ import {
   type MapInfoDto,
   type OmxDeviceDto,
   type DockingStationDto,
+  type WafRobotDto,
 } from './api/fmsApi'
 
 import type { MapEdge, MapPoint } from './hooks/useRouteGraph'
@@ -29,6 +30,9 @@ type Props = {
   graphError?: string | null
   visibleRobotIds?: RobotId[]
   robotStates?: ManagedRobot[]
+  wafRobot?: WafRobotDto | null
+  wafSelected?: boolean
+  onSelectWaf?: () => void
   omxDevices?: OmxDeviceDto[]
   selectedOmx?: string | null
   onSelectOmx?: (id: string) => void
@@ -54,6 +58,7 @@ export default function WarehouseMap({
   graphError = null,
   visibleRobotIds = [],
   robotStates = [],
+  wafRobot, wafSelected = false, onSelectWaf,
   omxDevices = [],
   selectedOmx,
   onSelectOmx,
@@ -337,6 +342,18 @@ export default function WarehouseMap({
                 </g>
               )
             })}
+          </g>
+        )}
+
+        {layers.robotId && wafRobot?.seen && wafRobot.pose_fresh && wafRobot.pose &&
+          ['map', '/map', 'robot4/map', '/robot4/map'].includes(wafRobot.pose.frame_id) && wafRobot.pixel_x != null && wafRobot.pixel_y != null && (
+          <g role="button" tabIndex={0} aria-label="robot4 WAF 재고 보충 로봇 선택" style={{ cursor: 'pointer' }}
+            opacity={wafRobot.connected ? 1 : .4} onPointerDown={e => e.stopPropagation()}
+            onClick={onSelectWaf} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelectWaf?.() } }}>
+            <rect x={wafRobot.pixel_x - px(12)} y={wafRobot.pixel_y - px(12)} width={px(24)} height={px(24)} rx={px(4)}
+              fill={wafSelected ? '#2589F5' : '#8059C8'} stroke={wafSelected ? '#183F81' : '#fff'} strokeWidth={px(2)} />
+            <text x={wafRobot.pixel_x} y={wafRobot.pixel_y} fontSize={px(8)} textAnchor="middle" dominantBaseline="middle" fill="#fff" fontWeight="800">04</text>
+            <text x={wafRobot.pixel_x} y={wafRobot.pixel_y + px(21)} fontSize={px(9)} textAnchor="middle" fill="#65449F">WAF 보충</text>
           </g>
         )}
 

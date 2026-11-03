@@ -4,6 +4,8 @@ import type { ScenarioStatus, ScenarioItem } from './api/fmsApi'
 import WarehouseMap from './WarehouseMap'
 import RobotOrderForm from './components/RobotOrderForm'
 import OmxPanel from './components/OmxPanel'
+import WafPanel from './components/WafPanel'
+import { useWafRobot } from './hooks/useWafRobot'
 import FmsRestartButton from './components/FmsRestartButton'
 import { cancelOrder, getOrders, retryOrder, type OrderDto, type WorkstationDto, type PickupDto } from './api/orderApi'
 import ScenarioControls from './components/ScenarioControls'
@@ -221,6 +223,7 @@ export default function FmsControlApp() {
   const [commandState, setCommandState] = useState<CommandState>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [omxDevices, setOmxDevices] = useState<OmxDeviceDto[]>([])
+  const [wafSelected, setWafSelected] = useState(false)
   const [selectedOmx, setSelectedOmx] = useState<string | null>(null)
   const [omxQueryError, setOmxQueryError] = useState<string | null>(null)
   const [rightPanelOpen, setRightPanelOpen] = useState(true)
@@ -253,13 +256,14 @@ export default function FmsControlApp() {
     changeMode,
     error: fleetError,
   } = useRobotFleet()
+  const waf = useWafRobot(robotMode === 'real')
   const { nodes, edges, nodeItems, loading: graphLoading, error: graphError } = useRouteGraph()
 
   const drivingMode = operationMode === 'ai' ? 'llm' : 'standard'
   const currentOrders = orders.filter(order => order.mode === robotMode)
 
   const selectedLiveRobot = managedRobots.find(robot => robot.id === selectedRobot)
-  const connectedRobotCount = managedRobots.filter(robot => robot.connected).length
+  const connectedRobotCount = managedRobots.filter(robot => robot.connected).length + (robotMode === 'real' && waf.data?.robot?.connected && !waf.error ? 1 : 0)
   const connected = Boolean(selectedLiveRobot?.connected)
   const emergencyStopped = selectedLiveRobot?.status === 'EMERGENCY_STOP'
 
@@ -335,8 +339,10 @@ export default function FmsControlApp() {
     return () => { stopped = true; window.clearTimeout(timer); controller?.abort() }
   }, [])
 
-  const selectRobot = (id: RobotId) => { setSelectedOmx(null); setSelectedRobot(id) }
+  const selectRobot = (id: RobotId) => { setWafSelected(false); setSelectedOmx(null); setSelectedRobot(id) }
+  const selectWaf = () => { remote.stop(); setSelectedRobot(null); setSelectedOmx(null); setWafSelected(true); setRightPanelOpen(true) }
   const selectOmx = (id: string) => {
+    setWafSelected(false)
     remote.stop()
     setSelectedRobot(null)
     setSelectedOmx(id)
@@ -672,7 +678,7 @@ export default function FmsControlApp() {
             routeModels={[...routeModels.ollama, ...routeModels.decision_model]} onModelChange={setSelectedRouteModel}
             mapView={<WarehouseMap nodes={nodes} edges={edges} layers={allLayers} selectedRobot={selectedRobot} onSelect={selectRobot}
               picking={false} onPick={() => {}} graphLoading={graphLoading} graphError={graphError} visibleRobotIds={mapRobotIds}
-              robotStates={managedRobots} omxDevices={omxDevices} dockingStations={dockingStations} />} />
+              robotStates={managedRobots} wafRobot={robotMode === 'real' && !waf.error ? waf.data?.robot : null} onSelectWaf={() => { selectWaf(); selectPage('control') }} omxDevices={omxDevices} dockingStations={dockingStations} />} />
         </div>
         <div style={{ display: page === 'control' ? 'flex' : 'none', flexDirection: 'column', flex: 1, minHeight: 0 }}>
         <div className="fms-operation-strip" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '6px 16px', borderBottom: `1px solid ${C.line}`, flexWrap: 'wrap' }}>
@@ -712,6 +718,9 @@ export default function FmsControlApp() {
               return robot ? displayRobotStatus(robot, orders) : ROBOT_DATA[id].status
             }}
             onSelect={selectRobot}
+            wafVisible={robotMode === 'real' && !!waf.data?.robot?.seen}
+            wafConnected={!!waf.data?.robot?.connected && !waf.error}
+            wafSelected={wafSelected} onSelectWaf={selectWaf}
           />
 
           <section style={{ position: 'relative', display: 'flex', flex: 1, minWidth: 0, background: C.surface }} aria-label="FMS 실시간 지도">
@@ -733,6 +742,8 @@ export default function FmsControlApp() {
               graphError={graphError}
               visibleRobotIds={mapRobotIds as RobotId[]}
               robotStates={managedRobots}
+              wafRobot={robotMode === 'real' && !waf.error ? waf.data?.robot : null}
+              wafSelected={wafSelected} onSelectWaf={selectWaf}
               omxDevices={omxDevices}
               selectedOmx={selectedOmx}
               onSelectOmx={selectOmx}
@@ -783,10 +794,11 @@ export default function FmsControlApp() {
               onPointerCancel={() => { sideDrag.current = null }}
               onKeyDown={e => { if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { e.preventDefault(); resizeSide(sideWidth + (e.key === 'ArrowLeft' ? 20 : -20)) } }}><span /></div>
             <div className="fms-side-wrapper" style={{ width: sideWidth }}>
-          {selectedOmxDevice && <OmxPanel key={selectedOmxDevice.omx_id}
+          {wafSelected && robotMode === 'real' && <WafPanel data={waf.data} error={waf.error} onClose={() => setWafSelected(false)} />}
+          {!wafSelected && selectedOmxDevice && <OmxPanel key={selectedOmxDevice.omx_id}
             device={selectedOmxDevice} queryError={omxQueryError} realMode={robotMode === 'real'}
             blocked={scenarioActive || modeSwitching} onClose={() => setSelectedOmx(null)} />}
-          {!selectedOmxDevice && (
+          {!selectedOmxDevice && !(wafSelected && robotMode === 'real') && (
           <RobotPanel
             robotId={selectedRobot}
             orders={orders}
@@ -842,11 +854,12 @@ export default function FmsControlApp() {
   )
 }
 
-function RobotRail({ robotIds, selectedRobot, getStatus, onSelect }: {
+function RobotRail({ robotIds, selectedRobot, getStatus, onSelect, wafVisible, wafConnected, wafSelected, onSelectWaf }: {
   robotIds: RobotId[]
   selectedRobot: RobotId | null
   getStatus: (id: RobotId) => string
   onSelect: (id: RobotId) => void
+  wafVisible: boolean; wafConnected: boolean; wafSelected: boolean; onSelectWaf: () => void
 }) {
   return (
     <aside style={{ width: 64, flexShrink: 0, padding: '10px 0', overflowY: 'auto', background: C.surface, borderRight: `1px solid ${C.line}`, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }} aria-label="로봇 목록">
@@ -862,6 +875,11 @@ function RobotRail({ robotIds, selectedRobot, getStatus, onSelect }: {
           </button>
         )
       })}
+      {wafVisible && <button onClick={onSelectWaf} aria-label="robot4 WAF 재고 보충 로봇 선택" aria-pressed={wafSelected}
+        title={`robot4 · 재고 보충 · ${wafConnected ? '연결됨' : '연결 확인 필요'}`}
+        style={{ width: 46, minHeight: 48, padding: 3, borderRadius: 8, border: `2px solid ${wafSelected ? C.primary : wafConnected ? '#8059C8' : C.muted}`, background: wafSelected ? '#EDF6FF' : C.surface, cursor: 'pointer', fontSize: 10, fontWeight: 800 }}>
+        04<br />WAF
+      </button>}
     </aside>
   )
 }

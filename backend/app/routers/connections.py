@@ -5,6 +5,7 @@ from fastapi import APIRouter
 from ..services.mode_service import mode_manager
 from ..services.zenoh_connection_manager import zenoh_connection_manager
 from ..ros2.ros_gateway import ros_gateway
+from ..services.waf_telemetry import waf_telemetry
 
 router = APIRouter(prefix="/api/connections", tags=["connections"])
 
@@ -22,6 +23,7 @@ async def get_connections():
     except ConnectionError:
         return {"devices": zenoh_connection_manager.last_successful(), "status": "unavailable"}
 
+    waf_telemetry.sync_connections(devices)
     ros_gateway.sync_connected_robots(devices)
 
     return {"devices": devices}

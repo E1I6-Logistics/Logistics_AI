@@ -491,7 +491,8 @@ class RosGateway:
                 continue
 
             robot_id = str(connection.get("name", "")).strip()
-            if not robot_id:
+            if not robot_id or robot_id == "robot4":
+                # WAF는 전용 관측·액션 노드가 담당한다. 배송 Fleet에 등록하지 않는다.
                 continue
 
             connected_robot_ids.append(robot_id)
@@ -531,6 +532,8 @@ class RosGateway:
     # 로봇 ID를 해결한다.
     def _resolve_robot_id(self, robot_id: str) -> str:
         robot_id = normalize_robot_id(robot_id)
+        if robot_id == "robot4":
+            raise ValueError("robot4는 WAF 재고 보충 전용입니다. 일반 주행·속도 제어를 사용할 수 없습니다")
 
         if self._ros_node is None:
             raise RuntimeError("ROS node is not initialized")

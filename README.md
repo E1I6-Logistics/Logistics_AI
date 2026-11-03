@@ -258,3 +258,22 @@ B/C/D 목적지 번호도 **첫 팔레트 인수 위치**로 전달합니다. �
 현장에서 이전 WAF 작업의 종료를 확인했는데 FMS의 재시작 전 기록만 남아 있다면,
 FMS를 중지한 상태에서 `logs/waf_replenishment.json`을 별도 보관한 뒤 다시 시작합니다.
 이전 기록을 지워 작업을 자동 재실행하는 처리는 하지 않습니다.
+
+
+### robot4 WAF 표시
+
+Zenoh에 `/robot4/...` 토픽이 발견되면 왼쪽에 **04 WAF**가 표시됩니다. 선택하면
+배송 로봇과 다른 관측 전용 사이드 패널에서 연결/IP, 배터리 잔량·전압,
+액션 가동 상태, 실제 `stage` 피드백과 결과를 확인할 수 있습니다.
+WAF는 배송 Fleet·배차·경로 계획·조이스틱·충전 명령에 등록하지 않습니다.
+
+- 배터리: `/robot4/battery_state` (`sensor_msgs/msg/BatteryState`). 잔량이 -1/NaN이면 미수신으로 표시합니다.
+- 위치: `/robot4/logitle_pose` (`PoseStamped`) 또는 `/robot4/amcl_pose` (`PoseWithCovarianceStamped`).
+  최신 map 좌표가 수신된 경우에만 지도에 표시합니다. 위치가 없어도 왼쪽 목록에서 상태를 볼 수 있습니다.
+- 보충 액션: `/robot4/pallet_replace` 우선, 기존 `/pallet_replace`도 지원합니다.
+  `FMS_WAF_ACTION_NAME`으로 한 주소를 명시할 수도 있습니다.
+- 액션의 status·feedback도 관측하므로 CLI로 시작한 작업의 가동 상태와 단계도 표시합니다.
+  FMS에서 요청한 작업만 해당 GoalHandle로 취소할 수 있습니다.
+
+표시 데이터는 `/api/replenishment`의 `robot` 객체에 있으며 기존 `/api/robots`의
+일반 배송 로봇 목록과 분리됩니다. 오래된 배터리·위치와 연결 조회 실패를 정상 값으로 표시하지 않습니다.
