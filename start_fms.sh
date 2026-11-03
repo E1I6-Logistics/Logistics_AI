@@ -70,7 +70,7 @@ cleanup_failed_start() {
         trap - EXIT
         printf '[FMS][ERROR] Startup failed; stopping the partially started stack.\n' >&2
         set +e
-        FMS_COMPOSE_FILE="$COMPOSE_FILE" "$PROJECT_DIR/stop_fms.sh"
+        FMS_KEEP_TRANSPORT=1 FMS_COMPOSE_FILE="$COMPOSE_FILE" "$PROJECT_DIR/stop_fms.sh"
     fi
 
     exit "$status"
@@ -234,7 +234,7 @@ command -v "$BRIDGE_BIN" >/dev/null 2>&1 || fail "Bridge binary not found: $BRID
 
 # Stop services recorded by the previous run before starting a new stack.
 if [ "${FMS_CLEAN_START:-1}" = "1" ]; then
-    FMS_COMPOSE_FILE="$COMPOSE_FILE" "$PROJECT_DIR/stop_fms.sh"
+    FMS_KEEP_TRANSPORT=1 FMS_COMPOSE_FILE="$COMPOSE_FILE" "$PROJECT_DIR/stop_fms.sh"
 fi
 for port in "$BACKEND_PORT" "$FRONTEND_PORT"; do
     port_is_open "$port" && fail "Port $port is already in use; stop the existing service first"
@@ -242,6 +242,7 @@ done
 if [ "${FMS_KEV_ENABLED:-1}" = "1" ]; then
     port_is_open "$KEV_PORT" && fail "Port $KEV_PORT is already in use; stop the existing Kev server first"
 fi
+export FMS_CONTINUOUS_RUN="${FMS_CONTINUOUS_RUN:-1}"
 CLEANUP_ON_EXIT=1
 
 log "Starting Zenoh Router and MQTT Broker with Docker Compose"

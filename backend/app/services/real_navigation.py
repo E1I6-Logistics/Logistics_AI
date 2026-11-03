@@ -120,6 +120,8 @@ class RealNavigation:
         self._deferred_requests = {}
         self._initializing_since = {}
         self._stale_idle_reported = set()
+        from .continuous_run import ContinuousRun
+        self._continuous = ContinuousRun(self)
         self.mapf = MapfExecution(
             self._traffic, mode=self.mode, response=self._command_response,
             refresh=self.refresh, validate=self.validate_pending, publish=self.after_mapf_commit,
@@ -795,6 +797,7 @@ class RealNavigation:
             robot.pause(reason_code, detail)
         else:
             robot.set_state(RobotState.OFFLINE)
+        self._continuous.observe(robot, reason_code)
 
         print(
             f"[{strftime('%Y-%m-%d %H:%M:%S')}] [WARN] [REAL NAV STATE] "
@@ -1388,6 +1391,7 @@ class RealNavigation:
     def tick(self):
         with self.lock:
             try:
+                self._continuous.tick()
                 self._tick()
 
             except (OSError, ValueError, KeyError, IndexError, RuntimeError) as exc:

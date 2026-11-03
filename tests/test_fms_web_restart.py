@@ -80,10 +80,10 @@ def test_launcher_failure_is_reported_and_lock_released(files, monkeypatch):
 def test_worker_runs_stop_then_start_in_temporary_fixture_only(files):
     root, logs = files
     events = root / 'events'
-    (root / 'stop_fms.sh').write_text('printf "stop\\n" >> events\n')
+    (root / 'stop_fms.sh').write_text('printf "stop:%s\\n" "$FMS_KEEP_TRANSPORT" >> events\n')
     (root / 'start_fms.sh').write_text('printf "start:%s\\n" "$FMS_CLEAN_START" >> events\n')
     restart.worker(root, logs, 'test-token', 'old', delay=0)
-    assert events.read_text().splitlines() == ['stop', 'start:0']
+    assert events.read_text().splitlines() == ['stop:1', 'start:0']
     assert restart.status()['restart']['phase'] == 'COMPLETE'
 
 
@@ -189,4 +189,5 @@ def test_restart_reloads_current_env_without_shell_execution(files, monkeypatch)
     result = restart.launch_environment(root)
     assert result['FMS_OMX_SSH_TARGETS'] == '{"omx1":"omx01@192.168.0.151"}'
     assert result['FMS_CLEAN_START'] == '0'
+    assert result['FMS_KEEP_TRANSPORT'] == '1'
     assert 'not-valid' not in result

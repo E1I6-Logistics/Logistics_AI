@@ -4,6 +4,7 @@ import type { ScenarioStatus, ScenarioItem } from './api/fmsApi'
 import WarehouseMap from './WarehouseMap'
 import RobotOrderForm from './components/RobotOrderForm'
 import OmxPanel from './components/OmxPanel'
+import { delayedOmxSnapshot } from './omxObservation'
 import WafPanel from './components/WafPanel'
 import { useWafRobot } from './hooks/useWafRobot'
 import FmsRestartButton from './components/FmsRestartButton'
@@ -327,8 +328,8 @@ export default function FmsControlApp() {
         if (!stopped) { setOmxDevices(devices); setOmxQueryError(null) }
       } catch {
         if (!stopped) {
-          setOmxQueryError('OMX 상태를 불러오지 못했습니다.')
-          setOmxDevices(previous => previous.map(row => ({ ...row, connected: false })))
+          setOmxQueryError('OMX 조회 지연 · 마지막 수신 상태를 표시합니다.')
+          setOmxDevices(delayedOmxSnapshot)
         }
       } finally {
         window.clearTimeout(timeout)

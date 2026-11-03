@@ -293,6 +293,7 @@ export type RobotStateDto = {
 }
 
 export type OmxDeviceDto = {
+  observation_stale?: boolean
   omx_id: string
   connected: boolean
   state: string

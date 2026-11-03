@@ -17,6 +17,13 @@ from backend.app.services.simulation_order_runner import simulation_order_runner
 from tests.test_charging_docking import docking, finish
 
 
+@pytest.fixture(autouse=True)
+def enabled_voltage_guard(monkeypatch):
+    # These cases exercise voltage rejection; production startup now defaults OFF.
+    from backend.app.services.dispatch_settings import dispatch_settings
+    monkeypatch.setattr(dispatch_settings, '_real_voltage_check_enabled', True)
+
+
 @pytest.fixture
 def context(monkeypatch):
     monkeypatch.setenv("FMS_SIM_KEV_DISPATCH_ENABLED", "1")

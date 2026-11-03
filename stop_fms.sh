@@ -132,7 +132,9 @@ if command -v ros2 >/dev/null 2>&1; then
 fi
 
 # Stop the Compose-managed Zenoh Router and MQTT Broker.
-if select_docker_command; then
+if [ "${FMS_KEEP_TRANSPORT:-0}" = "1" ]; then
+    log "공용 MQTT·Zenoh 라우터 유지: OMX 동시 단절 방지"
+elif select_docker_command; then
     if [ -f "$COMPOSE_FILE" ]; then
         "${DOCKER[@]}" compose -f "$COMPOSE_FILE" stop \
             zenoh-router \

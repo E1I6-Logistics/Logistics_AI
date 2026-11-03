@@ -129,6 +129,7 @@ def launch_environment(root):
             if separator and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key):
                 environment[key] = value
     environment["FMS_CLEAN_START"] = "0"
+    environment["FMS_KEEP_TRANSPORT"] = "1"
     return environment
 
 
@@ -139,7 +140,7 @@ def worker(root, folder, token, previous_instance, *, delay=2):
     try:
         time.sleep(delay)  # API 응답을 브라우저에 먼저 전달한다.
         report("STOPPING", "전체 FMS 종료 중")
-        run_script(root, "stop_fms.sh", 180)
+        run_script(root, "stop_fms.sh", 180, env=launch_environment(root))
         report("STARTING", "전체 FMS 시작 중")
         environment = launch_environment(root)
         run_script(root, "start_fms.sh", 480, env=environment)
@@ -147,7 +148,7 @@ def worker(root, folder, token, previous_instance, *, delay=2):
     except Exception as exc:
         # start 도중 일부 프로세스만 남는 경우도 기존 종료 절차로 정리한다.
         try:
-            run_script(root, "stop_fms.sh", 180)
+            run_script(root, "stop_fms.sh", 180, env=launch_environment(root))
         except Exception as cleanup:
             print("[FMS] 재시작 실패 후 정리 오류:", cleanup, flush=True)
         report("FAILED", str(exc))

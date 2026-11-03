@@ -16,7 +16,8 @@ export default function OmxPanel({ device, queryError, realMode, blocked, onClos
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<{ error: boolean; text: string } | null>(null)
   const submitting = useRef(false)
-  const online = device.connected && !queryError
+  const queryStale = !!queryError || !!device.observation_stale
+  const online = device.connected && !queryStale
   const working = ['WORKING', 'COMMAND_SENT'].includes(device.state)
   const restart = async () => {
     if (submitting.current) return
@@ -37,7 +38,7 @@ export default function OmxPanel({ device, queryError, realMode, blocked, onClos
       <h2 style={{ margin: 0, fontSize: 19 }}>{device.omx_id.toUpperCase()}</h2>
       <button onClick={onClose} aria-label="OMX 상세 닫기" style={{ border: 0, background: 'none', cursor: 'pointer', fontSize: 22 }}>×</button>
     </div>
-    <p style={{ color: online ? C.success : C.danger, fontWeight: 700 }}>{online ? '● 연결됨' : '● 연결 확인 필요'}</p>
+    <p style={{ color: queryStale ? C.warning : online ? C.success : C.danger, fontWeight: 700 }}>{queryStale ? '● 상태 조회 지연' : online ? '● 연결됨' : '● 연결 확인 필요'}</p>
     <div style={{ padding: 14, borderRadius: 8, background: C.subtle }}>
       <strong>{queryError ? '상태 조회 실패' : STATES[online ? device.state : 'OFFLINE'] ?? device.state}</strong>
       {device.detail && <p style={{ overflowWrap: 'anywhere', color: C.muted }}>{device.detail === 'RECOVERY_WAIT' ? '복구 대기 · 현장 상태 확인 필요' : device.detail}</p>}
@@ -62,7 +63,7 @@ export default function OmxPanel({ device, queryError, realMode, blocked, onClos
     {device.count_kind === 'motion_cycles' && <p style={{ color: C.warning, fontSize: 12 }}>동작 완료 횟수이며 실제 물건 전달 성공은 검증하지 않습니다.</p>}
     {device.message && <p style={{ color: C.muted, fontSize: 12, overflowWrap: 'anywhere' }}>{device.message}</p>}
     <h3 style={{ marginTop: 24, fontSize: 14 }}>서비스 관리</h3>
-    <button disabled={!device.restart_available || !realMode || blocked || working || busy} onClick={() => void restart()}
+    <button disabled={queryStale || !device.restart_available || !realMode || blocked || working || busy} onClick={() => void restart()}
       style={{ border: `1px solid ${C.line}`, borderRadius: 7, padding: '9px 14px', fontWeight: 700 }}>
       {busy ? '재시작 요청 중…' : 'OMX 서비스 재시작'}
     </button>

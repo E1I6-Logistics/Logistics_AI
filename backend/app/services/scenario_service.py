@@ -385,6 +385,15 @@ class ScenarioManager:
                 for spec in specs:
                     rid = spec["id"]
                     row = states.get(rid)
+                    if mode == 'real':
+                        from ..ros2.ros_gateway import ros_gateway
+                        with ros_gateway.navigation.lock:
+                            policy = getattr(ros_gateway.navigation, '_continuous', None)
+                            recovering = policy is not None and policy.waiting(rid)
+                        if recovering:
+                            rows.append(dict(robot_id=rid, status='RECOVERING',
+                                             current_node=row.get('current_node') if row else None, goal=spec['goal']))
+                            continue  # Keep the same timeout; no fake arrival or physical task replay.
                     if row is None or not row["connected"] or not row["fresh"]:
                         raise ValueError(f"{rid}: 연결 또는 최신 위치 확인 실패")
                     if row["status"] in ("PAUSED", "EMERGENCY_STOP", "OFFLINE"):

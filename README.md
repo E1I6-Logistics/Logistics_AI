@@ -282,3 +282,6 @@ WAF는 배송 Fleet·배차·경로 계획·조이스틱·충전 명령에 등�
 Waffle 장비의 셸·Zenoh 설정은 [shellscript의 Waffle 자동 환경 설정 안내](robots_ws/shellscript/README.md)를 사용합니다.
 호스트명 `waffle`에서 설치하면 모델 Waffle/LDS-03, 장비 ID `robot4`, 일반 Domain 11,
 Zenoh Domain 0을 선택합니다. Bridge는 WAF의 관측·보충 액션만 `/robot4`로 노출합니다.
+
+
+[연속 운용 브랜치: OMX 깜빡임 구분·재연결·주행 자동 복구](doc/continuous-run.md)

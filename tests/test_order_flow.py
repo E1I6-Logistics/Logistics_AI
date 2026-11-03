@@ -780,7 +780,11 @@ def test_real_mqtt_uses_same_workstation_selection_after_last_pickup(monkeypatch
 
 # 시뮬레이션이 모의 주행으로 충전소에 복귀하는지 검증한다.
 def test_simulation_uses_real_mock_navigation_and_returns_to_station():
-    mode_manager.set_mode("simulation")
+    mode_manager.set_mode("simulation", "algorithm")
+    order_manager._robot_dispatcher.discard()
+    order_manager._route_tasks.clear()
+    order_manager.recovering.clear()
+    workstation_manager._assignment_history.clear()
     mock_fms.reset()
     order_manager.orders.clear()
     order_manager.returning.clear()

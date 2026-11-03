@@ -195,8 +195,12 @@ class RecoveryTests(unittest.IsolatedAsyncioTestCase):
         with patch("backend.app.services.kev_mapf.kev_recovery.monotonic", return_value=now+2):
             await self.worker.run_once(self.store, self.coordinator, self.mode, now=now)
             self.assertTrue(await self.worker.run_once(self.store, self.coordinator, self.mode, now=now+2))
-        for tick in range(1, 201):
+        # Current simulation follows the configured real speed (0.09 m/s).
+        # Wait for terminal arrival within a bounded virtual time, not a 20s assumption.
+        for tick in range(1, 2001):
             self.store.advance_simulation(.1, now=now+2+tick*.1)
+            if all(r["goal_node"] is None for r in self.store._robots.values()):
+                break
         self.assertEqual(
             {rid: r["occupied_node"] for rid, r in self.store._robots.items()},
             {"robot1": "6", "robot2": "5", "robot3": "2"},

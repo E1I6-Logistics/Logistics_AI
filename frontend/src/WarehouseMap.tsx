@@ -1,3 +1,4 @@
+import { omxConnectionPresentation } from './omxObservation'
 import { useEffect, useRef, useState } from 'react'
 
 import {
@@ -283,7 +284,7 @@ export default function WarehouseMap({
         {!raw && (
           <g data-testid="omx-markers">
             {omxDevices.map(omx => {
-              const color = omx.connected ? '#2589F5' : '#9AA4B0'
+              const { color, label } = omxConnectionPresentation(omx)
 
               return (
                 <g
@@ -303,7 +304,7 @@ export default function WarehouseMap({
                   }}
                   transform={`translate(${omx.pixel_x} ${omx.pixel_y})`}
                 >
-                  <title>{`${omx.omx_id.toUpperCase()} · ${omx.connected ? omx.state : '연결 끊김'}`}</title>
+                  <title>{`${omx.omx_id.toUpperCase()} · ${label}`}</title>
                   {selectedOmx === omx.omx_id && <circle r={px(14)} fill="#2589F5" opacity={0.18} />}
                   <circle r={px(13)} fill="transparent" />
                   <circle

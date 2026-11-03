@@ -38,6 +38,8 @@ class MQTTManager:
         # MQTT Client
         if mqtt is not None:
             self.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION1)
+            self.client.reconnect_delay_set(min_delay=1, max_delay=5)
+            self.client.on_connect_fail = self._on_connect_fail
             self.client.on_connect = self._on_connect
             self.client.on_message = self._on_message
             self.client.on_disconnect = self._on_disconnect
@@ -62,7 +64,7 @@ class MQTTManager:
             flush=True,
         )
         try:
-            self.client.connect(self.broker_ip, self.broker_port, 60)
+            self.client.connect_async(self.broker_ip, self.broker_port, 60)
         except Exception as exc:
             print(
                 f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] [ERROR] [MQTT] "
@@ -102,6 +104,10 @@ class MQTTManager:
     # =========================================================
 
     # 연결 이벤트를 처리한다.
+    def _on_connect_fail(self, client, userdata):
+        self._invalidate_dock_connection(False)
+        print(f"[MQTT] 브로커 연결 대기 {self.broker_ip}:{self.broker_port} · 1~5초 간격으로 재연결", flush=True)
+
     def _on_connect(self, client, userdata, flags, rc):
         self._invalidate_dock_connection(rc == 0)
         if rc != 0:
