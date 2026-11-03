@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react'
 import { restartOmx, type OmxDeviceDto } from '../api/fmsApi'
 import { C } from '../constants/theme'
+import PalletReplenishment from './PalletReplenishment'
 
 const STATES: Record<string, string> = {
   IDLE: '주문 대기', READY: '준비 완료', WORKING: '작업 중', COMMAND_SENT: '접수 대기',
@@ -50,6 +51,7 @@ export default function OmxPanel({ device, queryError, realMode, blocked, onClos
         return <div key={item} style={{ border: `1px solid ${C.line}`, borderRadius: 8, marginBottom: 8, padding: 13 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between' }}><strong>{item} 팔레트</strong><strong style={{ color: colorFor(state) }}>{STOCK[state]}</strong></div>
           {state === 'UNKNOWN' && <p style={{ color: C.muted, fontSize: 12, marginBottom: 0 }}>{queryError ? 'FMS 상태 수신 대기' : row.reason}</p>}
+          <PalletReplenishment item={item} realMode={realMode} blocked={blocked || working} />
         </div>
       })}
       <p style={{ color: C.muted, fontSize: 12 }}>존재 여부만 표시합니다. 실제 개수는 계산하지 않습니다.</p>

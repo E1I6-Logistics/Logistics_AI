@@ -41,6 +41,7 @@ NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
 ROS_DISTRO="${ROS_DISTRO:-jazzy}"
 ROS_SETUP="${FMS_ROS_SETUP:-/opt/ros/$ROS_DISTRO/setup.bash}"
 ROS_WS_SETUP="${FMS_ROS_WS_SETUP:-$PROJECT_DIR/robots_ws/Logistics_AMR/install/setup.bash}"
+WAF_WS_SETUP="${FMS_WAF_WS_SETUP:-$PROJECT_DIR/robots_ws/Logistics_WAF/install/waffle_interfaces/share/waffle_interfaces/local_setup.bash}"
 # Keep the FMS ROS transport independent of the calling shell's ROS mode.
 # Use FMS_* variables when this stack needs an explicit override.
 ROS_DOMAIN_ID="${FMS_ROS_DOMAIN_ID:-15}"
@@ -148,6 +149,13 @@ load_ros_environment() {
     if [ -f "$ROS_WS_SETUP" ]; then
         # shellcheck disable=SC1090
         source "$ROS_WS_SETUP"
+    fi
+    # WAF 액션 타입만 추가한다. 중복 TurtleBot 패키지로 AMR 환경을 덮지 않는다.
+    if [ -f "$WAF_WS_SETUP" ]; then
+        source "$WAF_WS_SETUP"
+        log "WAF workspace sourced: $WAF_WS_SETUP"
+    else
+        log "WAF workspace not built: $WAF_WS_SETUP (재고 보충만 비활성)"
     fi
     set -u
 

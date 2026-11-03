@@ -16,6 +16,7 @@ from .routers.robots import router as robots_router
 from .routers.websocket import router as websocket_router
 from .routers.orders import router as orders_router
 from .routers.omx import router as omx_router
+from .routers.replenishment import router as replenishment_router
 from .routers.system import router as system_router
 from .routers.scenarios import router as scenarios_router
 from .routers.dispatch_settings import router as dispatch_settings_router
@@ -64,6 +65,12 @@ async def lifespan(app: FastAPI):
 
     executor = SingleThreadedExecutor()
     executor.add_node(ros_node)
+    # WAF는 별도 노드·상태로 추가하며 기존 AMR/OMX 실행기와 분리한다.
+    from .ros2.waf_client import create_waf_node
+    from .services.pallet_replenishment import replenishment
+    waf_node = create_waf_node(replenishment)
+    if waf_node is not None:
+        executor.add_node(waf_node)
 
     # RosGateway에 실제 ROS Node 연결
     ros_gateway.set_ros_node(ros_node)
@@ -107,7 +114,10 @@ async def lifespan(app: FastAPI):
             from .services.order_manager import order_manager
 
             order_manager._robot_dispatcher.close()
+            replenishment.close()
             executor.shutdown()
+            if waf_node is not None:
+                waf_node.destroy_node()
             ros_node.destroy_node()
 
             if rclpy.ok():
@@ -133,6 +143,7 @@ app.include_router(connections_router)
 app.include_router(websocket_router)
 app.include_router(orders_router)
 app.include_router(omx_router)
+app.include_router(replenishment_router)
 app.include_router(system_router)
 app.include_router(scenarios_router)
 app.include_router(dispatch_settings_router)

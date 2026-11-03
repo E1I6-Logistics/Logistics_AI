@@ -453,3 +453,31 @@ export function restartFmsWeb() {
     body: JSON.stringify({ confirm: true }), signal: AbortSignal.timeout(10000),
   })
 }
+
+
+export type ReplenishmentDto = {
+  can_cancel: boolean
+  available: boolean
+  busy: boolean
+  reason: string
+  destinations: Record<string, number>
+  job: null | {
+    request_id: string; item: string | null; destination?: number; state: string
+    stage?: string; message: string; cancel_requested?: boolean; started_at?: number; updated_at?: number
+  }
+}
+export function getReplenishment(signal?: AbortSignal) {
+  return request<ReplenishmentDto>('/api/replenishment', { signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(3000)]) : AbortSignal.timeout(3000) })
+}
+export function startReplenishment(item: string, requestId: string) {
+  return request<ReplenishmentDto>('/api/replenishment', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ item, request_id: requestId, confirm: true }), signal: AbortSignal.timeout(5000),
+  })
+}
+export function cancelReplenishment(requestId: string) {
+  return request<ReplenishmentDto>('/api/replenishment/cancel', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ request_id: requestId, confirm: true }), signal: AbortSignal.timeout(5000),
+  })
+}

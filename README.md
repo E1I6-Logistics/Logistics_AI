@@ -223,3 +223,38 @@ logirviz
 ```
 
 RViz의 `-d` 설정은 표시할 토픽을 지정합니다. 맵 YAML/PGM을 읽어 발행하는 서버는 `logirviz`가 함께 시작합니다.
+
+
+## WAF 수동 재고 보충
+
+기존 OMX 재고 카드의 A/B/C/D 아래 **재고 보충**을 누르면 별도 WAF 클라이언트가
+`/pallet_replace` (`waffle_interfaces/action/PalletReplace`)를 전송합니다.
+목적지는 A=1, B=2, C=3, D=4이며, 확인창 승인 후에만 전송합니다.
+진행 단계·결과·취소는 카드 안에 표시됩니다. 동시에 한 작업만 허용합니다.
+성공해도 재고 값을 임의로 바꾸지 않고 기존 OMX 관측 결과를 계속 표시합니다.
+
+PC에서 WAF 인터페이스를 빌드한 다음 FMS를 시작합니다. 이미 빌드했다면 생략합니다.
+
+```bash
+cd ~/AX_Logistics/robots_ws/Logistics_WAF
+source /opt/ros/jazzy/setup.bash
+colcon build --packages-select waffle_interfaces
+cd ~/AX_Logistics
+./start_fms.sh
+```
+
+`start_fms.sh`는 AMR 환경 뒤에 WAF의 `waffle_interfaces` 패키지 환경만 추가로 source합니다. 중복 TurtleBot 패키지는 source하지 않습니다.
+WAF가 없거나 인터페이스가 미준비이면 보충 기능만 연결 대기로 표시합니다.
+WAF 쪽에서는 기존 `/pallet_replace` 액션 서버를 실행하고 같은 ROS 도메인/Zenoh
+연결에서 발견되어야 합니다. FMS는 WAF 서버를 자동 실행하거나 이동 경로를 변경하지 않습니다.
+B/C/D 목적지 번호도 **첫 팔레트 인수 위치**로 전달합니다. 반납=2, 두 번째 인수=3,
+홈=4인 WAF 서버의 고정 후속 경로는 그대로입니다.
+
+작업 중 FMS가 재시작되거나 접수 응답이 지연되면 중복 실행 대신 상태 확인 대기로
+표시합니다. 작업 기록은 `logs/waf_replenishment.json`에 남깁니다. 취소 접수만으로
+종료했다고 표시하지 않습니다. 서버 재시작 전 작업은 WAF 실제 종료를 확인해야 합니다.
+기존 주문·AI 경로·AMR/OMX 제어 로직과 WAF 저장소는 변경하지 않습니다.
+
+현장에서 이전 WAF 작업의 종료를 확인했는데 FMS의 재시작 전 기록만 남아 있다면,
+FMS를 중지한 상태에서 `logs/waf_replenishment.json`을 별도 보관한 뒤 다시 시작합니다.
+이전 기록을 지워 작업을 자동 재실행하는 처리는 하지 않습니다.
