@@ -10,3 +10,7 @@
 	path = robots_ws/shellscript
 	url = https://github.com/E1I6-Logistics/shellscript.git
 	branch = main
+[submodule "robots_ws/Logistics_WAF"]
+	path = robots_ws/Logistics_WAF
+	url = https://github.com/E1I6-Logistics/Logistics_WAF.git
+	branch = main
