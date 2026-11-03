@@ -15,6 +15,7 @@ from tests.test_charging_docking import docking
 
 @pytest.fixture
 def policy(monkeypatch):
+    monkeypatch.setenv("FMS_DISPATCH_VOLTAGE_CHECK_ENABLED", "1")
     settings = DispatchSettings(11.2)
     monkeypatch.setattr(settings_api, "dispatch_settings", settings)
     monkeypatch.setattr(dispatch, "dispatch_settings", settings)
@@ -104,7 +105,7 @@ def test_voltage_off_keeps_other_real_dispatch_guards(client, docking, monkeypat
     elif blocker == "paused":
         robot.pause("station_exit_failed")
     elif blocker == "stale_pose":
-        robot.pose_received_at = docking.clock[0] - 3
+        robot.pose_received_at = docking.clock[0] - dispatch.REAL_POSE_TIMEOUT_S - 1
     assert dispatch.available_robots("real", busy) == []
 
 
@@ -119,7 +120,8 @@ def test_real_toggle_does_not_change_simulation_filter_or_telemetry(client, monk
         assert mock_data.mock_fms._snapshot(row, "simulation")["dispatch_battery_block_reason"] == "low_battery"
 
 
-def test_zero_environment_initializes_off_and_can_reenable_real_only():
+def test_zero_environment_initializes_off_and_can_reenable_real_only(monkeypatch):
+    monkeypatch.setenv("FMS_DISPATCH_VOLTAGE_CHECK_ENABLED", "1")
     settings = DispatchSettings(0)
     assert settings.snapshot()["battery_voltage_check_enabled"] is False
     assert settings.battery_block_reason(None, mode="real") is None
@@ -129,7 +131,14 @@ def test_zero_environment_initializes_off_and_can_reenable_real_only():
     assert settings.battery_block_reason(None, mode="simulation") is None
 
 
-def test_server_restart_uses_configured_startup_policy():
+def test_server_restart_uses_configured_startup_policy(monkeypatch):
+    monkeypatch.delenv("FMS_DISPATCH_VOLTAGE_CHECK_ENABLED", raising=False)
     settings = DispatchSettings(11.2)
-    settings.set_voltage_check(False)
+    assert settings.snapshot()["battery_voltage_check_enabled"] is False
+    assert settings.battery_block_reason(None, mode="real") is None
+    assert settings.battery_block_reason(None, mode="simulation") == "battery_unknown"
+    settings.set_voltage_check(True)
+    assert settings.battery_block_reason(None, mode="real") == "battery_unknown"
+    assert DispatchSettings(11.2).snapshot()["battery_voltage_check_enabled"] is False
+    monkeypatch.setenv("FMS_DISPATCH_VOLTAGE_CHECK_ENABLED", "1")
     assert DispatchSettings(11.2).snapshot()["battery_voltage_check_enabled"] is True

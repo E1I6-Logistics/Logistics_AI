@@ -16,6 +16,8 @@ from tests.test_dock_mqtt import message
 
 @pytest.fixture
 def docking(monkeypatch):
+    # 이 파일은 접촉 검증 ON 경로를 검사한다. 실제 서버 기본값과 분리한다.
+    monkeypatch.setattr(gateway_module.docking_settings, "_contact_verification_enabled", True)
     clock = [100.0]
     monkeypatch.setattr("backend.app.models.robot.monotonic", lambda: clock[0])
     monkeypatch.setattr(gateway_module, "monotonic", lambda: clock[0])

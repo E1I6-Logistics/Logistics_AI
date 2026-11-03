@@ -8,7 +8,7 @@ from threading import RLock
 class DockingSettings:
     def __init__(self):
         self._lock = RLock()
-        self._contact_verification_enabled = os.getenv("FMS_DOCK_CONTACT_CHECK_ENABLED", "1").strip().lower() not in {
+        self._contact_verification_enabled = os.getenv("FMS_DOCK_CONTACT_CHECK_ENABLED", "0").strip().lower() not in {
             "0", "false", "off", "no",
         }
 

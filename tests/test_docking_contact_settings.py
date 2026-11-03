@@ -163,3 +163,14 @@ def test_charging_recovery_does_not_start_station_exit_from_cached_on(client, do
     assert sent
     assert robot.navigation_type == NavigationType.CHARGING
     assert not docking.gateway._departing_docks
+
+
+def test_restart_defaults_off_but_manual_enable_still_checks_contact(monkeypatch):
+    monkeypatch.delenv("FMS_DOCK_CONTACT_CHECK_ENABLED", raising=False)
+    settings = DockingSettings()
+    assert settings.contact_verification_enabled is False
+    settings.set_contact_verification(True)
+    assert settings.contact_verification_enabled is True
+    assert DockingSettings().contact_verification_enabled is False
+    monkeypatch.setenv("FMS_DOCK_CONTACT_CHECK_ENABLED", "1")
+    assert DockingSettings().contact_verification_enabled is True

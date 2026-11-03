@@ -2,6 +2,7 @@
 
 import logging
 import math
+import os
 from threading import RLock
 
 from ..config import BATTERY_VOLTAGE_WINDOW_S, MIN_DISPATCH_BATTERY_VOLTAGE
@@ -11,9 +12,11 @@ class DispatchSettings:
     def __init__(self, minimum_voltage=MIN_DISPATCH_BATTERY_VOLTAGE):
         self._lock = RLock()
         self._configured_voltage = minimum_voltage
-        # 기존 환경변수 0은 시작 시 OFF로 유지하고, ON으로 바꾸면 기본 기준을 사용한다.
+        # 실제 검사는 기본 OFF. 전압 기준은 화면에서 ON으로 바꿀 때 사용한다.
         self._real_minimum_voltage = minimum_voltage if minimum_voltage > 0 else 11.2
-        self._real_voltage_check_enabled = minimum_voltage > 0
+        self._real_voltage_check_enabled = minimum_voltage > 0 and os.getenv(
+            "FMS_DISPATCH_VOLTAGE_CHECK_ENABLED", "0"
+        ).strip().lower() in {"1", "true", "on", "yes"}
 
     def snapshot(self):
         with self._lock:
