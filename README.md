@@ -277,3 +277,8 @@ WAF는 배송 Fleet·배차·경로 계획·조이스틱·충전 명령에 등�
 
 표시 데이터는 `/api/replenishment`의 `robot` 객체에 있으며 기존 `/api/robots`의
 일반 배송 로봇 목록과 분리됩니다. 오래된 배터리·위치와 연결 조회 실패를 정상 값으로 표시하지 않습니다.
+
+
+Waffle 장비의 셸·Zenoh 설정은 [shellscript의 Waffle 자동 환경 설정 안내](robots_ws/shellscript/README.md)를 사용합니다.
+호스트명 `waffle`에서 설치하면 모델 Waffle/LDS-03, 장비 ID `robot4`, 일반 Domain 11,
+Zenoh Domain 0을 선택합니다. Bridge는 WAF의 관측·보충 액션만 `/robot4`로 노출합니다.
