@@ -105,3 +105,13 @@ test('Zenoh HTTP 200의 조회 불가도 연결 정상으로 표시하지 않고
   next.devices[0].connected = false
   assert.equal(o.observationSnapshot().connections.devices[0].connected, true)
 })
+
+
+test('위치 미수신·null 좌표로 가짜 속도나 0,0 관측을 만들지 않는다', () => {
+  o.recordRobot('missing', {x:null,y:null,yaw:null,mode:'real'}, false)
+  assert.equal(o.observationSnapshot().robots.missing, undefined)
+  o.recordRobot('valid', {x:1,y:2,yaw:0,mode:'real'}, true)
+  assert.ok(o.observationSnapshot().robots.valid)
+  o.recordRobot('valid', {x:null,y:2,yaw:0,mode:'real'}, true)
+  assert.equal(o.observationSnapshot().robots.valid, undefined)
+})

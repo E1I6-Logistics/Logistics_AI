@@ -30,10 +30,14 @@ MAP_YAML_PATH = MAP_DIR / os.getenv("FMS_MAP_YAML", "logitle_map.yaml")
 # 사용할 이동 경로 파일. 별도 지정이 없으면 test.geojson을 쓴다.
 ROUTE_GRAPH_PATH = ROUTE_DIR / os.getenv("FMS_ROUTE_GRAPH", "test.geojson")
 
-# 서버 시작 모드(main/API 분기에서 사용). 시뮬레이션 제거 후에는 FMS_ROBOT_MODE=real로 실행한다.
-ROBOT_MODE = os.getenv("FMS_ROBOT_MODE", "simulation").strip().lower()
+# 서버 기본 시작은 실제 로봇 + AI. 환경변수로 명시적으로 전환할 수 있다.
+ROBOT_MODE = os.getenv("FMS_ROBOT_MODE", "real").strip().lower()
 if ROBOT_MODE not in {"real", "simulation"}:
     raise ValueError("FMS_ROBOT_MODE must be either 'real' or 'simulation'")
+
+OPERATION_MODE = os.getenv("FMS_OPERATION_MODE", "ai").strip().lower()
+if OPERATION_MODE not in {"algorithm", "ai"}:
+    raise ValueError("FMS_OPERATION_MODE must be either 'algorithm' or 'ai'")
 
 # ============================================================
 # CORS

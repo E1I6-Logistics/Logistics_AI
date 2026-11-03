@@ -75,7 +75,12 @@ class OMX:
         self.connected = True
         self.last_seen = time.time()
 
-        self.job_id = data.get("job_id")
+        incoming = data.get("job_id")
+        # A rejected SSH/manual order must not overwrite the running FMS job.
+        if (data.get("accepted") is False and self.job_id and incoming != self.job_id
+                and self.state in ("WORKING", "COMMAND_SENT")):
+            return
+        self.job_id = incoming
 
         if data.get("accepted", False):
             self.state = "WORKING"

@@ -280,9 +280,9 @@ export type RobotStateDto = {
   battery: number | null
   battery_voltage?: number | null
   dispatch_battery_block_reason?: 'battery_unknown' | 'low_battery' | null
-  x: number
-  y: number
-  yaw: number
+  x: number | null
+  y: number | null
+  yaw: number | null
   updated_at?: string | null
   mode: 'real' | 'simulation'
   route?: RobotRoute | null

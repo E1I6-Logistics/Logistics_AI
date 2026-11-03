@@ -58,9 +58,8 @@ export default function OmxPanel({ device, queryError, realMode, blocked, onClos
       <p style={{ color: C.muted, fontSize: 12 }}>존재 여부만 표시합니다. 실제 개수는 계산하지 않습니다.</p>
     </> : <p style={{ color: C.muted, fontSize: 13 }}>하차 담당 장비입니다. 팔레트 재고 검사는 사용하지 않습니다.</p>}
     <h3 style={{ marginTop: 24, fontSize: 14 }}>최근 작업</h3>
-    <p style={{ fontSize: 13 }}>{device.count_kind === 'motion_cycles' ? '동작 횟수' : '진행'}: {device.current_count} / {device.total_count}</p>
+    <p style={{ fontSize: 13 }}>{device.count_kind === 'motion_cycles' ? '동작 횟수' : '진행'}: {device.job_id ? `${device.current_count} / ${device.total_count}` : '작업 미수신'}</p>
     {device.job_id && <p style={{ color: C.muted, fontSize: 12, overflowWrap: 'anywhere' }}>작업: {device.job_id}</p>}
-    {device.count_kind === 'motion_cycles' && <p style={{ color: C.warning, fontSize: 12 }}>동작 완료 횟수이며 실제 물건 전달 성공은 검증하지 않습니다.</p>}
     {device.message && <p style={{ color: C.muted, fontSize: 12, overflowWrap: 'anywhere' }}>{device.message}</p>}
     <h3 style={{ marginTop: 24, fontSize: 14 }}>서비스 관리</h3>
     <button disabled={queryStale || !device.restart_available || !realMode || blocked || working || busy} onClick={() => void restart()}

@@ -234,3 +234,12 @@ def test_slow_valid_omx_observation_interval_is_supported(setup):
     data = payload(); data["valid_for_s"] = 750  # OMX 허용 최대 interval 300초 × 2.5
     manager._on_message(None, None, msg("stock", data))
     assert manager.get_omx("omx1").snapshot()["stock"]["fresh"]
+
+
+def test_rejected_manual_command_preserves_active_fms_job_and_count():
+    omx=OMX('omx3',Mock())
+    omx.job_id='fms-order';omx.state='WORKING';omx.current_count=1;omx.total_count=3
+    omx.update_ack({'job_id':'cli-manual','accepted':False})
+    assert (omx.job_id,omx.state,omx.current_count,omx.total_count)==('fms-order','WORKING',1,3)
+    omx.update_ack({'job_id':'fms-order','accepted':False})
+    assert omx.state=='REJECTED'

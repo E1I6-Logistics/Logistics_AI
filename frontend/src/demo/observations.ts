@@ -49,8 +49,11 @@ export function estimateMotion(previous: PoseSample | undefined, next: PoseSampl
   if (!Number.isFinite(speed) || !Number.isFinite(angle) || speed > 2) return { speed: null, angular: null }
   return { speed, angular: angle }
 }
-export function recordRobot(id: string, sample: Omit<PoseSample, 'at'>, hasPose: boolean) {
-  const next = { ...sample, at: Date.now() }
+export function recordRobot(id: string, sample: Omit<PoseSample, 'at' | 'x' | 'y' | 'yaw'> & { x: number | null; y: number | null; yaw: number | null }, hasPose: boolean) {
+  if (!hasPose || sample.x == null || sample.y == null || sample.yaw == null || ![sample.x, sample.y, sample.yaw].every(Number.isFinite)) {
+    poses.delete(id); delete robots[id]; return
+  }
+  const next: PoseSample = { ...sample, x: sample.x, y: sample.y, yaw: sample.yaw, at: Date.now() }
   const prev = poses.get(id)
   const period = prev ? next.at - prev.at : null
   robots[id] = { at: next.at, periodMs: period, sourceAt: sample.sourceAt,

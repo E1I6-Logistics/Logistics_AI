@@ -30,9 +30,9 @@ export type ManagedRobot = {
   occupiedNode: string | null
   occupiedEdge: string | null
   pauseReason?: string | null
-  x: number
-  y: number
-  yaw: number
+  x: number | null
+  y: number | null
+  yaw: number | null
   pixelX: number | null
   pixelY: number | null
   hasPose: boolean
@@ -59,8 +59,8 @@ export function useRobotFleet() {
   const [devices, setDevices] = useState<ConnectionDeviceDto[]>([])
   const [connectionSnapshotAvailable, setConnectionSnapshotAvailable] = useState(true)
   const [robotStates, setRobotStates] = useState<Record<string, RobotStateDto>>({})
-  const [mode, setModeState] = useState<RobotMode>('simulation')
-  const [operationMode, setOperationMode] = useState<OperationMode>('algorithm')
+  const [mode, setModeState] = useState<RobotMode>('real')
+  const [operationMode, setOperationMode] = useState<OperationMode>('ai')
   const [featureEngines, setFeatureEngines] = useState<Record<string, 'algorithm' | 'ai'>>({})
   const [modeSwitching, setModeSwitching] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -89,7 +89,7 @@ export function useRobotFleet() {
   const refreshMode = useCallback(async () => {
     const result = await getRobotMode()
     setModeState(result.mode)
-    setOperationMode(result.operation_mode ?? 'algorithm')
+    setOperationMode(result.operation_mode ?? 'ai')
     setFeatureEngines(result.feature_engines)
     return result.mode
   }, [])
@@ -207,7 +207,7 @@ export function useRobotFleet() {
     try {
       const result = await setRobotMode(nextMode, nextOperationMode)
       setModeState(result.mode)
-      setOperationMode(result.operation_mode ?? 'algorithm')
+      setOperationMode(result.operation_mode ?? 'ai')
       setFeatureEngines(result.feature_engines)
       setRobotStates({})
       await refreshRobots()
@@ -258,9 +258,9 @@ export function useRobotFleet() {
         occupiedNode: state?.occupied_node !== undefined ? state.occupied_node : state?.current_node ?? null,
         occupiedEdge: state?.occupied_edge ?? null,
         pauseReason: state?.pause_reason ?? null,
-        x: state?.x ?? 0,
-        y: state?.y ?? 0,
-        yaw: state?.yaw ?? 0,
+        x: state?.x ?? null,
+        y: state?.y ?? null,
+        yaw: state?.yaw ?? null,
         updatedAt: state?.updated_at ?? null,
         mode: state?.mode ?? mode,
         route: state?.route ?? null,

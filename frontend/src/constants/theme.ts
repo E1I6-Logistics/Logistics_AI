@@ -18,5 +18,5 @@ export const C = {
 export const E1 = '0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04)'      // card
 export const E2 = '0 3px 10px rgba(0,0,0,0.08), 0 1px 4px rgba(0,0,0,0.05)'     // elevated panel
 export const E3 = '0 8px 28px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.07)'     // dialog / dropdown
-export const FONT = "'Noto Sans KR','Malgun Gothic',Arial,sans-serif"
-export const MONO = "'JetBrains Mono','Courier New',monospace"
+export const FONT = 'var(--fms-font)'
+export const MONO = FONT

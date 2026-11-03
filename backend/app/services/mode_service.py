@@ -5,7 +5,7 @@ from __future__ import annotations
 from threading import RLock
 from typing import Literal
 
-from ..config import ROBOT_MODE
+from ..config import ROBOT_MODE, OPERATION_MODE
 
 RobotMode = Literal["real", "simulation"]
 OperationMode = Literal["algorithm", "ai"]
@@ -35,10 +35,12 @@ def feature_engines(operation_mode, *, mode=None):
 
 class RobotModeManager:
     # RobotModeManager의 초기 상태를 설정한다.
-    def __init__(self, initial_mode: str) -> None:
+    def __init__(self, initial_mode: str, initial_operation_mode: str = "algorithm") -> None:
         self._lock = RLock()
         self._mode: RobotMode = self._validate(initial_mode)
-        self._operation_mode: OperationMode = "algorithm"
+        if initial_operation_mode not in FEATURE_ENGINES:
+            raise ValueError("operation_mode must be either 'algorithm' or 'ai'")
+        self._operation_mode: OperationMode = initial_operation_mode
         self.generation = 0
 
     # 관련을 검증한다.
@@ -78,4 +80,4 @@ class RobotModeManager:
             return self._mode
 
 
-mode_manager = RobotModeManager(ROBOT_MODE)
+mode_manager = RobotModeManager(ROBOT_MODE, OPERATION_MODE)

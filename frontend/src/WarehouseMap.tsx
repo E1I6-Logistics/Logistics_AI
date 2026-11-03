@@ -117,6 +117,7 @@ export default function WarehouseMap({
   .filter(robot =>
     visibleRobotIds.includes(robot.id)
     && robot.hasPose
+    && robot.yaw != null
     && robot.pixelX != null
     && robot.pixelY != null
   )
@@ -125,7 +126,7 @@ export default function WarehouseMap({
     x: robot.pixelX as number,
     y: robot.pixelY as number,
     color: ROBOT_COLORS[robot.id],
-    heading: 90 - robot.yaw * 180 / Math.PI,
+    heading: 90 - (robot.yaw as number) * 180 / Math.PI,
     // 시뮬레이션 로봇은 가상 Fleet 자체가 연결 주체이므로 항상 활성 표시한다.
     stale: robot.mode === 'real' && !robot.connected,
   }))
@@ -358,7 +359,7 @@ export default function WarehouseMap({
           </g>
         )}
 
-        {/* 로봇 위치는 아직 demo. 다음 단계에서 /api/robots + /ws/dashboard로 교체 */}
+        {/* 실제 API·WebSocket에서 수신한 위치만 표시한다. */}
         {!raw && layers.robotId && (
           <g data-testid="robot-markers">
             {robotsForMap.map(robot => {

@@ -31,7 +31,7 @@ import { useCmdVel } from './hooks/useCmdVel'
 import { useRobotFleet } from './hooks/useRobotFleet'
 import { useRouteGraph } from './hooks/useRouteGraph'
 import { C, FONT, MONO } from './constants/theme'
-import { KEY_ROWS, ROBOT_DATA, type RobotId } from './constants/appData'
+import { KEY_ROWS, type RobotId } from './constants/appData'
 
 type CommandState = { tone: 'success' | 'danger' | 'info'; message: string } | null
 
@@ -352,17 +352,18 @@ export default function FmsControlApp() {
   const selectedOmxDevice = omxDevices.find(row => row.omx_id === selectedOmx)
 
   const nearestNode = useMemo(() => {
-    if (!selectedLiveRobot?.hasPose) return null
+    if (!selectedLiveRobot?.hasPose || selectedLiveRobot.x == null || selectedLiveRobot.y == null) return null
+    const { x, y } = selectedLiveRobot
     const candidates = Object.entries(nodes)
     if (candidates.length === 0) return null
     const [id, point] = candidates.reduce((nearest, candidate) => {
       const nearestDistance = Math.hypot(
-        nearest[1].worldX - selectedLiveRobot.x,
-        nearest[1].worldY - selectedLiveRobot.y,
+        nearest[1].worldX - x,
+        nearest[1].worldY - y,
       )
       const candidateDistance = Math.hypot(
-        candidate[1].worldX - selectedLiveRobot.x,
-        candidate[1].worldY - selectedLiveRobot.y,
+        candidate[1].worldX - x,
+        candidate[1].worldY - y,
       )
       return candidateDistance < nearestDistance ? candidate : nearest
     })
@@ -370,7 +371,7 @@ export default function FmsControlApp() {
       id,
       x: point.worldX,
       y: point.worldY,
-      distance: Math.hypot(point.worldX - selectedLiveRobot.x, point.worldY - selectedLiveRobot.y),
+      distance: Math.hypot(point.worldX - x, point.worldY - y),
     }
   }, [nodes, selectedLiveRobot])
 
@@ -701,7 +702,7 @@ export default function FmsControlApp() {
               borderRadius: 6,
               background: C.surface,
               cursor: 'pointer',
-              fontFamily: 'Pretendard, sans-serif',
+              fontFamily: FONT,
               fontSize: '13px',
               fontWeight: 500,
             }}
@@ -716,7 +717,7 @@ export default function FmsControlApp() {
             selectedRobot={selectedRobot}
             getStatus={id => {
               const robot = managedRobots.find(row => row.id === id)
-              return robot ? displayRobotStatus(robot, orders) : ROBOT_DATA[id].status
+              return robot ? displayRobotStatus(robot, orders) : '미수신'
             }}
             onSelect={selectRobot}
             wafVisible={robotMode === 'real' && !!waf.data?.robot?.seen}
@@ -968,12 +969,11 @@ function RobotPanel({ scenarioActive, robotId, orders, liveRobot, targetNode, dr
     )
   }
 
-  const fallback = ROBOT_DATA[robotId]
-  const battery = liveRobot?.battery ?? fallback.battery
+  const battery = liveRobot?.battery != null && Number.isFinite(liveRobot.battery) ? liveRobot.battery : null
   const connected = Boolean(liveRobot?.connected)
-  const status = !connected ? '연결 끊김' : liveRobot ? displayRobotStatus(liveRobot, orders) : fallback.status
+  const status = !connected ? '연결 끊김' : liveRobot ? displayRobotStatus(liveRobot, orders) : '미수신'
   const statusColor = !connected ? C.danger : /MOV|RUN|이동|작업/i.test(status) ? C.success : C.warning
-  const batteryColor = battery < 30 ? C.danger : battery < 50 ? C.warning : C.success
+  const batteryColor = battery == null ? C.muted : battery < 30 ? C.danger : battery < 50 ? C.warning : C.success
   const route = liveRobot?.route?.node_ids?.length ? liveRobot.route.node_ids.map(id => `N${id}`).join(' → ') : '—'
   const controlsEnabled = connected && !emergencyStopped && !scenarioActive && remoteStatus === 'ready'
   const activeOrder = orders.find(order => order.robot_id === liveRobot?.backendId && order.status === 'IN_PROGRESS')
@@ -987,7 +987,7 @@ function RobotPanel({ scenarioActive, robotId, orders, liveRobot, targetNode, dr
             <strong style={{ fontSize: 16 }}>{robotId}</strong>
             <span style={{ padding: '2px 7px', borderRadius: 5, background: `${statusColor}16`, color: statusColor, fontSize: 9, fontWeight: 800 }}>{status}</span>
           </div>
-          <span style={{ color: C.muted, font: `9px ${MONO}` }}>{fallback.serial}</span>
+          <span style={{ color: C.muted, font: `9px ${MONO}` }}>{liveRobot?.backendId ?? '식별자 미수신'}</span>
         </div>
       </div>
 
@@ -998,7 +998,7 @@ function RobotPanel({ scenarioActive, robotId, orders, liveRobot, targetNode, dr
         </div>}
         <SectionTitle>핵심 상태</SectionTitle>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-          <StatusCard label="배터리" value={`${Math.round(battery)}%`} color={batteryColor}>
+          <StatusCard label="배터리" value={battery == null ? '미수신' : `${Math.round(battery)}%`} color={batteryColor}>
             <div style={{ fontSize: 10, marginTop: 4 }}>
               {liveRobot?.batteryVoltage != null && Number.isFinite(liveRobot.batteryVoltage)
                 ? `${liveRobot.batteryVoltage.toFixed(2)} V` : '전압 미확인'}
@@ -1006,7 +1006,7 @@ function RobotPanel({ scenarioActive, robotId, orders, liveRobot, targetNode, dr
             {liveRobot?.dispatchBatteryBlockReason && <div style={{ color: C.danger, fontSize: 10 }}>
               배차 불가 · {liveRobot.dispatchBatteryBlockReason === 'low_battery' ? '전압 부족' : '최근 전압 기록 없음'}
             </div>}
-            <div style={{ height: 5, borderRadius: 5, overflow: 'hidden', background: '#E3E8EF', marginTop: 8 }}><div style={{ width: `${battery}%`, height: '100%', background: batteryColor }} /></div>
+            {battery != null && <div style={{ height: 5, borderRadius: 5, overflow: 'hidden', background: '#E3E8EF', marginTop: 8 }}><div style={{ width: `${Math.max(0, Math.min(100, battery))}%`, height: '100%', background: batteryColor }} /></div>}
           </StatusCard>
           <StatusCard label="통신 상태"
             value={liveRobot?.connectionState === 'UNKNOWN' ? '● 확인 중' : connected ? '● 정상' : '● 끊김'}
@@ -1027,14 +1027,6 @@ function RobotPanel({ scenarioActive, robotId, orders, liveRobot, targetNode, dr
             </strong>
           </div>
           <span style={{ padding: '3px 8px', borderRadius: 20, background: connected ? '#DDF4EA' : '#F1F3F6', color: connected ? '#167A55' : C.muted, fontSize: 9, fontWeight: 800 }}>AUTO</span>
-        </div>
-
-        <SectionTitle>작업 일정</SectionTitle>
-        <div style={{ border: `1px solid ${C.line}`, borderRadius: 9, padding: '2px 11px' }}>
-          <InfoRow label="작업 시작" value={fallback.startTime} />
-          <InfoRow label="최초 예상 완료" value={fallback.estOrig} />
-          <InfoRow label="현재 예상 완료" value={fallback.estCurr} />
-          <InfoRow label="예상 지연" value={fallback.delay} danger={fallback.delay !== '—' && fallback.delay !== '없음'} last />
         </div>
 
         <SectionTitle>계획 경로</SectionTitle>
