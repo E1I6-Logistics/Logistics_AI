@@ -469,6 +469,7 @@ export type ReplenishmentDto = {
   robot: WafRobotDto | null
   action_name: string
   can_cancel: boolean
+  can_clear?: boolean
   available: boolean
   busy: boolean
   reason: string
@@ -491,5 +492,13 @@ export function cancelReplenishment(requestId: string) {
   return request<ReplenishmentDto>('/api/replenishment/cancel', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ request_id: requestId, confirm: true }), signal: AbortSignal.timeout(5000),
+  })
+}
+
+export function clearStoppedReplenishment(requestId: string) {
+  return request<ReplenishmentDto>('/api/replenishment/clear-stopped', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ request_id: requestId, confirm: true, confirm_stopped: true }),
+    signal: AbortSignal.timeout(5000),
   })
 }

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { getReplenishment, startReplenishment, cancelReplenishment, type ReplenishmentDto } from '../api/fmsApi'
+import { getReplenishment, startReplenishment, cancelReplenishment, clearStoppedReplenishment, type ReplenishmentDto } from '../api/fmsApi'
 import { C } from '../constants/theme'
 import { replenishmentRequestId } from './palletReplenishmentId'
 
@@ -7,6 +7,7 @@ const STATES: Record<string, string> = {
   SENDING: '접수 확인 중', RUNNING: '보충 중', CANCELLING: '취소 처리 중',
   SUCCEEDED: '보충 동작 완료', FAILED: '보충 실패', REJECTED: '접수 거절',
   CANCELLED: '취소 완료', UNKNOWN: '실제 상태 확인 필요',
+  ENDED: '작업 종료 · 상세 결과 미수신',
 }
 const STAGES: Record<string, string> = {
   NAV_TO_PICK: '해당 팔레트로 이동', ALIGN: '정렬·삽입·들어올리기·후진',
@@ -42,14 +43,16 @@ export default function PalletReplenishment({ item, realMode, blocked }: {
   }, [])
   const job = data?.job
   const own = job?.item === item
-  const submit = async (cancel = false) => {
+  const submit = async (action: 'start' | 'cancel' | 'clear' = 'start') => {
     if (lock.current) return
-    const text = cancel ? '진행 중인 WAF 보충 작업을 취소할까요? 종료 결과를 확인할 때까지 기다립니다.'
+    const text = action === 'clear' ? 'WAF가 실제로 정지했고 이전 보충 작업도 종료됐는지 확인했나요? 이전 기록만 정리하며 로봇을 움직이거나 새 작업을 보내지 않습니다.'
+      : action === 'cancel' ? '진행 중인 WAF 보충 작업을 취소할까요? 종료 결과를 확인할 때까지 기다립니다.'
       : `${item} 팔레트 재고 보충을 시작할까요? WAF가 실제로 이동합니다. 목적지: ${data?.destinations[item]}`
     if (!window.confirm(text)) return
     lock.current = true; version.current += 1; setSending(true); setError(null)
     try {
-      const result = cancel && job ? await cancelReplenishment(job.request_id)
+      const result = action === 'clear' && job ? await clearStoppedReplenishment(job.request_id)
+        : action === 'cancel' && job ? await cancelReplenishment(job.request_id)
         : await startReplenishment(item, replenishmentRequestId())
       setData(result)
     } catch (exc) {
@@ -68,10 +71,13 @@ export default function PalletReplenishment({ item, realMode, blocked }: {
       <strong style={{ color: ['FAILED', 'REJECTED', 'UNKNOWN'].includes(job.state) ? C.danger : C.primary }}>{STATES[job.state] ?? job.state}</strong>
       {job.stage && <p>{STAGES[job.stage] ?? job.stage}</p>}
       {job.message && <p style={{ overflowWrap: 'anywhere', color: C.muted }}>{job.message}</p>}
-      {data?.busy && data.can_cancel && <button disabled={sending || job.cancel_requested} onClick={() => void submit(true)}>
+      {data?.busy && data.can_cancel && <button disabled={sending} onClick={() => void submit('cancel')}>
         {job.cancel_requested ? 'WAF 종료 확인 대기' : '보충 취소'}
       </button>}
-      {data?.busy && !data.can_cancel && <p style={{ color: C.warning }}>WAF에서 실제 작업 종료를 확인하세요. 자동 재전송하지 않습니다.</p>}
+      {data?.can_clear && <button disabled={sending} onClick={() => void submit('clear')}>이전 작업 종료 확인·기록 정리</button>}
+      {data?.busy && !data.can_cancel && !data.can_clear && <p style={{ color: C.warning }}>
+        {job.cancel_requested ? '취소 요청 접수 · WAF 실제 종료 확인 중' : 'WAF에서 실제 작업 종료를 확인하세요.'}
+      </p>}
       {job.state === 'SUCCEEDED' && <p style={{ color: C.muted }}>팔레트 유무는 기존 OMX 검사 결과로 다시 확인합니다.</p>}
     </div>}
     {error && <p role="alert" style={{ color: C.danger }}>{error}</p>}

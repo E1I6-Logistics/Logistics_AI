@@ -32,3 +32,19 @@ test('새 요청 접수 중에는 이전 요청의 마지막 stage를 현재 단
   assert.ok(!html.includes('ALIGN_2'))
   assert.ok(html.includes('아직 수신된 단계 없음'))
 })
+test('재시작 전 기록에는 종료 확인·기록 정리 버튼을 표시한다', () => {
+  const data = row();data.busy = true;data.can_clear = true
+  data.job = { request_id: 'old', state: 'UNKNOWN', item: 'A', message: '이전 작업 확인' }
+  const html = render(data)
+  assert.ok(html.includes('이전 작업 종료 확인·기록 정리'))
+  assert.ok(!html.includes('보충 액션 취소'))
+})
+test('취소 접수 대기와 응답 실패 후 취소 재시도를 구분한다', () => {
+  const data = row();data.busy = true
+  data.job = { request_id: 'x', state: 'CANCELLING', item: 'A', cancel_requested: true, message: '대기' }
+  assert.ok(render(data).includes('취소 요청 접수 · WAF 실제 종료 확인 중'))
+  data.can_cancel = true;data.job.cancel_requested = false;data.job.state = 'UNKNOWN'
+  const html = render(data)
+  assert.ok(html.includes('보충 액션 취소'))
+  assert.ok(!html.includes('WAF 실제 종료 확인 중'))
+})

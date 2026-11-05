@@ -7,8 +7,10 @@ LOG = logging.getLogger(__name__)
 
 
 class WafActionTransport:
-    def __init__(self, clients):
+    def __init__(self, clients, node=None):
         self.clients = clients
+        self.node = node
+        self.cancel_clients = {}
         self.action_name = clients[0][0]
         self.selected = clients[0][1]
 
@@ -19,8 +21,26 @@ class WafActionTransport:
                 return True
         return False
 
-    def send_goal_async(self, goal, **kwargs):
+    def send_goal_async(self, goal, goal_id=None, **kwargs):
+        if goal_id is not None:
+            from unique_identifier_msgs.msg import UUID
+            kwargs['goal_uuid'] = UUID(uuid=list(bytes.fromhex(goal_id)))
         return self.selected.send_goal_async(goal, **kwargs)
+
+    def cancel_goal_async(self, goal_id, action_name):
+        """FMS 재시작 후에도 기록된 UUID 하나만 취소한다. 전체 취소는 보내지 않는다."""
+        from action_msgs.srv import CancelGoal
+        if self.node is None or action_name not in dict(self.clients):
+            raise RuntimeError('기록된 WAF 액션의 취소 연결을 찾지 못했습니다')
+        client = self.cancel_clients.get(action_name)
+        if client is None:
+            client = self.node.create_client(CancelGoal, action_name + '/_action/cancel_goal')
+            self.cancel_clients[action_name] = client
+        if not client.service_is_ready():
+            raise RuntimeError('WAF 취소 서비스 연결 대기')
+        request = CancelGoal.Request()
+        request.goal_info.goal_id.uuid = list(bytes.fromhex(goal_id))
+        return client.call_async(request)
 
 
 def create_waf_node(service, telemetry=waf_telemetry):
@@ -43,7 +63,7 @@ def create_waf_node(service, telemetry=waf_telemetry):
             override = os.environ.get("FMS_WAF_ACTION_NAME", "").strip()
             names = [override] if override else ["/robot4/pallet_replace", "/pallet_replace"]
             clients = [(name, ActionClient(node, PalletReplace, name)) for name in names]
-            service.attach(WafActionTransport(clients), PalletReplace.Goal)
+            service.attach(WafActionTransport(clients, node), PalletReplace.Goal)
             status_qos = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL,
                                     reliability=ReliabilityPolicy.RELIABLE)
             for name in names:

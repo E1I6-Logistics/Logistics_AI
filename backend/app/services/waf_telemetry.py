@@ -22,6 +22,7 @@ class WafTelemetry:
         self.pose = None
         self.pose_at = None
         self.actions = {}
+        self.terminal_goals = {}
         self.feedback = None
 
     def sync_connections(self, devices):
@@ -68,9 +69,32 @@ class WafTelemetry:
     def observe_action_status(self, msg, source):
         with self.lock:
             # StatusArray는 변경 때 발행된다. 가동 중 상태를 짧은 시간만으로 지우지 않는다.
-            statuses = [int(row.status) for row in msg.status_list]
-            self.actions[source] = dict(active=any(s in (1, 2, 3) for s in statuses),
+            goals, unidentified_active = {}, False
+            for row in msg.status_list:
+                status = int(row.status)
+                try:
+                    goal_id = bytes(row.goal_info.goal_id.uuid).hex()
+                except (AttributeError, TypeError, ValueError):
+                    goal_id = None
+                if goal_id:
+                    goals[goal_id] = status
+                    if status in (4, 5, 6):
+                        self.complete_goal(goal_id, status)
+                elif status in (1, 2, 3):
+                    unidentified_active = True
+            self.actions[source] = dict(goals=goals, unidentified_active=unidentified_active,
                                         received_at=self.clock())
+
+    def complete_goal(self, goal_id, status):
+        """Result/Status로 종료가 확인된 동일 UUID의 늦은 EXECUTING 표시는 무시한다."""
+        with self.lock:
+            self.terminal_goals[goal_id] = int(status)
+            if len(self.terminal_goals) > 256:
+                del self.terminal_goals[next(iter(self.terminal_goals))]
+
+    def goal_status(self, goal_id):
+        with self.lock:
+            return self.terminal_goals.get(goal_id)
 
     def observe_feedback(self, msg, source):
         with self.lock:
@@ -78,7 +102,9 @@ class WafTelemetry:
 
     def external_active(self):
         with self.lock:
-            return any(row['active'] for row in self.actions.values())
+            return any(row['unidentified_active'] or any(
+                status in (1, 2, 3) and goal_id not in self.terminal_goals
+                for goal_id, status in row['goals'].items()) for row in self.actions.values())
 
     def snapshot(self):
         with self.lock:

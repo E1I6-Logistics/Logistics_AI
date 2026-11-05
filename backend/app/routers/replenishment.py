@@ -22,6 +22,10 @@ class CancelRequest(BaseModel):
     confirm: StrictBool
 
 
+class ClearStoppedRequest(CancelRequest):
+    confirm_stopped: StrictBool
+
+
 @router.get("")
 def status():
     return replenishment.snapshot()
@@ -49,5 +53,16 @@ def cancel(request: CancelRequest):
     # 작업 중 UI 모드가 바뀌었어도 취소 요청은 허용한다.
     try:
         return replenishment.cancel(str(request.request_id))
+    except ReplenishmentError as exc:
+        raise HTTPException(exc.status, exc.message) from exc
+
+
+@router.post("/clear-stopped")
+def clear_stopped(request: ClearStoppedRequest):
+    require_confirmation(request.confirm)
+    if not request.confirm_stopped:
+        raise HTTPException(400, "WAF가 정지하고 이전 작업이 종료됐는지 현장에서 확인하세요")
+    try:
+        return replenishment.clear_stopped(str(request.request_id))
     except ReplenishmentError as exc:
         raise HTTPException(exc.status, exc.message) from exc

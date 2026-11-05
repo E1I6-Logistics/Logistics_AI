@@ -1,12 +1,12 @@
 import { useState } from 'react'
-import { cancelReplenishment, type ReplenishmentDto } from '../api/fmsApi'
+import { cancelReplenishment, clearStoppedReplenishment, type ReplenishmentDto } from '../api/fmsApi'
 import { C } from '../constants/theme'
 
 const ACTIVITY: Record<string, string> = {
   SENDING: '액션 접수 확인 중', RUNNING: '재고 보충 가동 중', CANCELLING: '취소 처리 중',
   READY: '액션 서버 대기 가능', UNKNOWN: '가동 상태 확인 필요',
 }
-const JOB: Record<string, string> = { SUCCEEDED: '보충 동작 완료', FAILED: '실패', CANCELLED: '취소 완료', REJECTED: '접수 거절' }
+const JOB: Record<string, string> = { SUCCEEDED: '보충 동작 완료', FAILED: '실패', CANCELLED: '취소 완료', REJECTED: '접수 거절', ENDED: '작업 종료 · 상세 결과 미수신' }
 const at = (value?: number | null) => value == null ? '미수신' : new Date(value * 1000).toLocaleTimeString('ko-KR')
 
 export default function WafPanel({ data, error, onClose }: {
@@ -17,10 +17,15 @@ export default function WafPanel({ data, error, onClose }: {
   const feedback = robot?.feedback
   const [notice, setNotice] = useState<string | null>(null)
   const [cancelling, setCancelling] = useState(false)
-  const cancel = async () => {
-    if (!job || cancelling || !window.confirm('WAF 재고 보충 액션을 취소할까요? 실제 종료 결과까지 기다립니다.')) return
+  const cancel = async (clear = false) => {
+    const prompt = clear ? 'WAF가 실제로 정지했고 이전 보충 작업도 종료됐는지 확인했나요? 이전 기록만 정리하며 로봇을 움직이거나 새 작업을 보내지 않습니다.'
+      : 'WAF 재고 보충 액션을 취소할까요? 실제 종료 결과까지 기다립니다.'
+    if (!job || cancelling || !window.confirm(prompt)) return
     setCancelling(true)
-    try { await cancelReplenishment(job.request_id); setNotice('취소 요청 전송 · 종료 결과 확인 중') }
+    try {
+      const result = clear ? await clearStoppedReplenishment(job.request_id) : await cancelReplenishment(job.request_id)
+      setNotice(result.job?.message || '취소 요청 전송 · 종료 결과 확인 중')
+    }
     catch (e) { setNotice(e instanceof Error ? e.message : '취소 결과 확인 실패') }
     finally { setCancelling(false) }
   }
@@ -54,9 +59,11 @@ export default function WafPanel({ data, error, onClose }: {
       <p>{JOB[job.state] ?? ACTIVITY[job.state] ?? job.state}</p>
       <p style={{ overflowWrap: 'anywhere' }}>{job.message}</p>
     </>}
-    {data?.busy && data.can_cancel && <button disabled={cancelling || job?.cancel_requested} onClick={() => void cancel()}>
+    {data?.busy && data.can_cancel && <button disabled={cancelling} onClick={() => void cancel()}>
       {cancelling || job?.cancel_requested ? '액션 종료 대기' : '보충 액션 취소'}
     </button>}
+    {data?.busy && job?.cancel_requested && !data.can_cancel && <p role="status">취소 요청 접수 · WAF 실제 종료 확인 중</p>}
+    {data?.can_clear && <button disabled={cancelling} onClick={() => void cancel(true)}>이전 작업 종료 확인·기록 정리</button>}
     {notice && <p role="status">{notice}</p>}
     <h3>수신 위치</h3>
     <p>{robot?.pose ? `x=${robot.pose.x.toFixed(2)}, y=${robot.pose.y.toFixed(2)}, 방향=${(robot.pose.yaw * 180 / Math.PI).toFixed(0)}°` : '최신 위치 미수신'}</p>
