@@ -125,11 +125,11 @@ if not math.isfinite(BATTERY_VOLTAGE_WINDOW_S) or BATTERY_VOLTAGE_WINDOW_S <= 0:
 # 실제 로봇이 움직일 것으로 예상하는 속도(m/s). 예약 시간을 계산할 때 쓴다.
 # 기본값은 0.10이며 Nav2 주행 속도를 직접 변경하지 않는다.
 # 실측 평균속도보다 낮추면 예약이 길어지고, 높이면 예약 충돌 위험이 커진다.
-REAL_NAVIGATION_SPEED_MPS = float(os.getenv("FMS_REAL_NAVIGATION_SPEED_MPS", "0.09"))
+REAL_NAVIGATION_SPEED_MPS = float(os.getenv("FMS_REAL_NAVIGATION_SPEED_MPS", "0.15"))
 
 # 지점과 통로의 예약 시간 앞뒤에 더하는 여유 시간(초).
 # 시간 오차가 크면 늘리되 다른 로봇의 대기 시간이 길어진다.
-REAL_RESERVATION_MARGIN_S = float(os.getenv("FMS_REAL_RESERVATION_MARGIN_S", "1.5"))
+REAL_RESERVATION_MARGIN_S = float(os.getenv("FMS_REAL_RESERVATION_MARGIN_S", "1.0"))
 
 # 로봇이 지난 지점이나 통로의 예약을 풀기 전에 확인하는 최소 거리(m).
 # 로봇 반경(현재 burger.yaml의 0.1m)에 위치 오차 여유 0.1m를 더한 기본값이다.
