@@ -1,294 +1,218 @@
-# Logistics FMS
+# Logistics_AI
 
-물류 로봇의 위치·경로·주문을 한 화면에서 관리하는 관제 시스템입니다. FastAPI 백엔드, React/Vite 대시보드, ROS 2 Jazzy, Nav2, Zenoh, MQTT, 시뮬레이션과 AI 경로 선택 기능을 사용합니다.
+**LOGIFLOW · 주문부터 운반·상하차·재고 보충까지 연결하는 AI 기반 물류 관제 시스템**
 
-## 현재 기능
+여러 로봇의 독립 기능을 하나의 물류 작업으로 이어주는 FMS 저장소다. 웹에서 주문을 등록하고, AMR의 이동과 OMX의 상하차 결과를 받아 다음 작업을 연결한다. KEV 기반 AI 판단과 알고리즘 방식, 실제 장비와 시뮬레이션을 같은 관제 화면에서 선택한다.
 
-- 지도에 로봇 위치, 방향, 경로, 점유·예약 상태를 표시합니다.
-- 상단에서 **시뮬 · 알고리즘 / 시뮬 · AI / 실제 · 알고리즘 / 실제 · AI**를 선택합니다. AI 모드에서는 현재 경로 선택에 AI가 적용되고 배차·작업대 선택과 교통 제어는 알고리즘을 사용합니다.
-- 관제 화면에서 A/B/C/D 품목을 합계 1~5개로 주문합니다. 주문은 대기열에서 가용 로봇에 배차되며 픽업대 N5(A/B), N6(C/D)를 거쳐 작업대와 로봇 스테이션으로 이동합니다.
-- 하단 주문 패널에서 진행 단계, 로봇별 주문 품목, 픽업대·작업대 상태와 실패 사유를 확인합니다. 목록은 5건 높이로 스크롤하며 패널 높이를 드래그하거나 접을 수 있습니다.
-- 하단 목록에서 주문을 선택해 수동으로 취소할 수 있습니다. 배정된 로봇은 적재 상태와 관계없이 기존 경로 예약을 이용해 담당 스테이션으로 복귀합니다.
-- 지도 목적지 이동, 실제 로봇 원격 제어, 긴급 정지·해제를 지원합니다. 실제 로봇을 연결할 때는 ROS 2 액션 서버와 Zenoh 네트워크가 준비되어야 합니다.
-- 실패한 시뮬레이션 주문은 실패 사유와 복귀 상태를 표시하고, 복귀한 뒤 수동으로 재시도할 수 있습니다. 실제 주문은 현장 적재물과 OMX 결과를 확인한 뒤 다시 등록해야 합니다.
-- AI 경로는 Ollama, Laya, Kev 등의 설정된 모델을 사용할 수 있습니다. 모델 서버와 GPU 준비 여부는 선택한 모델에 따라 다릅니다.
+현재 프로젝트에서 사용하는 관제 코드는 **이 `Logistics_AI` 저장소**다. 별도 `Logistics_FMS` 저장소를 합치는 정리는 수행하지 않았다.
 
-## 데모 탭
+[개요](#1-프로젝트-개요) · [기능](#2-주요-기능) · [연결](#3-시스템-연결) · [환경](#4-실행-환경) · [구조](#5-저장소-구조) · [설치](#6-설치-및-환경-설정) · [사용](#7-사용-방법) · [운영](#8-설정과-운영-시-참고) · [점검](#9-확인-및-점검) · [문서](#10-관련-문서와-저장소) · [브랜치](#11-브랜치와-문서-기준)
 
-왼쪽 **데모**에서 주문 전체 흐름, 기존 3대 교통 시험, 선택 AMR 이동, OMX 상태·팔레트, 마커 노드 이동·정렬, 충전 도킹을 확인합니다. 실행 중 취소와 탭 이동을 지원합니다. 통신·추정 속도·실행 기록은 별도 하위 탭에 표시합니다.
+## 1. 프로젝트 개요
 
-백엔드를 변경하지 않고 기존 API만 사용합니다. OMX 단독 작업 전송과 ArUco 정렬만 재실행은 현재 API가 없어 제한 이유를 표시합니다. [항목별 실행·취소 방법과 검증 범위](doc/demo-console.md)를 먼저 확인하세요.
+물류 흐름은 개별 로봇이 움직이는 것만으로 완성되지 않는다. 주문 배정, 작업 위치 도착, 상하차 완료, 다음 목적지 이동이 서로 맞아야 한다. 이 저장소는 장비 상태와 실제 응답을 모아 그 흐름을 관리한다.
 
-## 폴더 구조
+| 구분 | 담당 범위 |
+|---|---|
+| 웹 관제 | 지도·주문·장비 상태·수동 제어·데모 화면 |
+| 백엔드 | 주문 단계, 배차, 경로·점유·예약, 명령과 결과 처리 |
+| AI 연동 | KEV 경로 선택·배차·다중 로봇 교통 판단 |
+| 장비 연동 | AMR 3대, OMX 4대, WAF 재고 보충 로봇 |
+
+일반 주문은 **주문 등록 → AMR 배정 → 픽업대 이동 → OMX 상차 → 작업대 이동 → OMX 하차 → 스테이션 복귀** 순서로 진행한다. 재고 보충은 품목별 버튼에서 별도 WAF 액션으로 요청한다.
+
+## 2. 주요 기능
+
+- **주문 관리:** A/B/C/D 주문 등록, 대기열·진행 단계·결과 표시, 취소와 복귀 요청.
+- **로봇 관제:** AMR 위치·방향·경로·배터리·연결 상태와 개별 로봇 상세 패널.
+- **AI·알고리즘 모드:** 실제/시뮬레이션과 AI/알고리즘 선택. 기본 시작은 실제·AI이며 KEV 기본 모델은 `kev-0.8b`다.
+- **다중 로봇 흐름:** 그래프 경로, 점유·예약, KEV MAPF 및 교통 복구 연동.
+- **OMX 연동:** MQTT 접수·진행·결과, 로봇팔 상태, A/B/C/D 팔레트의 있음·비었음·확인 불가 표시.
+- **WAF 수동 보충:** A=1, B=2, C=3, D=4 목적지로 액션 전송, 단계 피드백·취소·재요청 처리.
+- **운영 화면:** 데모 하위 탭, API별 통신 관측, Zenoh·MQTT 상태, 장비 서비스 관리와 FMS 웹 재시작.
+- **로컬 지도 보기:** 로봇의 지도 발행 없이 PC의 YAML/PGM으로 RViz 실행.
+
+데모 화면도 기존 API를 호출한다. 실행 가능한 항목과 조회만 가능한 항목을 구분하며, 탭 이동 자체는 진행 중인 작업을 취소하지 않는다.
+
+## 3. 시스템 연결
+
+```mermaid
+flowchart LR
+    Web["웹 관제 · 주문 · 데모"] <--> FMS["Logistics_AI · FMS"]
+    FMS <--> KEV["KEV 모델 서버"]
+    FMS <--> Z["Zenoh Router / Bridge"]
+    Z <--> AMR["robot1~3 · AMR"]
+    Z <--> AX["robot4 · AX Jetson"]
+    AX <--> WAF["Waffle Pi · DDS Domain 11"]
+    FMS <--> M["MQTT Broker"]
+    M <--> OMX["OMX1~4 · 상하차 / 팔레트 관측"]
+    M <--> Dock["도킹 접촉 센서"]
+```
+
+| 연결 | 인터페이스 |
+|---|---|
+| 웹 ↔ 백엔드 | HTTP API, WebSocket |
+| FMS ↔ AMR | Zenoh를 통한 `/robot1`~`/robot3` ROS 토픽·액션 |
+| FMS ↔ OMX | `omxN/command`, `ack`, `progress`, `result`, `status`, OMX1·2의 `stock` |
+| FMS ↔ WAF | `/robot4/pallet_replace` 액션, 배터리·위치·단계 피드백 |
+| Waffle ↔ AX Jetson | CycloneDDS, Domain 11, SUBNET. Pi에서 Zenoh를 실행하지 않는다. |
+
+WAF는 일반 배송 로봇의 경로 생성 대상으로 편입하지 않는다. FMS는 보충 액션을 보내고 상태를 받으며, WAF 자체의 Nav2·정렬·리프트 시퀀스가 실제 작업을 수행한다.
+
+## 4. 실행 환경
+
+| 항목 | 구성 |
+|---|---|
+| 메인 PC | Ubuntu 24.04, ROS 2 Jazzy |
+| 백엔드 | Python, FastAPI, Pydantic, paho-mqtt |
+| 프런트엔드 | React 19, TypeScript, Vite |
+| AI 서버 | KEV 별도 소스·모델, 선택 모델에 맞는 GPU·메모리 환경 |
+| 통신 | CycloneDDS, Zenoh 1.9.0, Mosquitto MQTT |
+| 실행 관리 | 호스트의 백엔드·프런트엔드·Bridge·KEV, Docker Compose의 Router·Broker |
+| FMS ROS 기본값 | Domain 15 / CycloneDDS / LOCALHOST |
+
+PC의 IP, 장비별 시리얼·센서 보정, AI·ACT 가중치는 각 장비 환경에 맞춰 준비한다. 서브모듈을 받는 것만으로 모델이나 현장 설정까지 설치되지는 않는다.
+
+## 5. 저장소 구조
 
 ```text
-backend/
-  app/                 FastAPI, 주문·배차·교통·ROS 2 서비스
-  simulation/          시뮬레이션 실행기와 AI 경로 평가 도구
-frontend/              React 관제 화면
-maps/                  지도 파일
-routes/                GeoJSON 경로 그래프
-robots_ws/             Logistics_AMR ROS 2 작업공간 (Git 제외)
-scripts/
-  setup.sh             메인/로봇 PC 일괄 설치 및 검증
-  verify_env.sh        역할별 환경 검증
-  main/                메인 PC Zenoh 패키지와 셸 설정
-  robot/               로봇 PC Zenoh 패키지와 셸 설정
-tests/                 단위 테스트, 시나리오, 수동 MQTT 점검 도구
-infra/                 Zenoh Router·MQTT Docker Compose 예시
-doc/                   상세 기술 문서
-.env.example           공통 환경변수 양식
-.env                   로컬 설정과 비밀키 (Git 제외)
-start_fms.sh / stop_fms.sh
+Logistics_AI/                    # 현장 폴더명 예: ~/AX_Logistics
+├── backend/app/                 # API, 주문·AI·교통·ROS/MQTT 연동
+├── backend/simulation/          # 시뮬레이션·모델 비교 도구
+├── frontend/                    # 웹 관제·주문·데모 화면
+├── robots_ws/
+│   ├── Logistics_AMR/           # AMR 서브모듈
+│   ├── Logistics_WAF/           # WAF 서브모듈
+│   └── shellscript/             # 환경·실행 명령 서브모듈
+├── omx_ws/Logistics_OMX/         # OMX 서브모듈
+├── maps/ · routes/              # 지도·경로 그래프
+├── infra/                       # Zenoh Router·MQTT Broker 구성
+├── scripts/                     # 설치·SSH·RViz 실행 보조
+├── tests/                       # API·주문·연동 회귀 검증
+├── doc/ · docs/                 # 설계·운영·검증 기록
+├── .env.example                 # 로컬 설정 양식
+└── start_fms.sh · stop_fms.sh    # FMS 시작·종료
 ```
 
-시뮬레이션 코드는 `backend/simulation/`에 있습니다. 백엔드 주문·배차 로직은 `backend/app/`에 있고 시뮬레이션에서도 같은 주문 흐름을 사용합니다.
+## 6. 설치 및 환경 설정
 
-## 설치
-
-Ubuntu 24.04(x86_64 또는 aarch64/Jetson), 인터넷 연결과 `sudo` 권한이 필요합니다. 설치는 시스템 APT 패키지와 사용자 Python/Node 환경을 변경합니다. **메인 PC와 로봇 PC에서 각각 한 번씩** 아래 명령을 실행합니다.
+### 새 PC에서 받기
 
 ```bash
-# 메인 PC: ROS 2, Docker, Node, Python, Zenoh, AI 의존성, Kev, ROS 작업공간, 프런트엔드
-cd /path/to/AX_Logistics
+git clone --branch dev --recurse-submodules \
+  https://github.com/E1I6-Logistics/Logistics_AI.git ~/AX_Logistics
+cd ~/AX_Logistics
+git submodule status
+```
+
+서브모듈은 부모 저장소가 기록한 **정확한 커밋**으로 받는다. 현재 검토 기준은 네 서브모듈 모두 `dev`이며, 재현할 때는 `git submodule update --init --recursive`를 사용한다. `--remote`는 고정된 조합 대신 원격의 다음 변경을 가져오는 명령이다.
+
+### 설치와 인터페이스 준비
+
+다음은 새 메인 PC의 설치 순서다. 설치기는 시스템 패키지·Python·Node·ROS 작업공간을 준비한다.
+
+```bash
+cd ~/AX_Logistics
+# 현재 설치기는 AMR 작업공간의 dev 브랜치를 확인한다.
+git -C robots_ws/Logistics_AMR switch dev
 bash scripts/setup.sh main
-
-# 각 로봇 PC: ROS 2와 로봇 측 Zenoh 패키지
-cd /path/to/AX_Logistics
-bash scripts/setup.sh robot
+source ~/.bashrc
 ```
 
-인수 없이 `bash scripts/setup.sh`를 실행하면 `main` 역할입니다. 스크립트는 기존 설치를 재사용하고 마지막에 `scripts/verify_env.sh`를 자동 실행합니다. 메인 PC에서는 다음 항목도 자동 준비합니다.
-
-- `~/venv/robot` 가상환경에 `backend/requirements.txt`, `backend/simulation/requirements.txt`, Kev 서버 의존성 설치
-- `robots_ws/Logistics_AMR`가 없으면 `dev` 브랜치를 clone하고, 기존 작업공간도 `dev` 브랜치인지 확인한 뒤 ROS 의존성 설치와 `colcon build --symlink-install` 실행
-- `frontend/`의 npm 의존성 설치
-- 루트 `.env`와 `infra/docker-compose.yml`이 없을 때만 예시 파일에서 생성
-- `~/.axbashrc` 또는 `~/.axrobotbashrc`를 생성해 `~/.bashrc`에서 불러오기
-
-`start_fms.sh`는 Kev 소스를 기본적으로 `../kev`에서 찾습니다. 설치 스크립트도 같은 위치에 없으면 clone합니다. 위치를 바꾸려면 `FMS_KEV_DIR`를 지정합니다. Kev를 사용하지 않을 환경에서는 설치와 실행 모두 `FMS_KEV_ENABLED=0`으로 설정합니다. Kev 모델 가중치는 설치 중 내려받지 않고 첫 서버 실행 시 선택한 모델에 맞춰 준비됩니다.
-메인 PC의 `~/.axbashrc`에는 Kev 경로 선택 설정이 들어갑니다. 이미 설치한 PC는 `bash scripts/setup.sh main`을 다시 실행하거나 해당 파일에 `scripts/main/bashrc_main.conf`의 Kev 설정을 반영해야 합니다.
-
-설치 후 새 터미널을 열어 셸 설정을 적용합니다. Docker 그룹에 처음 추가된 경우에는 로그아웃 후 다시 로그인합니다. 필요하면 역할별 점검을 다시 실행합니다.
+WAF 보충 기능을 사용하려면 메인 PC에도 액션 메시지 타입을 빌드한다. 로봇 구동부나 비전 서버를 FMS PC에서 함께 시작하는 절차는 아니다.
 
 ```bash
-bash scripts/verify_env.sh main
-bash scripts/verify_env.sh robot
-```
-
-로봇의 실제 주행에는 해당 장비의 TurtleBot 펌웨어·센서·Nav2 설정도 필요합니다. 로봇별 하드웨어 설정은 [ROS 2/Zenoh 안내](doc/ros2-zenoh-guide.md)를 확인합니다.
-
-## 환경 설정
-
-루트 `.env.example`은 공유용 양식이고 `.env`가 실제 로컬 설정 파일입니다. `.env`는 Git에서 제외됩니다. `start_fms.sh`와 Python 백엔드·평가 도구가 이 파일을 읽으며 이미 셸에 export된 환경변수가 우선합니다. API 키는 `.env`에만 입력합니다.
-
-| 변수 | 용도 |
-| --- | --- |
-| `FMS_ROBOT_MODE` | 서버 시작 운용 모드: `simulation` 또는 `real` |
-| `FMS_MAP_YAML`, `FMS_ROUTE_GRAPH` | 사용할 지도와 경로 그래프 |
-| `LLM_PROVIDER`, `OLLAMA_MODEL`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` | LLM 경로 기능 |
-| `ROUTE_SELECTOR`, `LAYA_*`, `KEV_*` | AI 경로 선택기와 모델 서버 |
-| `FMS_KEV_ENABLED`, `FMS_KEV_DIR`, `FMS_KEV_RUN` | Kev 자동 실행 여부·소스 위치·모델 |
-| `FMS_BACKEND_PORT`, `FMS_FRONTEND_PORT`, `FMS_KEV_PORT` | 서비스 포트 |
-| `FMS_VENV_DIR`, `FMS_ROS_WS_SETUP` | Python 가상환경과 ROS 작업공간 setup 경로 |
-
-AI 모드에서 선택할 모델은 백엔드 설정에 활성화되어 있어야 합니다. Ollama 모델을 사용한다면 Ollama 서버와 모델을 별도로 준비해야 합니다. Laya와 Kev 로컬 실행에는 해당 모델에 맞는 GPU·메모리가 필요할 수 있습니다.
-
-실제·시뮬레이션의 주문·수동 AI 목적지 이동은 출발 전에 **PBS를 벤치마킹한 KEV MAPF**를 거칩니다. 코드가 충돌 구역과 안전 WAIT 위치를 선택하고, KEV가 우선순위 Score·WAIT/REROUTE/HOLD·우회 경로를 판단하며 FMS가 예약·점유를 검사합니다. `FMS_SIM_MAPF_ENABLED=1`이 기본이며, 우선순위는 `FMS_MAPF_PRIORITY_MODE=score`만 지원합니다. 관련 로봇 모두를 한 MAPF 계획에서 KEV 요청 1회로 점수 평가하고 재사용합니다. 우선순위 choice 분기·프롬프트는 제거했으며 잘못된 choice 설정은 거부합니다. 코드는 높은 점수 우선·동점 ID 오름차순의 계획 전체 순서를 고정합니다. 점유나 대기 가능 여부로 순위를 뒤집지 않으며, 점유 해제·예약 확인 전에는 높은 Score도 진입하지 않습니다. 양보 행동·경로·별도 교착 복구에는 choice를 유지하며 구역·WAIT 위치의 KEV 호출은 제거했습니다. 각 선택 질문은 후보들을 한 요청에 담으므로 점수로 바꾸어도 호출 수가 줄어드는 구조가 아니며, 후보 하나인 경로와 MAPF 선택은 API를 호출하지 않습니다. 전체 MAPF가 1회 호출로 끝나는 의미는 아닙니다. `/api/mode`의 `simulation_mapf_enabled`, `mapf_priority_mode`와 이동 응답의 `mapf.priority_scores`, `metrics.kev_api_calls`·`kev_score_calls`·`kev_choice_calls`로 적용 여부와 호출 수를 확인할 수 있습니다. 단독 요청이고 다른 점유와 충돌하지 않으면 불필요한 다중 로봇 KEV 판단을 호출하지 않습니다.
-
-주문에서 픽업·작업대 도착을 확인하기 위해 정지한 로봇도 다음 요청의 병렬 MAPF 판단에 포함합니다. 준비 당시의 `command_epoch`를 저장하므로 추론 중 추가 정지·취소가 오면 오래된 요청은 거부합니다. 같은 픽업은 현재 작업과 실제 노드 점유가 해제될 때까지 기다리며, 앞 주문의 작업대 작업·복귀 완료까지 기다리지 않습니다.
-
-출발 전 MAPF는 준비된 여러 로봇을 한 번에 판단하고, 같은 판단 결과의 경로·예약을 함께 반영합니다. `MIXED_ACTIVE_PENDING_PARALLEL` 응답의 공통 `plan_id`와 `input_paths`로 이를 확인합니다. 간선 위를 정상 이동하는 로봇도 분석에 포함하며, 같은 명령을 따라 진행하는 것만으로 결과를 폐기하지 않습니다. KEV가 정한 WAIT는 다음에 진입할 공유 노드·간선에서만 적용합니다. 선행 로봇이 그 자원을 벗어나면 후행 로봇이 재개하고, 관련 없는 구간은 병렬로 움직입니다. 새 요청·취소·지도·연결 상태 변경은 계속 검증합니다.
-
-이미 서로의 출발 노드를 막아 MAPF가 출발을 보류한 경우에도, 대기 중인 요청을 별도 KEV 복구 판단에 포함합니다. 출발 전 MAPF가 보류한 경로를 그대로 실행하지 않고, KEV가 다시 선택한 합법적인 출발·임시 대피·재개 경로만 FMS가 검증·실행합니다. 이 보완 흐름은 응답의 `KEV_PENDING_RECOVERY`와 서버 로그에 구분해 기록됩니다.
-
-주행 중에는 다른 로봇의 점유로 노드 위에서 1초 이상 진행하지 못하면 별도 복구 검토를 수행합니다. 이동할 로봇, 우회·임시 대피·대기 행동, 대피 노드, 원래 작업 재개를 KEV가 전체 로봇 상태와 합법적인 이동 선택지를 보고 결정합니다. 코드가 어떤 대피 후보가 교착을 푸는지 순위를 정하거나 특정 로봇을 선택하지 않습니다. FMS는 현재 점유·그래프 연결·예약을 검증하고 원래 주문과 목적지를 유지하며 선택된 명령을 실행합니다. 임시 대피 도착은 작업 완료로 처리하지 않습니다. 수동 AI 목적지 이동과 주문 이동에 공통 적용되며, 주행 중 복구 실패 시 5초 간격으로 재검토합니다. KEV 추론 실패를 A*나 임의 후보로 자동 대체하지 않습니다. 실제 로봇은 ROS Action 종료·최신 위치·노드 위 정지를 확인한 뒤 같은 복구 계약으로 연결하며, 간선 중간 정지에는 자동 경로 교체를 적용하지 않습니다.
-
-KEV MAPF의 요청 관리(`FmsMapfCoordinator`), 병렬 배차 상태(`ParallelAdmission`), 정체 감시(`KevRecovery`), KEV 복구 판단(`KevRecoveryPlanner`)을 분리했습니다. 실제·모의 실행은 `MapfExecution`의 상태 사본·원자적 예약 반영·복구 연산을 공유하고, 엔진은 주입된 `KevPlanner` 계약을 사용합니다. 전체 구조와 검증 범위는 [KEV MAPF 구조](docs/kev_mapf_flowchart.md)에 정리합니다. 실제 실행기는 승인된 다음 한 구간만 ROS Action으로 보내며 성공 결과와 실제 위치가 함께 확인되어야 진행합니다. **물리 로봇 현장 검증은 아직 수행하지 않았습니다.**
-
-실행 중인 FMS 자체의 출발 전 MAPF·복구·주문 완료는 `~/venv/robot/bin/python tools/verify_kev_mapf_fms.py`로 검증합니다. 이 명령은 **시뮬레이션 로봇의 위치와 작업을 실제로 변경**하며, simulation / ai / MAPF 활성 상태에서만 실행됩니다. 초기 배치, 두 사진 배치, 주문 3건과 실제 병렬 이동을 확인하고 HTTP 응답·실제 상태 변화를 `/tmp/kev-mapf-fms-validation.json`에 기록합니다.
-
-## 시작과 종료
-
-```bash
-cd /path/to/AX_Logistics
-./start_fms.sh
-./stop_fms.sh
-```
-
-시작 스크립트는 Docker Compose로 Zenoh Router와 MQTT Broker를 시작하고, 호스트에서 ROS 2 daemon, Zenoh Bridge, FastAPI, Vite, Kev를 시작합니다. 각 서비스의 준비 상태를 확인하며 실패하면 이번 시작에서 띄운 스택을 정리합니다.
-
-| 서비스 | 기본 주소 |
-| --- | --- |
-| 관제 화면 | `http://127.0.0.1:5173/` |
-| 백엔드 상태 | `http://127.0.0.1:8000/health` |
-| API 문서 | `http://127.0.0.1:8000/docs` |
-| Zenoh Router / REST | `7447` / `8001` |
-| MQTT | `1883` |
-| Kev | `http://127.0.0.1:8011/` |
-
-실행 로그와 PID 파일은 `logs/`에 있습니다. 백엔드가 시뮬레이션 모드에서도 ROS 2 노드와 커스텀 `turtlebot3_my_msg/action/PrecisionDock`를 가져오므로 `robots_ws/Logistics_AMR` 빌드가 필요합니다.
-
-## 관제 화면과 주문
-
-왼쪽 검은색 내비게이션은 그대로 유지되고, 상단에서 네 가지 운용 모드를 바꿀 수 있습니다. 관제 지도에서 주문을 등록하며 하단 패널에서 주문 대기·픽업·작업대·복귀 흐름을 확인합니다. 주문명 입력을 생략하면 `ORDER-001` 형식으로 자동 지정됩니다. 화면 오른쪽은 선택한 로봇의 상태와 제어 기능입니다.
-
-시뮬레이션 로봇은 `robot1`~`robot3`입니다. 실제 모드에서는 Zenoh로 발견한 로봇과 ROS 2 상태를 사용합니다. AI 모드의 경로 선택 외 배차·작업대·교통 안전 로직은 현재 알고리즘으로 동작합니다.
-
-## 주요 API
-
-| 경로 | 기능 |
-| --- | --- |
-| `GET /health` | 백엔드 상태 |
-| `GET, PUT /api/mode` | 시뮬/실제 및 AI/알고리즘 모드 |
-| `GET /api/robots` | 로봇 상태 |
-| `GET /api/map/info`, `GET /api/map/image` | 지도 |
-| `GET /api/route/graph`, `GET /api/route/nodes` | 경로 그래프 |
-| `GET, POST /api/orders` | 주문 목록·등록 |
-| `POST /api/orders/{order_id}/retry` | 실패한 시뮬레이션 주문 재시도 |
-| `DELETE /api/orders/{order_id}` | 주문 취소 및 배정 로봇 복귀 요청 |
-| `POST /api/command/goal-node` | 선택 노드로 이동 |
-| `WS /ws/dashboard`, `WS /ws/cmd_vel` | 상태 스트림·수동 제어 |
-
-전체 엔드포인트와 요청 형식은 실행 중인 백엔드의 `/docs`에서 확인합니다.
-
-## 테스트와 점검
-
-```bash
-cd /path/to/AX_Logistics
-~/venv/robot/bin/python -m unittest discover -s tests -v
-cd frontend
-npm run typecheck
-npm run build
-```
-
-`tests/`에는 단위 테스트, `tests/traffic_scenarios.py`와 시나리오 JSON, `tests/manual_omx_client.py`·`tests/manual_omx_server.py` 수동 MQTT 점검 도구가 있습니다. 수동 도구는 자동 단위 테스트에 포함되지 않습니다.
-
-```bash
-python -m tests.traffic_scenarios cycle
-python -m tests.manual_omx_client --robot-id omx1 --broker-ip 127.0.0.1
-python -m tests.manual_omx_server
-```
-
-교통 시나리오의 조건과 실행법은 [시나리오 안내](doc/traffic_scenarios.md)에 있습니다. AI 경로 평가 도구는 `backend/simulation/evaluation/`에 있고 별도 절차는 [LLM 경로 평가 안내](doc/llm-route-generation-benchmark.md)에 있습니다.
-
-## 문제 해결
-
-- `turtlebot3_my_msg` import 실패: `robots_ws/Logistics_AMR/install/setup.bash` 생성 여부를 확인하고 작업공간을 다시 빌드합니다.
-- 대시보드·API 실행 실패: `logs/frontend.log`, `logs/backend.log`와 설치 점검 결과를 확인합니다.
-- Kev 서버 실행 실패: `logs/kev.log`, 모델 이름, GPU 메모리와 `FMS_KEV_DIR`를 확인합니다.
-- 실제 로봇이 보이지 않음: `logs/zenoh_bridge.log`, Zenoh Router·로봇 Bridge, ROS domain과 namespace를 확인합니다.
-- 주문이 대기 중: 로봇 연결·점유·복귀 상태와 픽업대 예약을 하단 주문 패널에서 확인합니다.
-
-
-FMS 시나리오의 **무작위 주문 연속 배차**는 사람이 시작·중지하는 시뮬레이션 AI 스트레스 시험입니다. 주문당 1~5개, N5만/N6만/양쪽 방문을 3건마다 무작위 순서로 편성하며 미완료 최대 6건을 계속 보충합니다. 중지 시 총 주문·성공·실패 수와 실패 위치를 JSON으로 다운로드한 뒤 시험 상태를 초기화합니다. 상세 사용법과 적용 상태는 [구조 문서 17번](docs/kev_mapf_flowchart.md#17-사람이-실행하는-무작위-주문-스트레스-시나리오)을 참조하세요.
-
-## OMX 상태와 팔레트 관측
-
-지도 OMX 아이콘에서 장치 상태·담당 팔레트의 물건 유무를 확인합니다. 설정·검증·선택적 서비스 재시작 방법은 [OMX 상태 사용법](docs/omx-status.md)을 참고하세요.
-
-웹 상단 **FMS 전체 재시작**은 작업 여부와 관계없이 기존 stop/start 스크립트를 순서대로 실행합니다. [SSH 설정·웹 재시작 사용법](docs/omx-status.md#omx1~4-ssh-간편-설정)을 확인하세요.
-
-
-## PC 로컬 맵으로 RViz 열기
-
-로봇이 맵을 보내지 않아도 PC의 저장 맵으로 RViz를 열 수 있습니다.
-
-```bash
-cd ~/AX_Logistics
-./rviz_fms
-```
-
-기본 맵은 AMR 소스의 `map/logitle_map_fin.yaml`과 해당 PGM입니다.
-맵 서버가 자동 활성화되고 RViz는 전용 `/fms_view/map`을 구독합니다.
-`/robot1/2/3/logitle_pose`와 각 `plan` 표시는 유지되며, 로봇 연결 시 함께 보입니다.
-RViz 창을 닫거나 실행 터미널에서 Ctrl+C를 누르면 이 명령이 만든 맵 서버도 종료됩니다.
-일반 `rviz2` 명령만 실행하면 이 로컬 맵 서버는 시작되지 않습니다.
-
-다른 맵을 선택하려면:
-
-```bash
-./rviz_fms map:=/절대경로/맵.yaml
-```
-
-로봇과 지도가 겹치려면 로봇의 위치 기준 맵과 PC YAML의 맵·좌표 원점이 같아야 합니다.
-RViz Route Tool의 GeoJSON 경로 편집 파일은 기존처럼 별도로 불러옵니다.
-
-
-짧은 명령을 원하면 아래 alias를 터미널에 적용합니다. 같은 줄을 `~/.bashrc` 맨 아래에 넣으면 새 터미널에서도 사용할 수 있습니다.
-
-```bash
-alias logirviz='"$HOME/AX_Logistics/rviz_fms"'
-logirviz
-```
-
-RViz의 `-d` 설정은 표시할 토픽을 지정합니다. 맵 YAML/PGM을 읽어 발행하는 서버는 `logirviz`가 함께 시작합니다.
-
-
-## WAF 수동 재고 보충
-
-기존 OMX 재고 카드의 A/B/C/D 아래 **재고 보충**을 누르면 별도 WAF 클라이언트가
-`/pallet_replace` (`waffle_interfaces/action/PalletReplace`)를 전송합니다.
-목적지는 A=1, B=2, C=3, D=4이며, 확인창 승인 후에만 전송합니다.
-진행 단계·결과·취소는 카드 안에 표시됩니다. 동시에 한 작업만 허용합니다.
-성공해도 재고 값을 임의로 바꾸지 않고 기존 OMX 관측 결과를 계속 표시합니다.
-
-PC에서 WAF 인터페이스를 빌드한 다음 FMS를 시작합니다. 이미 빌드했다면 생략합니다.
-
-```bash
-cd ~/AX_Logistics/robots_ws/Logistics_WAF
 source /opt/ros/jazzy/setup.bash
+cd ~/AX_Logistics/robots_ws/Logistics_WAF
 colcon build --packages-select waffle_interfaces
+```
+
+공유 설정 양식은 `.env.example`, 현장 값은 Git에서 제외된 `.env`다. 설치기가 생성한 파일이 있으면 내용을 확인한다. `start_fms.sh`는 이미 셸에 설정된 값을 우선하고, AMR 환경 뒤에 WAF 인터페이스 환경만 추가한다.
+
+| 설정 | 용도 |
+|---|---|
+| `FMS_ROBOT_MODE`, `FMS_OPERATION_MODE` | 실제/시뮬레이션, AI/알고리즘 시작 모드 |
+| `FMS_MAP_YAML`, `FMS_ROUTE_GRAPH` | 지도와 경로 그래프 |
+| `FMS_ROS_WS_SETUP`, `FMS_WAF_WS_SETUP` | 빌드된 ROS 작업공간·WAF 인터페이스 |
+| `FMS_KEV_DIR`, `FMS_KEV_RUN`, `FMS_KEV_ENABLED` | KEV 소스·모델·실행 여부 |
+| `FMS_MQTT_BROKER_IP`, `FMS_MQTT_BROKER_PORT` | 백엔드의 MQTT 연결 주소 |
+| `FMS_WAF_ACTION_NAME` | 보충 액션 주소. 기본 우선순위는 `/robot4/pallet_replace`다. |
+
+KEV 소스 기본 경로는 `~/AX_Logistics`의 형제 폴더인 `~/kev`, 모델 기본값은 `jaredpalmer/kev-0.8b@v1.0`이다. 학습 가중치와 GPU 환경 준비는 별도다.
+
+## 7. 사용 방법
+
+시작과 종료는 상황에 맞게 **각각** 실행한다.
+
+```bash
 cd ~/AX_Logistics
 ./start_fms.sh
 ```
 
-`start_fms.sh`는 AMR 환경 뒤에 WAF의 `waffle_interfaces` 패키지 환경만 추가로 source합니다. 중복 TurtleBot 패키지는 source하지 않습니다.
-WAF가 없거나 인터페이스가 미준비이면 보충 기능만 연결 대기로 표시합니다.
-WAF 쪽에서는 기존 `/pallet_replace` 액션 서버를 실행하고 같은 ROS 도메인/Zenoh
-연결에서 발견되어야 합니다. FMS는 WAF 서버를 자동 실행하거나 이동 경로를 변경하지 않습니다.
-B/C/D 목적지 번호도 **첫 팔레트 인수 위치**로 전달합니다. 반납=2, 두 번째 인수=3,
-홈=4인 WAF 서버의 고정 후속 경로는 그대로입니다.
+| 용도 | 명령·접속 |
+|---|---|
+| 관제 웹 | `http://<FMS_PC_IP>:5173/` |
+| 백엔드 상태 | `http://<FMS_PC_IP>:8000/health` |
+| API 문서 | `http://<FMS_PC_IP>:8000/docs` |
+| 종료 | `./stop_fms.sh` |
+| Router·Broker를 유지하며 FMS 종료 | `FMS_KEEP_TRANSPORT=1 ./stop_fms.sh` |
+| PC 저장 지도로 RViz 열기 | `./rviz_fms` |
 
-작업 중 FMS가 재시작되거나 접수 응답이 지연되면 중복 실행 대신 상태 확인 대기로
-표시합니다. 작업 기록은 `logs/waf_replenishment.json`에 남깁니다. 취소 접수만으로
-종료했다고 표시하지 않습니다. ROS 작업 UUID를 함께 저장하고, 취소 Result가 늦거나
-빠져도 같은 UUID의 종료 Status를 수신하면 새 보충 요청을 허용합니다. 취소 거절·통신 오류·
-완료 응답 지연 시 취소 버튼을 다시 사용할 수 있으며, 실제 종료 확인 전에는 새 작업을 보내지 않습니다.
-FMS 재시작 후에도 UUID가 기록된 기존 작업만 취소할 수 있습니다.
-기존 주문·AI 경로·AMR/OMX 제어 로직과 WAF 저장소는 변경하지 않습니다.
+1. 웹에서 실제/시뮬레이션과 AI/알고리즘 모드를 확인한다.
+2. 로봇·OMX의 연결과 준비 상태를 확인한다.
+3. A/B/C/D 주문을 등록하고 AMR 이동·상하차·복귀 단계를 확인한다.
+4. 재고 보충은 해당 품목의 **재고 보충** 버튼으로 별도 요청한다.
+5. WAF 상세에서 단계·결과·취소를 확인한다. 취소 완료 후에는 새 요청을 등록할 수 있다.
 
-현장에서 이전 WAF 작업의 종료를 확인했는데 FMS의 재시작 전 기록만 남아 있다면,
-팔레트 보충 영역 또는 WAF 상세의 **이전 작업 종료 확인·기록 정리**를 사용합니다.
-실제 정지·작업 종료를 확인한 후 확인창을 승인해야 하며, 다른 활성 작업이 관측되면 거절합니다.
-이 기능은 이전 기록만 정리하고 로봇을 움직이거나 작업을 자동 재실행하지 않습니다.
+FMS 재시작 전 보충 기록만 남은 경우에는 실제 작업 종료를 확인한 뒤 **이전 작업 종료 확인·기록 정리**를 사용한다. 기록 정리 자체가 로봇을 이동시키거나 이전 작업을 재전송하지는 않는다.
 
+## 8. 설정과 운영 시 참고
 
-### robot4 WAF 표시
+- **연속 운용 정책:** 현재 시작 스크립트는 `FMS_CONTINUOUS_RUN=1`을 기본으로 한다. 일시적인 위치·연결·이동 실패는 기존 Action 종료와 상태 회복을 확인한 뒤 재시도한다. 긴급 정지·취소·점유 검사가 사라진 구성은 아니다.
+- **속도 설정:** `FMS_REAL_NAVIGATION_SPEED_MPS`는 FMS의 시간 예측에 사용하는 기준값이다. 실기체의 속도 제어와 Nav2 파라미터는 AMR/WAF 작업공간에서 확인한다.
+- **장비 관리:** OMX 서비스 재시작은 SSH 설정과 장치 준비가 필요하다. FMS 웹 재시작 버튼은 기존 stop/start 스크립트를 실행하므로 사용 시점을 구분한다.
+- **재고 관측:** `PRESENT`, `EMPTY`, `UNKNOWN`은 OMX가 측정해 보낸 관측 상태다. 보충 액션 성공만으로 팔레트 재고 값을 강제로 바꾸지 않는다.
+- **상하차 결과:** OMX의 동작 사이클 완료와 실제 물품 전달 성공은 서로 다른 정보다. 수신한 결과·검증 범위를 그대로 확인한다.
+- **로컬 데이터:** `.env`, 로그, 모델, 장치 설정은 현장 자료다. 저장소를 갱신하면서 다른 장비의 값으로 덮어쓰지 않는다.
 
-Zenoh에 `/robot4/...` 토픽이 발견되면 왼쪽에 **04 WAF**가 표시됩니다. 선택하면
-배송 로봇과 다른 관측 전용 사이드 패널에서 연결/IP, 배터리 잔량·전압,
-액션 가동 상태, 실제 `stage` 피드백과 결과를 확인할 수 있습니다.
-WAF는 배송 Fleet·배차·경로 계획·조이스틱·충전 명령에 등록하지 않습니다.
+## 9. 확인 및 점검
 
-- 배터리: `/robot4/battery_state` (`sensor_msgs/msg/BatteryState`). 잔량이 -1/NaN이면 미수신으로 표시합니다.
-- 위치: `/robot4/logitle_pose` (`PoseStamped`) 또는 `/robot4/amcl_pose` (`PoseWithCovarianceStamped`).
-  최신 map 좌표가 수신된 경우에만 지도에 표시합니다. 위치가 없어도 왼쪽 목록에서 상태를 볼 수 있습니다.
-- 보충 액션: `/robot4/pallet_replace` 우선, 기존 `/pallet_replace`도 지원합니다.
-  `FMS_WAF_ACTION_NAME`으로 한 주소를 명시할 수도 있습니다.
-- 액션의 status·feedback도 관측하므로 CLI로 시작한 작업의 가동 상태와 단계도 표시합니다.
-  FMS에서 요청한 작업만 해당 GoalHandle로 취소할 수 있습니다.
+다음은 상태 조회 명령이다. 로봇 이동 목표를 보내지 않는다.
 
-표시 데이터는 `/api/replenishment`의 `robot` 객체에 있으며 기존 `/api/robots`의
-일반 배송 로봇 목록과 분리됩니다. 오래된 배터리·위치와 연결 조회 실패를 정상 값으로 표시하지 않습니다.
+```bash
+curl -s http://127.0.0.1:8000/health
+curl -s http://127.0.0.1:8000/api/connections
+curl -s http://127.0.0.1:8000/api/replenishment
+```
 
+FMS의 ROS 환경에서 `ros2 action info /robot4/pallet_replace`로 보충 서버를 확인한다. 내부 DDS 환경의 AX Jetson에서는 `/pallet_replace`를 조회한다.
 
-Waffle 장비의 셸·Zenoh 설정은 [shellscript의 Waffle 자동 환경 설정 안내](robots_ws/shellscript/README.md)를 사용합니다.
-호스트명 `waffle`에서 설치하면 모델 Waffle/LDS-03, 장비 ID `robot4`, 일반 Domain 11,
-Zenoh Domain 0을 선택합니다. Bridge는 WAF의 관측·보충 액션만 `/robot4`로 노출합니다.
+| 증상 | 확인 위치 |
+|---|---|
+| 웹/API 실행 실패 | `logs/frontend.log`, `logs/backend.log` |
+| AMR·WAF가 보이지 않음 | `logs/zenoh_bridge.log`, Router 주소, Bridge·Domain·namespace |
+| OMX가 동시에 깜빡임 | MQTT 연결 로그와 Broker 재시작 여부 |
+| 팔레트 확인 불가 | OMX 관측 이유, 홈 상태, ROI·빈 기준·카메라 연결 |
+| 보충 후 재요청 차단 | WAF 종료 결과, 취소 상태, 재시작 전 작업 기록 |
+| KEV 준비 실패 | `logs/kev.log`, 모델 경로·GPU·Python 환경 |
 
+개발 검증은 `tests/`, 프런트엔드 타입 검사·빌드는 `frontend/package.json`의 스크립트를 사용한다. 시뮬레이션 시나리오와 실기체 작업 시험은 분리한다. 이번 정리는 문서·Git 참조 점검이며 새로운 실물 성능 검증을 뜻하지 않는다.
 
-[연속 운용 브랜치: OMX 깜빡임 구분·재연결·주행 자동 복구](doc/continuous-run.md)
+## 10. 관련 문서와 저장소
 
+| 문서 | 내용 |
+|---|---|
+| [데모 콘솔](doc/demo-console.md) | 실행 항목, 취소, 관측 정보 |
+| [KEV MAPF 구조](docs/kev_mapf_flowchart.md) | 배차·경로·교통 판단 흐름 |
+| [연속 운용 정책](doc/continuous-run.md) | 재시도 대상과 유지되는 조건 |
+| [OMX 상태 연동](docs/omx-status.md) | 팔레트 수신, SSH, 장비 관리 |
+| [정리 전 운영 안내](docs/README_REFERENCE.md) | 기존 상세 설명과 이력 보존 |
+| [이번 dev 정리 기준](docs/DEV_REVIEW.md) | 기준 브랜치와 서브모듈 고정 버전 |
 
-기본 시작 모드는 실제 로봇 + AI입니다(`FMS_ROBOT_MODE=real`, `FMS_OPERATION_MODE=ai`). 명시적인 시뮬레이션 전환은 유지합니다. 로봇 배터리·위치·진행·오류는 실제 API/ROS/MQTT 관측으로 표시하며, 예시 배터리·장비 일련번호·작업 일정은 사용하지 않습니다. 미수신 값은 숫자로 대신하지 않습니다. OMX의 집계는 수신한 동작 횟수이며 물품 전달 수와 구별합니다.
+연결 저장소: [AMR](https://github.com/E1I6-Logistics/Logistics_AMR/tree/dev) · [WAF](https://github.com/E1I6-Logistics/Logistics_WAF/tree/dev) · [OMX](https://github.com/E1I6-Logistics/Logistics_OMX/tree/dev) · [shellscript](https://github.com/E1I6-Logistics/shellscript/tree/dev) · [전체 프로젝트 소개](https://github.com/E1I6-Logistics)
+
+## 11. 브랜치와 문서 기준
+
+2026-11-07 정리 기준은 최근 사용한 원격 `feat/fms-continuous-run`의 `6d5bf76`이다. 그 실행 코드를 유지한 채 README와 서브모듈 참조를 `dev`에 정리한다. **`main` 반영은 최종 검토·이미지 추가 후 별도로 진행한다.**
+
+실행 코드·파라미터·설치 스크립트는 이번 문서 정리에서 수정하지 않는다. 변경한 Git 연결 정보와 각 서브모듈 커밋은 [dev 검토 기록](docs/DEV_REVIEW.md)에 남긴다.
